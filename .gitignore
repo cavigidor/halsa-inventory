@@ -1,0 +1,18 @@
+# data & generated outputs — NEVER commit
+data/
+dashboards/
+eski/
+*.xlsx
+*.xls
+dashboard.html
+agent_context.json
+agent_state.db
+
+# secrets
+.env
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
