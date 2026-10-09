@@ -43,7 +43,12 @@ def main():
     used = [e["display_value"] for e in data["evidence"]]
     print(f"RESULT: OK — schema valid, {len(data['evidence'])} fact(s) referenced, all values from Python: "
           f"{all(u in displays for u in used)}")
+    q = r.get("quality_issues", [])
+    print("quality (Q-1):", "OK — interprets, no fact lists" if not q else "ISSUES — " + "; ".join(q))
     print("summary:", data["summary"])
+    print("risks:", " | ".join(data["risks"]))
+    print("opportunities:", " | ".join(data["opportunities"]))
+    print("recommended_action:", data["recommended_action"])
     return 0
 
 

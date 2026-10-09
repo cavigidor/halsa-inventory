@@ -18,6 +18,7 @@ import config as C
 import schemas as S
 from services import evidence as EV
 from services.ai import grounding as G
+from services.ai import quality as Q
 from services.ai.base import AIResult, ERR_PACKET, ERR_UNKNOWN
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -106,8 +107,12 @@ class BusinessActionAgent:
                         "reason": f"malformed: {type(e).__name__}", "category": "malformed"}
             entry.update(success=True, error_category=None)
             self.recorder(entry)
+            quality = Q.assess(res.data)["issues"]          # writing quality: measured, never enforced
+            if quality:
+                log.info("ai output quality issues task=%s: %s", task, "; ".join(quality[:5]))
             return {"ok": True, "data": resolved, "packet": packet, "reason": None, "category": None,
-                    "warnings": list(resolved.get("warnings", []) or []), "raw_ids": G.referenced_ids(res.data)}
+                    "warnings": list(resolved.get("warnings", []) or []), "raw_ids": G.referenced_ids(res.data),
+                    "quality_issues": quality}
         return {"ok": False, "data": None, "packet": packet, "warnings": [],
                 "reason": f"{last_err.category}: {last_err}", "category": last_err.category}
 

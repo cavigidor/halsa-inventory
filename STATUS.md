@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-09 (M3 close-out: push verified, CI green, live OpenAI smoke test PASSED)._
+_Updated 2026-10-09 (M3 merged to `main`; Q-1 summary quality in progress on `claude/q1-summary-quality`)._
 
 ## Git
 - **Branch:** `claude/milestone-3-live-ai`, based on `main`.
@@ -90,5 +90,11 @@ OpenAI model. The OpenAI default model `gpt-5-mini` lives in
 - Real exports in `./data` (Mac): `2020-5 ekim satışlar.xlsx`, `STOK 5 Ekim 2026.xlsx`, `Cari 5 Ekim 2026.xlsx`.
 - A pre-M3 backup of the Mac folder: `~/Desktop/ME/Projects/StockAgent_backup_2026-10-08_pre-M3`.
 
+## Q-1 (in progress)
+Branch `claude/q1-summary-quality` from `main` @ `60dffdb` (PR #1 merged; Milestone 3 complete).
+Writing-quality prompt rules, schema field guidance and `services/ai/quality.py` measurement are
+implemented. The standard suite gives 128 passed, 7 skipped, 1 xfailed. The live verification
+run is pending.
+
 ## Immediate next task
-TASKS M3-C3: review and merge the pull request `claude/milestone-3-live-ai` → `main`.
+TASKS Q-1: one live smoke run on `claude/q1-summary-quality`; expect `quality (Q-1): OK`.
