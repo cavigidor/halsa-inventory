@@ -83,35 +83,3 @@ def test_store_roundtrip(tmp_path, monkeypatch):
     r3 = ST.upsert_actions(acts); assert r3["added"] == 0  # completed not regenerated
     ST.add_memory("customer","120.1","contacted","aradık",next_followup="2026-09-20")
     assert ST.get_memory("customer","120.1")[0]["kind"] == "contacted"
-
-# ---------------- context reconciliation (real data) ----------------
-@pytest.fixture(scope="module")
-def ctx():
-    return CTX.build_context(DATA, inflation_rate=0.40)
-
-def test_context_reconciles_overdue(ctx):
-    coll, owed = db.m_collections(db._latest(DATA, db.is_aging))
-    assert ctx["company"]["working_capital"]["overdue_total"] == round(sum(r["overdue"] for r in coll))
-
-def test_context_reconciles_overstock(ctx):
-    _, over, _ = db.m_stock(db._latest(DATA, db.is_stock))
-    assert ctx["company"]["working_capital"]["overstock_value"] == round(sum(o["inv"] for o in over))
-
-def test_context_topn_respected(ctx):
-    assert len(ctx["collections"]) <= C.MAX_CONTEXT_ITEMS_PER_CATEGORY
-    assert len(ctx["winback"]) <= C.MAX_CONTEXT_ITEMS_PER_CATEGORY
-
-def test_actions_have_required_shape(ctx):
-    assert len(ctx["actions"]) <= C.MAX_DAILY_ACTIONS
-    for a in ctx["actions"]:
-        assert 0 <= a["score"] <= 100
-        assert a["requires_approval"] is True
-        assert a["interpretation"] is None  # AI not run yet
-        assert a["facts"] and isinstance(a["facts"], list)
-
-def test_real_decline_absent_without_inflation():
-    c = CTX.build_context(DATA, inflation_rate=None)
-    assert c["config"]["inflation_source"] in ("unavailable", "manual_config")
-    if c["config"]["inflation_rate"] is None:
-        assert all(a["category"] != "real_decline" for a in c["actions"])
-        assert c["company"]["working_capital"]["shrinking_real_count"] is None

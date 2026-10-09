@@ -1,6 +1,6 @@
 """API sözleşmesi ve AI çıktı şemaları (Pydantic v2)."""
 from typing import Optional, List, Any, Dict, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 Priority = Literal["critical", "high", "medium", "low"]
 Confidence = Literal["high", "medium", "low"]
@@ -10,8 +10,17 @@ class Health(BaseModel):
     status: str = "ok"
     ai_available: bool
     ai_provider: str
+    ai_model: Optional[str] = None
+    ai_reason: Optional[str] = None
     macro_available: bool
     data_folder: str
+
+
+class EvidenceFact(BaseModel):
+    """A Python-computed fact the AI text relied on. display_value comes from Python only."""
+    fact_id: str
+    label: str
+    display_value: str
 
 class Unavailable(BaseModel):
     available: bool = False
@@ -43,10 +52,13 @@ class ActionOut(BaseModel):
     status: str = "open"
     interpretation: Optional[str] = None
     recommendation: Optional[str] = None
+    evidence: List[EvidenceFact] = []
 
 class ActionsResponse(BaseModel):
     ai_available: bool
     ai_reason: Optional[str] = None
+    ai_error_category: Optional[str] = None
+    ai_warnings: List[str] = []
     generated_at: str
     count: int
     actions: List[ActionOut]
@@ -63,6 +75,9 @@ class CustomerAnalysis(BaseModel):
     recommended_action: Optional[str] = None
     confidence: Optional[Confidence] = None
     reason: Optional[str] = None
+    ai_error_category: Optional[str] = None
+    evidence: List[EvidenceFact] = []
+    ai_warnings: List[str] = []
 
 class ProductAnalysis(BaseModel):
     available: bool = True
@@ -76,6 +91,9 @@ class ProductAnalysis(BaseModel):
     recommendation: Optional[str] = None
     confidence: Optional[Confidence] = None
     reason: Optional[str] = None
+    ai_error_category: Optional[str] = None
+    evidence: List[EvidenceFact] = []
+    ai_warnings: List[str] = []
 
 # ---------- draft message ----------
 class DraftRequest(BaseModel):
@@ -90,6 +108,8 @@ class DraftResponse(BaseModel):
     channel: Optional[str] = None
     message: Optional[str] = None
     warnings: List[str] = []
+    ai_error_category: Optional[str] = None
+    evidence: List[EvidenceFact] = []
     note: str = "Yalnızca taslak. Otomatik gönderim yapılmaz."
 
 # ---------- scenario ----------
@@ -126,30 +146,54 @@ class ActionStatusResponse(BaseModel):
     status: str
 
 # ========== AI OUTPUT SCHEMAS (validated strictly) ==========
-class _AIActionItem(BaseModel):
-    entity_id: str
+# Rules shared by all AI outputs (Milestone 3):
+# - every field required, no extra fields (OpenAI Structured Outputs strict mode);
+# - numbers are NEVER written by the model: prose references facts as [[FACT:F001]]
+#   and Python substitutes the exact display value (services/ai/grounding.py);
+# - evidence_fact_ids lists the facts a statement relies on; unknown ids are rejected.
+_STRICT = ConfigDict(extra="forbid")
+
+
+class AIActionItem(BaseModel):
+    model_config = _STRICT
+    action_ref: str = Field(description="items[].action_ref from the evidence packet, e.g. A01")
     interpretation: str
     recommendation: str
+    evidence_fact_ids: List[str]
     confidence: Confidence
 
+
 class AIActionsOut(BaseModel):
-    items: List[_AIActionItem]
+    model_config = _STRICT
+    items: List[AIActionItem]
+    warnings: List[str]
+
 
 class CustomerAnalysisAI(BaseModel):
+    model_config = _STRICT
     summary: str
     risks: List[str]
     opportunities: List[str]
     recommended_action: str
+    evidence_fact_ids: List[str]
+    warnings: List[str]
     confidence: Confidence
 
+
 class ProductAnalysisAI(BaseModel):
+    model_config = _STRICT
     status: str
     risk: str
     opportunity: str
-    best_buyers: List[str]
+    best_buyer_fact_ids: List[str] = Field(description="fact ids of 'Aday alıcı N' facts, best first")
     recommendation: str
+    evidence_fact_ids: List[str]
+    warnings: List[str]
     confidence: Confidence
 
+
 class MessageDraftAI(BaseModel):
+    model_config = _STRICT
     message: str
-    warnings: List[str] = []
+    evidence_fact_ids: List[str]
+    warnings: List[str]

@@ -67,6 +67,10 @@ def build_context(data_folder, inflation_rate=None, macro=None, top_n=None):
                                      qty=("miktar", "sum"), name=("_cname", "first"))
         out = []
         for cust, r in g.iterrows():
+            # KAPALI customers are never sales-opportunity candidates (domain invariant).
+            # They remain in collections/risk. (Milestone 3 fix; see DECISIONS.md D-009.)
+            if attr.get(str(cust), {}).get("closed"):
+                continue
             has_od = (owed.get(str(cust), 0) or 0) > 0
             related = bool(pana and pana in cust_anagrup.get(cust, set()))
             s, comp = SC.buyer_score(r["spend"], int(r["last"]) if pd.notna(r["last"]) else None,

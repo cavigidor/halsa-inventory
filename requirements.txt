@@ -1,9 +1,13 @@
-pandas
+# Python 3.12+ required (dashboard_builder.py uses PEP 701 f-strings)
+pandas>=2.0
+numpy
 openpyxl
 fastapi
 uvicorn
 pydantic>=2
 httpx
 pytest
+# AI provider SDK (imported lazily; the app runs without a key)
+openai>=1.66
 # optional, only if AI_PROVIDER=anthropic:
 # anthropic
