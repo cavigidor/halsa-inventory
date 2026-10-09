@@ -28,7 +28,8 @@ STANDARD_WARNINGS = [
     {"code": "missing_is_not_zero",
      "text": "Pakette olmayan veya 'veri yok' olarak işaretlenen değerler bilinmiyor demektir; sıfır kabul edilmez."},
     {"code": "margin_data_gaps",
-     "text": "Maliyet verisi bazı satış satırlarında eksik; kâr marjı bu pakette yoktur ve tahmin edilmemelidir."},
+     "text": "Kâr marjı bu analizin kapsamı dışındadır (maliyet verisi güvenilir değil): marj veya kârlılık "
+             "hakkında yorum, risk ya da öneri yazma; tahmin etme."},
 ]
 
 
@@ -68,6 +69,8 @@ def fmt_decimal(x, digits=2):
     return f"{float(x):.{digits}f}".replace(".", ",")
 
 
+NUMERIC_KINDS = {"money", "count", "percent", "decimal", "year"}
+
 FORMATTERS = {"money": fmt_money, "count": fmt_int, "percent": fmt_pct,
               "decimal": fmt_decimal, "year": lambda v: str(int(v)),
               "text": lambda v: str(v), "buyer": lambda v: str(v),
@@ -99,7 +102,10 @@ class EvidencePacket:
     def fact(self, label, value, kind="text", meaning="", display=None):
         """Add a fact. None -> recorded as missing (never zero). Returns the fact id or None."""
         if value is None or (isinstance(value, str) and value.strip() in ("", "—", "nan", "None")):
-            self.missing.append(label)
+            # "missing is not zero" concerns NUMBERS. Empty descriptive fields (sector, rep, …) are
+            # simply omitted — listing them made the model recommend "completing the data" (Q-1).
+            if kind in NUMERIC_KINDS:
+                self.missing.append(label)
             return None
         if len(self.facts) >= C.MAX_EVIDENCE_FACTS:
             return None

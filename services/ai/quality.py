@@ -113,12 +113,21 @@ _PH = r"\[\[FACT:F\d{3,4}\]\]"
 _PH_RE = re.compile(_PH)
 _PAREN = re.compile(r"\s*\(([^()]*)\)")
 _SEP_DANGLING = re.compile(r"\s*[;,]\s*%s(?:\s*(?:[,;/]|ve)\s*%s)*\s*(?=[.!?](?:\s|$)|$)" % (_PH, _PH))
-_END_AFTER_WORD = re.compile(r"(\S+)(\s+%s)(?=\s*[.!?](?:\s|$)|\s*$)" % _PH)
+_END_AFTER_WORD = re.compile(r"(?<!\])(\b[^\s\[]+)((?:\s*[,;]?\s+%s)+)(?=\s*[.!?](?:\s|$)|\s*$)" % _PH)
+# 3+ fact refs in a row anywhere ("Yıllık cirolar [[F]], [[F]], [[F]];") -> drop that whole clause
+_RUN_CLAUSE = re.compile(r"[^.;!?]*?%s(?:[\s,/–\-]*(?:ve\s+)?%s){2,}[^.;!?]*[.;!?]?\s*" % (_PH, _PH))
 # common Turkish finite-verb endings (clause is complete -> a following fact is a citation)
 _VERB_END = re.compile(r"(?:yor|abilir|ebilir|amaz|emez|dır|dir|dur|dür|tır|tir|tur|tür|malı|meli|"
                        r"sın|sin|sun|sün|sınlar|sinler|ın|in|un|ün|ayın|eyin|acak|ecek|mış|miş|muş|müş|"
                        r"dı|di|du|dü|tı|ti|tu|tü)$", re.IGNORECASE)
 _TECH_TOKEN = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$")
+
+
+def _tr_upper_first(t):
+    if not t:
+        return t
+    c = t[0]
+    return ({"i": "İ", "ı": "I"}.get(c) or c.upper()) + t[1:]
 
 
 def _clean_spacing(t):
@@ -127,10 +136,24 @@ def _clean_spacing(t):
     t = re.sub(r"\s+([.,;:!?)])", r"\1", t)
     t = re.sub(r"([;,])\s*([.!?])", r"\2", t)
     t = re.sub(r"[;,]\s*$", "", t)
-    return t.strip()
+    t = re.sub(r"([.!?]\s+)([a-zçğıöşü])", lambda m: m.group(1) + _tr_upper_first(m.group(2)), t)
+    t = t.strip()
+    return _tr_upper_first(t) if t and t[0].islower() else t
 
 
 def _tidy_text(text, field, packet, fixes):
+    """Run the tidy pass until stable (max 3 passes: removals can expose new citation patterns)."""
+    moved, t = [], text
+    for _ in range(3):
+        nt, mv = _tidy_once(t, field, packet, fixes)
+        moved += mv
+        if nt == t:
+            break
+        t = nt
+    return t, moved
+
+
+def _tidy_once(text, field, packet, fixes):
     moved = []
     t = text
     if field in NO_INLINE_FIELDS:
@@ -165,6 +188,12 @@ def _tidy_text(text, field, packet, fixes):
                 return m.group(1)
             return m.group(0)
         t = _END_AFTER_WORD.sub(verb, t)
+        # (c2) a clause that is just a run of facts -> removed (ids kept as evidence)
+        def run(m):
+            moved.extend(x[7:-2] for x in _PH_RE.findall(m.group(0)))
+            fixes.append(f"{field}: clause listing facts back-to-back removed")
+            return " "
+        t = _RUN_CLAUSE.sub(run, t)
         # (d) text facts both written out and referenced -> drop the reference
         if packet is not None:
             plain = _PH_RE.sub(" ", t)

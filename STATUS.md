@@ -108,7 +108,15 @@ recommended action carry no inline facts (refs move to `evidence_fact_ids`). In 
 citation-style refs (parenthetical groups, after ';' or ',' at a clause end, after a finished verb,
 duplicated names) and technical labels are removed. Tidy only removes, never adds a number. Quality
 is measured both on the model output and on the tidied output. Standard suite: 134 passed, 7 skipped,
-1 xfailed. Live run 3 is pending.
+1 xfailed.
+Live run 3 (two runs, both `RESULT: OK`; one used the guard retry): tidy fixed several defects, but
+1) a year glued after another ref survived a single tidy pass; 2) a mid-sentence run of three amounts
+was not handled; 3) the model kept turning informational notes into to-dos (an empty "Sektör" listed
+as missing, and the margin warning).
+Fixes: tidy runs until stable (max 3 passes) and handles ref sequences; a clause made of 3+ refs is
+removed (ids kept as evidence) and the next sentence re-capitalized; `missing` now lists only numeric
+facts (empty descriptive fields are omitted); the margin warning says margin is out of scope.
+Standard suite: 137 passed, 7 skipped, 1 xfailed. Live run 4 is pending.
 
 ## Immediate next task
 TASKS Q-1: live smoke run 2 on `claude/q1-summary-quality`; expect `quality (Q-1): OK` and clean reading.

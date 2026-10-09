@@ -12,7 +12,9 @@ Milestone 5 must not be started until it is moved to *Current*.
   touches numbers. The smoke test prints a Q-1 verdict.
   Live run 1: metric OK but the text had tacked-on facts, duplicates and listed missing fields;
   fixed (packet relevance, sharper quality checks, prompt). Live run 2: the model repeated them, so a
-  deterministic tidy step was added (D-014). Remaining: live run 3 on this branch.
+  deterministic tidy step was added (D-014). Live run 3: tidy gaps + notes treated as to-dos; fixed.
+  Remaining: live run 4. If the wording is acceptable, merge; remaining judgment issues are model
+  capability (option: AI_REASONING_EFFORT=medium), not a reason to keep iterating.
   Done when it prints `RESULT: OK` and `quality (Q-1): OK`, then merge via PR.
   If quality still shows ISSUES, tune the prompt once more; do not loosen the numeric guard.
 

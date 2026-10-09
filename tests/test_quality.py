@@ -104,7 +104,8 @@ def test_lapsed_customer_gets_no_bogus_missing_fields():
     p = _smoke_packet()
     for label in ("En eski borç dönemi", "2025–2026 ciro", "Borç / ciro", "Tahsilat öncelik puanı (0–100)"):
         assert label not in p.missing
-    assert "Sektör" in p.missing          # genuinely empty -> still reported
+    assert "Sektör" not in p.missing      # empty descriptive field: omitted, not a "missing number"
+    assert all(f["label"] != "Sektör" for f in p.facts)
 
 
 def test_second_live_run_defects_are_flagged():
@@ -119,7 +120,7 @@ def test_second_live_run_defects_are_flagged():
     assert any("opportunities[0]: fact reference tacked" in i for i in issues)
     assert any("opportunities: 1 inline fact ref(s) moved" in i for i in issues)
     assert any("'TEMSILCI-A' written and referenced twice" in i for i in issues)
-    p.missing.append("Temsilci")
+    p.missing += ["Sektör", "Temsilci"]
     assert any("lists missing fields" in i for i in Q.assess(out, p)["issues"])
 
 
@@ -184,3 +185,34 @@ def test_tidy_keeps_label_value_and_mid_sentence_references():
     raw = {**GOOD, "summary": f"Toplam geçmiş harcama: [[FACT:{spend}]]. Harcaması [[FACT:{spend}]] olan müşteri değerli."}
     tidied, fixes = Q.tidy(raw, p)
     assert tidied["summary"] == raw["summary"] and fixes == []
+
+
+
+# ---------------- live run 3 (2026-10-09, two runs) ----------------
+def test_run3a_year_tacked_after_another_ref_is_removed():
+    p = _smoke_packet()
+    tier, year = _fid(p, "Geri kazanım kademesi"), _fid(p, "Son aktif yıl")
+    raw = {**GOOD, "summary": (f"Müşteri kademesinde ([[FACT:{tier}]]); bu durum hemen müdahale gerektiriyor "
+                               f"[[FACT:{tier}]] [[FACT:{year}]]. Vadesi geçen borç görünmüyor.")}
+    tidied, _ = Q.tidy(raw, p)
+    assert "gerektiriyor." in tidied["summary"] and Q.assess(tidied, p)["issues"] == []
+
+
+def test_run3b_fact_run_clause_removed_and_sentence_recapitalized():
+    p = _smoke_packet()
+    ids = [f["fact_id"] for f in p.facts if f["kind"] == "money"][:3]
+    while len(ids) < 3:
+        ids.append(ids[-1])
+    raw = {**GOOD, "summary": ("Durum: müşteri öncelikli; geçmişte düzenli alım kaydı var. Yıllık cirolar "
+                               f"[[FACT:{ids[0]}]], [[FACT:{ids[1]}]], [[FACT:{ids[2]}]]; öncelik kısa vadeli likidite.")}
+    tidied, fixes = Q.tidy(raw, p)
+    assert "Yıllık cirolar" not in tidied["summary"]
+    assert "var. Öncelik kısa vadeli likidite." in tidied["summary"]
+    assert Q.assess(tidied, p)["issues"] == []
+    assert set(ids) <= set(tidied["evidence_fact_ids"])
+
+
+def test_margin_warning_says_out_of_scope():
+    p = _smoke_packet()
+    w = next(x for x in p.to_payload()["warnings"] if x["code"] == "margin_data_gaps")
+    assert "kapsamı dışındadır" in w["text"] and "yorum" in w["text"]
