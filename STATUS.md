@@ -41,6 +41,7 @@ see below), then merge to `main`.
 | Baseline before M3, no data (CI-like) | same | 27 passed, 1 failed, 4 errors (needed real Excel) |
 | After M3, cloud, no data | `python -m pytest -q` | **106 passed, 7 skipped (local_data), 1 xfailed** |
 | After .env-loader fix, cloud, no data | `python -m pytest -q` | **107 passed, 7 skipped, 1 xfailed** |
+| After quota category, cloud, no data | `python -m pytest -q` | **108 passed, 7 skipped, 1 xfailed** |
 | After M3, Mac VM, real 5 Oct 2026 data | `python -m pytest -q` | **113 passed, 1 xfailed** |
 
 The xfail is the strict known issue DQ-1 (dashboard margin treats missing cost as zero).
@@ -50,12 +51,14 @@ cloud session (the log download was forbidden); expected 106 passed / 7 skipped 
 `main` @ `d37db1f` predates the workflow file, so it has no CI run yet.
 
 ## Live provider test
-NOT RUN. Blocked by network policy, not by code: both the cloud session and the Mac's sandbox VM
-reach the internet only through an allowlist proxy, which returns 403 for `api.openai.com`.
-The Mac `.env` exists but `OPENAI_API_KEY` is still empty (owner's first run printed SKIPPED).
-`.env` loader fixed: a later non-empty line now beats an earlier empty one, and `export KEY=` is accepted. It must be run in the Mac's own
-Terminal (TASKS M3-C2), or an org admin must allowlist `api.openai.com`.
-`scripts/live_smoke_test.py` without a key printed `SKIPPED: OPENAI_API_KEY not set — no live call made.`
+ATTEMPTED 2026-10-09 by the owner in the Mac Terminal (`python scripts/live_smoke_test.py`):
+`provider=openai model=gpt-5-mini` → attempt 1 failed with HTTP 429, category `rate_limit`
+(latency 2877 ms, no tokens). The key was accepted (an invalid key gives `auth`); the 429 is
+almost certainly `insufficient_quota` — no credit on the OpenAI API account yet. The pipeline
+behaved as designed: categorized failure, no agent-level retry, no fabricated output.
+Follow-up: quota is now its own category (`quota`) with a billing hint, separate from transient
+`rate_limit`. Re-run after adding API credit (TASKS M3-C2). The sandboxes still cannot reach
+`api.openai.com`, so the run stays on the Mac.
 
 ## Provider configuration
 Default `AI_PROVIDER=disabled`. The OpenAI default model `gpt-5-mini` lives in

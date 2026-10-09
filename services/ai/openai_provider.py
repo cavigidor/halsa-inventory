@@ -14,7 +14,7 @@ import time
 
 from .base import (AIProvider, AIResult, ERR_AUTH, ERR_BAD_REQUEST, ERR_CONNECTION,
                    ERR_INCOMPLETE, ERR_MALFORMED, ERR_MISSING_KEY, ERR_PROVIDER_5XX,
-                   ERR_RATE_LIMIT, ERR_REFUSAL, ERR_SDK_MISSING, ERR_TIMEOUT, ERR_UNKNOWN)
+                   ERR_QUOTA, ERR_RATE_LIMIT, ERR_REFUSAL, ERR_SDK_MISSING, ERR_TIMEOUT, ERR_UNKNOWN)
 
 
 class OpenAIProvider(AIProvider):
@@ -145,7 +145,10 @@ def _classify_exception(e):
     if isinstance(e, (openai.AuthenticationError, openai.PermissionDeniedError)):
         return ERR_AUTH, "Authentication with OpenAI failed (check OPENAI_API_KEY)."
     if isinstance(e, openai.RateLimitError):
-        return ERR_RATE_LIMIT, "OpenAI rate limit or quota exceeded."
+        if getattr(e, "code", None) == "insufficient_quota" or getattr(e, "type", None) == "insufficient_quota":
+            return ERR_QUOTA, ("OpenAI account has no available credit (insufficient_quota): add credit "
+                               "or raise the usage limit in the OpenAI platform billing settings.")
+        return ERR_RATE_LIMIT, "OpenAI rate limit exceeded (too many requests); try again shortly."
     if isinstance(e, openai.APITimeoutError):          # subclass of APIConnectionError: check first
         return ERR_TIMEOUT, "OpenAI request timed out."
     if isinstance(e, openai.APIConnectionError):

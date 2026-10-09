@@ -11,6 +11,7 @@ Milestone 5 must not be started until it is moved to *Current*.
   at most 2 requests. Record provider, model, result, latency and tokens in STATUS.md.
   If the default model `gpt-5-mini` is not available on the account, set `AI_MODEL`
   (the default lives only in `config.DEFAULT_MODELS`).
+  First attempt (2026-10-09): HTTP 429 / no credit on the API account. Add credit, re-run.
   Done when the script prints `RESULT: OK` and the outcome is recorded.
 - [ ] **M3-C3: Merge `claude/milestone-3-live-ai` into `main`** after C1 and C2, via a PR on GitHub.
 

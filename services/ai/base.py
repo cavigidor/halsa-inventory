@@ -14,6 +14,7 @@ ERR_MISSING_KEY = "missing_key"        # provider selected but no API key
 ERR_SDK_MISSING = "sdk_missing"        # provider SDK not installed
 ERR_AUTH = "auth"                      # invalid key / permission denied
 ERR_RATE_LIMIT = "rate_limit"
+ERR_QUOTA = "quota"                    # account has no credit / billing limit reached (not transient)
 ERR_TIMEOUT = "timeout"
 ERR_CONNECTION = "connection"
 ERR_PROVIDER_5XX = "provider_5xx"

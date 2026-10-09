@@ -73,6 +73,8 @@ def test_success_response_is_validated_and_metered():
     (openai.AuthenticationError("bad key", response=_resp(401), body=None), "auth"),
     (openai.PermissionDeniedError("denied", response=_resp(403), body=None), "auth"),
     (openai.RateLimitError("slow down", response=_resp(429), body=None), "rate_limit"),
+    (openai.RateLimitError("no credit", response=_resp(429),
+                           body={"type": "insufficient_quota", "code": "insufficient_quota"}), "quota"),
     (openai.APITimeoutError(request=_req()), "timeout"),
     (openai.APIConnectionError(request=_req()), "connection"),
     (openai.InternalServerError("boom", response=_resp(500), body=None), "provider_5xx"),
