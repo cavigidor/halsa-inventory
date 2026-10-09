@@ -89,3 +89,14 @@ Don't rewrite earlier entries. If one is superseded, add a new entry that says s
 - **Consequences:** failures now name the cause (`incomplete` + a hint, or `malformed` with the
   pydantic error types and output length, never the content). Structured Outputs are still strict,
   and the D-008 constraints are unchanged.
+
+### D-013 · 2026-10-09 · Numeric-guard allow-list: Python labels and list markers
+- **Decision:** the model may repeat Python-authored flag names and classification values verbatim,
+  and years appearing inside them count as packet years. Single-digit list markers (`1)`, `2.`, `(3)`)
+  at the start of the text or after a line or sentence break are treated as layout. User-typed
+  instructions are never allow-listed, and every other digit or number word is still rejected.
+- **Rationale:** the first complete live call was rejected for exactly these three non-financial
+  patterns. Rejecting them made the AI layer unusable without improving safety.
+- **Consequences:** the guard is still strict about amounts, percentages, counts and ratios (tests
+  cover numbers inside enumerated sentences). The prompt also asks for no numbering and no raw
+  flag names.

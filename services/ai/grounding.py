@@ -44,9 +44,15 @@ def _strip_allowed(text, allowed):
     return out
 
 
+# Structural list markers ("1) ", "2. ", "(3) ") at the start of the text or right after a line
+# break / ';' / ':' are layout, not business claims. Single digit 1-9 only; anything else is scanned.
+_ENUMERATOR = re.compile(r"(?:^|(?<=[\n;:.!?]))[ \t]*\(?[1-9][.)][ \t]+")
+
+
 def numeric_violations(text, packet):
     """Numbers/quantities in model prose that did not come through a fact placeholder."""
-    body = FACT_TOKEN.sub(" ", text)
+    body = _ENUMERATOR.sub(" ", text)
+    body = FACT_TOKEN.sub(" ", body)
     body = _strip_allowed(body, packet.allowed_text)
     allowed_years = packet.allowed_years()
     years_removed = _YEAR.sub(lambda m: " " if m.group(0) in allowed_years else m.group(0), body)

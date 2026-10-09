@@ -114,12 +114,19 @@ class EvidencePacket:
             self.allowed_text.add(str(disp))
         return fid
 
+    # Python-authored labels the model may repeat verbatim (not numbers it invented).
+    # Free text typed by the user (user_instruction) is NOT allowed: echoing it is not grounding.
+    _UNTRUSTED_CLASSIFICATIONS = {"user_instruction"}
+
     def classify(self, name, value):
         self.classifications.append({"name": name, "value": value})
+        if name not in self._UNTRUSTED_CLASSIFICATIONS:
+            self.allow(name, value if isinstance(value, str) else None)
 
     def flag(self, name):
         if name not in self.flags:
             self.flags.append(name)
+            self.allow(name)
 
     def warn(self, code, text):
         if all(w["code"] != code for w in self.warnings):
@@ -133,8 +140,11 @@ class EvidencePacket:
     # -- derived --
     def allowed_years(self):
         import re
-        blob = " ".join([f["display_value"] + " " + f["label"] for f in self.facts] + [str(self.as_of or "")])
-        return set(re.findall(r"\b(?:19|20)\d{2}\b", blob))
+        blob = " ".join([f["display_value"] + " " + f["label"] for f in self.facts]
+                        + [str(self.as_of or "")] + list(self.flags)
+                        + [str(c["value"]) for c in self.classifications
+                           if c["name"] not in self._UNTRUSTED_CLASSIFICATIONS])
+        return set(re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", blob))   # also inside flag names
 
     def to_payload(self):
         payload = {

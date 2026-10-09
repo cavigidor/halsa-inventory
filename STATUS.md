@@ -43,6 +43,7 @@ see below), then merge to `main`.
 | After .env-loader fix, cloud, no data | `python -m pytest -q` | **107 passed, 7 skipped, 1 xfailed** |
 | After quota category, cloud, no data | `python -m pytest -q` | **108 passed, 7 skipped, 1 xfailed** |
 | After create()+diagnostics, cloud, no data | `python -m pytest -q` | **111 passed, 7 skipped, 1 xfailed** |
+| After guard false-positive fixes, cloud, no data | `python -m pytest -q` | **121 passed, 7 skipped, 1 xfailed** |
 | After M3, Mac VM, real 5 Oct 2026 data | `python -m pytest -q` | **113 passed, 1 xfailed** |
 
 The xfail is the strict known issue DQ-1 (dashboard margin treats missing cost as zero).
@@ -64,7 +65,14 @@ Second attempt (after adding credit): `attempt=1 category=malformed latency_ms=2
 reasoning and the JSON was cut off (`responses.parse()` raised before status/usage could be read).
 Fix (D-012): provider now uses `responses.create()` with the same strict JSON schema, checks
 `status`/`incomplete_details` and records usage incl. `reasoning_tokens` BEFORE parsing; the default
-model gets `reasoning.effort=low`; default output cap 4000. Re-run pending (TASKS M3-C2). The sandboxes still cannot reach
+model gets `reasoning.effort=low`; default output cap 4000.
+Third attempt: model completed normally (`reasoning_tokens=256`, ~1.1–1.5k output tokens, 9–11 s), but
+the numeric guard rejected both attempts. These were false positives, not invented financial numbers:
+an echoed Python flag (`lapsed_no_2026_purchase`), the year 2026 from that flag, and step numbering
+"1) 2) 3) 4)". Fix: flags and Python classifications are allow-listed (user-typed instructions are
+not); years inside flags/classifications count as packet years; single-digit list markers at the
+start of the text or after a sentence/line break are treated as layout. The prompt forbids numbered
+steps and raw flag names, and the retry message now names the offending tokens. Re-run pending. The sandboxes still cannot reach
 `api.openai.com`, so the run stays on the Mac.
 
 ## Provider configuration

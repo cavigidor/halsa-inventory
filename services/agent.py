@@ -24,9 +24,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 log = logging.getLogger("agent")
 
 STRICT_RETRY = (
-    "\n\nÖNCEKİ CEVAP REDDEDİLDİ: {why}\n"
-    "Metinde HİÇBİR rakam, tutar, yüzde veya sayısal ifade yazma. Sayı gerekiyorsa yalnızca "
-    "paketteki bir kimliği [[FACT:F001]] biçiminde kullan. Yalnızca paketteki fact_id'leri kullan."
+    "\n\nÖNCEKİ CEVAP REDDEDİLDİ ({why}). Sorunlu alanlar ve ifadeler: {details}\n"
+    "Bu ifadeleri KALDIR. Metinde HİÇBİR rakam, tutar, yüzde, yıl dışı sayı veya sayısal ifade yazma; "
+    "adımları numaralandırma. Sayı gerekiyorsa yalnızca paketteki bir kimliği [[FACT:F001]] biçiminde "
+    "kullan. Yalnızca paketteki fact_id'leri kullan. Teknik etiketleri (ör. flags) Türkçe açıkla."
 )
 
 
@@ -95,7 +96,8 @@ class BusinessActionAgent:
                 entry.update(success=False, error_category=g.category)
                 self.recorder(entry)
                 log.warning("grounding violation (%s) task=%s attempt=%d", g.category, task, attempt)
-                prompt = self.system_prompt + STRICT_RETRY.format(why=g.category)
+                details = "; ".join(g.details[:6]) if g.details else str(g)[:300]
+                prompt = self.system_prompt + STRICT_RETRY.format(why=g.category, details=details[:600])
                 continue
             except Exception as e:  # schema invalid
                 entry.update(success=False, error_category="malformed")

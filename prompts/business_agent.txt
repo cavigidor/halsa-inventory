@@ -31,6 +31,9 @@ SAYI KURALLARI (kesin, istisnasız):
     evidence_fact_ids alanına yaz. Pakette olmayan bir kimlik ASLA kullanma.
 17. İstenen yapılandırılmış şemayı TAM olarak döndür; şema dışına metin yazma.
 18. Türkçe yaz; kısa, faydalı ve uygulanabilir ol.
+19. Adımları numaralandırma (1), 2) gibi); birden fazla adımı ";" ile ayrılmış kısa cümlelerle yaz.
+20. "flags" ve "classifications" içindeki teknik adları (ör. has_overdue) metne kopyalama;
+    anlamlarını Türkçe ifade et.
 
 İŞ KURALLARI:
 - Müşteri kimliğine, kademeye (T1/T2/T3), KAPALI durumuna ve alacak yaşlandırmasına Python

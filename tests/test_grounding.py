@@ -189,3 +189,47 @@ def test_product_best_buyers_must_be_buyer_facts():
     assert data["best_buyers"] == ["Sentetik Aktif"]
     data, r = BusinessActionAgent(Scripted([{**base, "best_buyer_fact_ids": [stock]}] * 2)).analyze_product(prod)
     assert data is None and r["category"] == "fact_reference"
+
+
+# ---------------- false-positive regressions from the first live run (2026-10-09) ----------------
+def _live_like_packet():
+    return EV.customer_packet({"customer_code": "900.00.0001", "name": "Sentetik T1 Kirtasiye",
+                               "winback_tier": 1, "historical_spend": 184230, "last_active_year": 2025,
+                               "overdue": 0})
+
+
+def test_python_flags_and_their_years_may_be_echoed():
+    p = _live_like_packet()                     # adds flag lapsed_no_2026_purchase
+    G.check(ok(risks=["lapsed_no_2026_purchase: 2026'da sipariş yok."], evidence_fact_ids=[],
+               summary="Özet.", opportunities=[]), p)
+
+
+@pytest.mark.parametrize("text", ["1) Temsilci arasın. 2) Teklif hazırlansın.",
+                                  "Adımlar:\n1. Ara\n2. Teklif ver", "(1) Ara; (2) Takip et."])
+def test_list_enumerators_are_structure_not_claims(text):
+    G.check(ok(recommended_action=text, evidence_fact_ids=[], summary="Özet.", opportunities=[]),
+            _live_like_packet())
+
+
+@pytest.mark.parametrize("text", ["Toplam 3 müşteri arandı.", "1) 12 adet teklif et.",
+                                  "10) Ara.", "Adım 2. olarak ara."])
+def test_numbers_inside_sentences_still_rejected(text):
+    with pytest.raises(G.GroundingError) as e:
+        G.check(ok(recommended_action=text, evidence_fact_ids=[], summary="Özet.", opportunities=[]),
+                _live_like_packet())
+    assert e.value.category == "numeric_guard"
+
+
+def test_user_instruction_text_is_not_allowlisted():
+    p = EV.draft_packet("email", {"customer_code": "900.00.0001", "name": "Sentetik"},
+                        instruction="yüzde 15 indirim öner")
+    with pytest.raises(G.GroundingError):
+        G.check({"message": "Size yüzde 15 indirim sunabiliriz.", "evidence_fact_ids": [], "warnings": []}, p)
+
+
+def test_retry_prompt_names_the_offending_tokens():
+    bad = ok(summary="Harcama 184 bin TL.", evidence_fact_ids=[], opportunities=[])
+    good = ok(summary="Harcama yüksek.", evidence_fact_ids=[], opportunities=[])
+    prov = Scripted([bad, good])
+    BusinessActionAgent(prov).analyze_customer(CUST)
+    assert "184" in prov.prompts[1] and "summary" in prov.prompts[1]

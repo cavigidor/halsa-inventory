@@ -12,7 +12,8 @@ Milestone 5 must not be started until it is moved to *Current*.
   If the default model `gpt-5-mini` is not available on the account, set `AI_MODEL`
   (the default lives only in `config.DEFAULT_MODELS`).
   Attempt 1 (2026-10-09): HTTP 429 / no credit. Attempt 2: malformed (likely truncated by hidden
-  reasoning); provider fixed (D-012). Re-run; if it reports `incomplete`, raise AI_MAX_OUTPUT_TOKENS.
+  reasoning); provider fixed (D-012). Attempt 3: guard false positives (flag echo, step numbers);
+  guard refined. Re-run; if it reports `incomplete`, raise AI_MAX_OUTPUT_TOKENS.
   Done when the script prints `RESULT: OK` and the outcome is recorded.
 - [ ] **M3-C3: Merge `claude/milestone-3-live-ai` into `main`** after C1 and C2, via a PR on GitHub.
 
