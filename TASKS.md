@@ -4,14 +4,10 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 must not be started until it is moved to *Current*.
 
 ## Current — Milestone 3 (close-out)
-- [ ] **M3-C1: Push the checkpoint to GitHub and verify CI.**
-  Push `main` and `claude/milestone-3-live-ai`, then check that the `tests` workflow is green
-  on GitHub Actions. The cloud session's push was refused (403, Claude GitHub App not installed
-  on the repo), so push from the Mac or install the app first.
-  Done when `git ls-remote origin` shows both branches at the local SHAs and CI passes.
-- [ ] **M3-C2: Run the single live provider smoke test.**
-  On the Mac, put `OPENAI_API_KEY` in `.env` and run
-  `AI_PROVIDER=openai python scripts/live_smoke_test.py`. It sends one synthetic packet and makes
+- [ ] **M3-C2: Run the single live provider smoke test (owner, in the Mac's own Terminal).**
+  The AI sandboxes cannot reach `api.openai.com` (allowlist proxy, 403), so this runs outside them.
+  On the Mac, put `OPENAI_API_KEY` in `.env` (gitignored) and run
+  `AI_PROVIDER=openai python scripts/live_smoke_test.py` with Python 3.12+. It sends one synthetic packet and makes
   at most 2 requests. Record provider, model, result, latency and tokens in STATUS.md.
   If the default model `gpt-5-mini` is not available on the account, set `AI_MODEL`
   (the default lives only in `config.DEFAULT_MODELS`).
@@ -53,6 +49,8 @@ Milestone 5 must not be started until it is moved to *Current*.
   2020 should count, change `QUAL_YEARS` and that test together.
 
 ## Completed
+- [x] 2026-10-09 — M3-C1: both branches pushed and verified with `git ls-remote`; CI run
+  `37972839805` on `claude/milestone-3-live-ai` @ `dfa57de` succeeded.
 - [x] 2026-10-09 — Repository bootstrap: Milestone 1+2 code imported into git, `.gitignore`
   hardened, fixture names sanitized (commit `d37db1f` on `main`).
 - [x] 2026-10-09 — M3: OpenAI Responses API provider, centralized factory, `ai_settings()`,

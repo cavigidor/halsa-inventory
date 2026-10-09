@@ -1,18 +1,19 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-09 at the end of the Milestone 3 implementation session._
+_Updated 2026-10-09 (M3 close-out: push verified, CI green; live call blocked by sandbox network)._
 
 ## Git
 - **Branch:** `claude/milestone-3-live-ai`, based on `main`.
 - **`main`:** `71f5f2f` (original dashboard) → `d37db1f` (bootstrap: M1+M2 import, hardened `.gitignore`).
 - **This checkpoint:** the commit that last touched this file (`git log -1 -- STATUS.md`).
-- **GitHub sync:** NOT YET VERIFIED ON REMOTE when this file was written. The push from the cloud
-  session was refused (HTTP 403: the Claude GitHub App is not installed for this repo). The
-  commits exist locally and in the Mac checkout. See TASKS M3-C1. Before this run the remote was empty.
+- **GitHub sync:** VERIFIED 2026-10-09. `git ls-remote origin` shows `main` = `d37db1f` and
+  `claude/milestone-3-live-ai` = `dfa57de`, matching local (the user pushed from the Mac). Remote
+  default branch (HEAD) = `main`.
 
 ## Milestone
 Milestone 3 (real LLM behind the abstraction, with numeric safety) is implemented and tested.
-Close-out tasks remain: push and CI, one live smoke call, merge.
+Push and CI are done. Remaining close-out: one live smoke call (must run in the Mac's own Terminal,
+see below), then merge to `main`.
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -42,12 +43,17 @@ Close-out tasks remain: push and CI, one live smoke call, merge.
 | After M3, Mac VM, real 5 Oct 2026 data | `python -m pytest -q` | **113 passed, 1 xfailed** |
 
 The xfail is the strict known issue DQ-1 (dashboard margin treats missing cost as zero).
-CI: `.github/workflows/tests.yml` exists but has not run yet, because nothing has been pushed.
+CI: GitHub Actions run `37972839805` on `claude/milestone-3-live-ai` @ `dfa57de` — **success**
+(every step green, including `python -m pytest -q`). The per-test counts could not be read from the
+cloud session (the log download was forbidden); expected 106 passed / 7 skipped / 1 xfailed.
+`main` @ `d37db1f` predates the workflow file, so it has no CI run yet.
 
 ## Live provider test
-SKIPPED. No `OPENAI_API_KEY` exists in this environment or in the Mac project folder (there is no `.env`).
-`scripts/live_smoke_test.py` printed `SKIPPED: OPENAI_API_KEY not set — no live call made.`
-Next: TASKS M3-C2.
+NOT RUN. Blocked by network policy, not by code: both the cloud session and the Mac's sandbox VM
+reach the internet only through an allowlist proxy, which returns 403 for `api.openai.com`.
+No `.env` / `OPENAI_API_KEY` exists in the Mac project folder. It must be run in the Mac's own
+Terminal (TASKS M3-C2), or an org admin must allowlist `api.openai.com`.
+`scripts/live_smoke_test.py` without a key printed `SKIPPED: OPENAI_API_KEY not set — no live call made.`
 
 ## Provider configuration
 Default `AI_PROVIDER=disabled`. The OpenAI default model `gpt-5-mini` lives in
@@ -68,4 +74,4 @@ Default `AI_PROVIDER=disabled`. The OpenAI default model `gpt-5-mini` lives in
 - A pre-M3 backup of the Mac folder: `~/Desktop/ME/Projects/StockAgent_backup_2026-10-08_pre-M3`.
 
 ## Immediate next task
-TASKS M3-C1: push both branches and confirm CI is green.
+TASKS M3-C2: the owner runs `scripts/live_smoke_test.py` once in the Mac Terminal and records the result.
