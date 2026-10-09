@@ -86,3 +86,20 @@ def test_app_starts_without_any_key(monkeypatch, synthetic_dir):
         a = client.get("/api/agent/actions").json()
         assert a["ai_available"] is False and a["count"] > 0
         assert all(x["interpretation"] is None for x in a["actions"])
+
+
+def test_dotenv_later_nonempty_value_wins_and_real_env_wins(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    env.write_text("AI_PROVIDER=disabled\nOPENAI_API_KEY=\nAI_MODEL=\n"
+                   "OPENAI_API_KEY=sk-test-not-real   # added on a new line\n"
+                   "export AI_PROVIDER=openai\nAI_TIMEOUT_SECONDS=\"45\"\n", encoding="utf-8")
+    for k in ("OPENAI_API_KEY", "AI_PROVIDER", "AI_TIMEOUT_SECONDS"):
+        monkeypatch.setenv(k, "")          # registers restore-on-teardown, then clear
+        monkeypatch.delenv(k)
+    monkeypatch.setenv("AI_MODEL", "from-real-env")
+    C._load_dotenv(str(env))
+    import os
+    assert os.environ["OPENAI_API_KEY"] == "sk-test-not-real"
+    assert os.environ["AI_PROVIDER"] == "openai"
+    assert os.environ["AI_TIMEOUT_SECONDS"] == "45"
+    assert os.environ["AI_MODEL"] == "from-real-env"

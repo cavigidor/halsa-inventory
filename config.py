@@ -2,22 +2,31 @@
 import os
 
 
-def _load_dotenv():
-    """Load ./.env (gitignored) into os.environ without overriding real env vars.
+def _load_dotenv(path=None):
+    """Load ./.env (gitignored) into os.environ without overriding real (non-empty) env vars.
     Minimal parser, no dependency. Skipped when STOCKAGENT_NO_DOTENV is set (tests)."""
-    if os.environ.get("STOCKAGENT_NO_DOTENV"):
-        return
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if path is None:
+        if os.environ.get("STOCKAGENT_NO_DOTENV"):
+            return
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     if not os.path.exists(path):
         return
+    values = {}
     with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
+            if line.startswith("export "):
+                line = line[7:].strip()
             if not line or line.startswith("#") or "=" not in line:
                 continue
             k, v = line.split("=", 1)
             v = v.split(" #", 1)[0].strip().strip('"').strip("'")
-            os.environ.setdefault(k.strip(), v)
+            k = k.strip()
+            if v or k not in values:          # a later non-empty value beats an earlier empty one
+                values[k] = v
+    for k, v in values.items():
+        if not os.environ.get(k):             # real (non-empty) env vars always win
+            os.environ[k] = v
 
 
 _load_dotenv()

@@ -40,6 +40,7 @@ see below), then merge to `main`.
 | Baseline before M3, Mac, real data | `python -m pytest tests/ -q` | **32 passed** |
 | Baseline before M3, no data (CI-like) | same | 27 passed, 1 failed, 4 errors (needed real Excel) |
 | After M3, cloud, no data | `python -m pytest -q` | **106 passed, 7 skipped (local_data), 1 xfailed** |
+| After .env-loader fix, cloud, no data | `python -m pytest -q` | **107 passed, 7 skipped, 1 xfailed** |
 | After M3, Mac VM, real 5 Oct 2026 data | `python -m pytest -q` | **113 passed, 1 xfailed** |
 
 The xfail is the strict known issue DQ-1 (dashboard margin treats missing cost as zero).
@@ -51,7 +52,8 @@ cloud session (the log download was forbidden); expected 106 passed / 7 skipped 
 ## Live provider test
 NOT RUN. Blocked by network policy, not by code: both the cloud session and the Mac's sandbox VM
 reach the internet only through an allowlist proxy, which returns 403 for `api.openai.com`.
-No `.env` / `OPENAI_API_KEY` exists in the Mac project folder. It must be run in the Mac's own
+The Mac `.env` exists but `OPENAI_API_KEY` is still empty (owner's first run printed SKIPPED).
+`.env` loader fixed: a later non-empty line now beats an earlier empty one, and `export KEY=` is accepted. It must be run in the Mac's own
 Terminal (TASKS M3-C2), or an org admin must allowlist `api.openai.com`.
 `scripts/live_smoke_test.py` without a key printed `SKIPPED: OPENAI_API_KEY not set — no live call made.`
 
