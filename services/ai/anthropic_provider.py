@@ -1,6 +1,8 @@
-"""Anthropic adaptörü. SDK yalnızca çağrı anında import edilir; modül import'u SDK gerektirmez."""
-import os, json, re
-from .base import AIProvider, AIResult
+"""Anthropic adaptörü (Milestone 2; not the Milestone 3 target provider, kept working).
+SDK yalnızca çağrı anında import edilir; modül import'u SDK gerektirmez."""
+import os, json, re, time
+from .base import (AIProvider, AIResult, ERR_MALFORMED, ERR_MISSING_KEY, ERR_SDK_MISSING,
+                   ERR_UNKNOWN)
 
 
 def _extract_json(text):
@@ -15,48 +17,61 @@ class AnthropicProvider(AIProvider):
     name = "anthropic"
 
     def __init__(self, model=None):
+        import config as C
+        s = C.ai_settings()
         self.key = os.environ.get("ANTHROPIC_API_KEY")
-        self.model = model or os.environ.get("AI_MODEL", "claude-3-5-sonnet-20241022")
+        self.model = model or C.DEFAULT_MODELS["anthropic"]
+        self.timeout = s["timeout_seconds"]
+        self.max_output_tokens = s["max_output_tokens"]
         self._client = None
 
-    def is_available(self) -> bool:
+    def unavailable_reason(self):
         if not self.key:
-            return False
+            return ERR_MISSING_KEY
         try:
             import anthropic  # noqa: F401
-            return True
         except Exception:
-            return False
+            return ERR_SDK_MISSING
+        return None
+
+    def is_available(self) -> bool:
+        return self.unavailable_reason() is None
 
     def _client_(self):
         import anthropic
         if self._client is None:
-            self._client = anthropic.Anthropic(api_key=self.key)
+            self._client = anthropic.Anthropic(api_key=self.key, timeout=float(self.timeout), max_retries=1)
         return self._client
 
     def generate_structured(self, system_prompt, payload, response_model) -> AIResult:
-        if not self.is_available():
-            return AIResult(available=False, error="Anthropic API key/SDK not available.")
+        meta = {"provider": self.name, "model": self.model}
+        why = self.unavailable_reason()
+        if why:
+            return AIResult(available=False, error="Anthropic API key/SDK not available.",
+                            error_category=why, meta=meta)
         try:
             schema = response_model.model_json_schema()
         except Exception:
             schema = {}
-        base = (system_prompt +
-                "\n\nSADECE aşağıdaki JSON şemasına uyan geçerli JSON döndür; açıklama/markdown YOK.\n" +
+        base = ("SADECE aşağıdaki JSON şemasına uyan geçerli JSON döndür; açıklama/markdown YOK.\n" +
                 json.dumps(schema, ensure_ascii=False) +
-                "\n\nGİRDİ (Python tarafından doğrulanmış gerçekler — sayıları DEĞİŞTİRME):\n" +
+                "\n\nKANIT PAKETİ (Python tarafından doğrulanmış gerçekler):\n" +
                 json.dumps(payload, ensure_ascii=False))
         instr, last = base, ""
-        for _ in range(2):
+        t0 = time.monotonic()
+        for _ in range(2):   # bounded: one retry for malformed JSON only
             try:
                 msg = self._client_().messages.create(
-                    model=self.model, max_tokens=1500,
+                    model=self.model, max_tokens=self.max_output_tokens, system=system_prompt,
                     messages=[{"role": "user", "content": instr}])
                 text = "".join(getattr(b, "text", "") for b in msg.content)
                 data = json.loads(_extract_json(text))
-                response_model(**data)
-                return AIResult(available=True, data=data, raw=text)
+                response_model.model_validate(data)
+                meta["latency_ms"] = int((time.monotonic() - t0) * 1000)
+                return AIResult(available=True, data=data, raw=text, meta=meta)
             except Exception as e:
-                last = str(e)
+                last = type(e).__name__
                 instr = base + "\n\nÖNCEKİ CEVAP GEÇERSİZDİ. Yalnızca geçerli JSON döndür."
-        return AIResult(available=True, error=f"validation_failed:{last}")
+        meta["latency_ms"] = int((time.monotonic() - t0) * 1000)
+        cat = ERR_MALFORMED if last in ("JSONDecodeError", "ValidationError") else ERR_UNKNOWN
+        return AIResult(available=True, error=f"validation_failed:{last}", error_category=cat, meta=meta)

@@ -20,7 +20,7 @@ log = logging.getLogger("app")
 DATA_FOLDER = os.environ.get("DATA_FOLDER", os.path.join(ROOT, "data"))
 INFLATION = C.MANUAL_INFLATION_RATE
 
-app = FastAPI(title="AI Aksiyon Merkezi API", version="0.2")
+app = FastAPI(title="AI Aksiyon Merkezi API", version="0.3")
 
 
 @app.on_event("startup")
@@ -29,8 +29,9 @@ def _startup():
     app.state.repo = ContextRepository(data_folder=DATA_FOLDER, inflation_rate=INFLATION)
     app.state.provider = get_provider()
     app.state.agent = BusinessActionAgent(app.state.provider)
-    log.info("startup: provider=%s available=%s data=%s",
-             app.state.provider.name, app.state.provider.is_available(), DATA_FOLDER)
+    log.info("startup: provider=%s model=%s available=%s data=%s",
+             app.state.provider.name, getattr(app.state.provider, "model", None),
+             app.state.provider.is_available(), DATA_FOLDER)
 
 
 # ---- dependencies (overridable in tests) ----
@@ -41,6 +42,13 @@ def get_agent() -> BusinessActionAgent:
     return app.state.agent
 
 
+def _ctx_or_none(repo):
+    try:
+        return repo.context()
+    except Exception:
+        return None
+
+
 def _action_id(a):
     return ST.content_key(a["category"], a["entity_id"], ST.hash_facts(a["facts"]))
 
@@ -48,8 +56,17 @@ def _action_id(a):
 # ---------------- health / context ----------------
 @app.get("/api/health", response_model=S.Health)
 def health(agent: BusinessActionAgent = Depends(get_agent)):
-    return S.Health(ai_available=agent.available, ai_provider=agent.provider.name,
+    p = agent.provider
+    return S.Health(ai_available=agent.available, ai_provider=p.name,
+                    ai_model=getattr(p, "model", None),
+                    ai_reason=(None if agent.available else getattr(p, "reason", None)),
                     macro_available=False, data_folder=DATA_FOLDER)
+
+
+@app.get("/api/ai/calls")
+def ai_calls(limit: int = 50):
+    """AI call metadata only (provider, model, latency, tokens, error category). No content."""
+    return {"calls": ST.recent_ai_calls(max(1, min(limit, 500)))}
 
 
 @app.get("/api/context", response_model=S.ContextResponse)
@@ -78,19 +95,21 @@ def agent_actions(repo: ContextRepository = Depends(get_repo),
         if ST.is_hidden(row):
             continue
         visible.append((aid, a, row.get("status", "open")))
-    enrich = agent.enrich_actions([a for _, a, _ in visible])
-    by_id = enrich["by_id"]
+    enrich = agent.enrich_actions([a for _, a, _ in visible], ctx)
+    by_ref = enrich["by_ref"]
     out = []
-    for aid, a, status in visible:
-        ai = by_id.get(a["entity_id"])
+    for (aid, a, status), ref in zip(visible, enrich["refs"]):
+        ai = by_ref.get(ref)
         out.append(S.ActionOut(
             action_id=aid, category=a["category"], entity_type=a["entity_type"],
             entity_id=a["entity_id"], title=a["title"], facts=a["facts"], drivers=a.get("drivers", {}),
             score=a["score"], priority=a["priority"], confidence=a["confidence"],
             requires_approval=True, status=status,
             interpretation=(ai["interpretation"] if ai else None),
-            recommendation=(ai["recommendation"] if ai else None)))
+            recommendation=(ai["recommendation"] if ai else None),
+            evidence=(ai["evidence"] if ai else [])))
     return S.ActionsResponse(ai_available=enrich["ai_available"], ai_reason=enrich["reason"],
+                             ai_error_category=enrich.get("category"), ai_warnings=enrich.get("warnings", []),
                              generated_at=ctx["generated_at"], count=len(out), actions=out)
 
 
@@ -102,13 +121,15 @@ def agent_customer(customer_code: str, repo: ContextRepository = Depends(get_rep
     if not facts:
         raise HTTPException(404, f"Müşteri bulunamadı: {customer_code}")
     facts = {**facts, "history": ST.get_memory("customer", customer_code)}
-    data, reason = agent.analyze_customer(facts)
+    data, r = agent.analyze_customer(facts, ctx=_ctx_or_none(repo))
     if data is None:
-        return S.CustomerAnalysis(customer_code=customer_code, facts=facts, ai_available=False, reason=reason)
+        return S.CustomerAnalysis(customer_code=customer_code, facts=facts, ai_available=agent.available,
+                                  reason=r["reason"], ai_error_category=r["category"])
     return S.CustomerAnalysis(customer_code=customer_code, facts=facts, ai_available=True,
                               summary=data["summary"], risks=data["risks"],
                               opportunities=data["opportunities"],
-                              recommended_action=data["recommended_action"], confidence=data["confidence"])
+                              recommended_action=data["recommended_action"], confidence=data["confidence"],
+                              evidence=data["evidence"], ai_warnings=data.get("warnings", []))
 
 
 @app.get("/api/agent/product/{product_code}", response_model=S.ProductAnalysis)
@@ -117,13 +138,15 @@ def agent_product(product_code: str, repo: ContextRepository = Depends(get_repo)
     facts = repo.product(product_code)
     if not facts:
         raise HTTPException(404, f"Ürün bulunamadı: {product_code}")
-    data, reason = agent.analyze_product({**facts, "top_buyers": facts.get("ranked_buyers", [])})
+    data, r = agent.analyze_product(facts, ctx=_ctx_or_none(repo))
     if data is None:
-        return S.ProductAnalysis(product_code=product_code, facts=facts, ai_available=False, reason=reason)
+        return S.ProductAnalysis(product_code=product_code, facts=facts, ai_available=agent.available,
+                                 reason=r["reason"], ai_error_category=r["category"])
     return S.ProductAnalysis(product_code=product_code, facts=facts, ai_available=True,
                              status=data["status"], risk=data["risk"], opportunity=data["opportunity"],
                              best_buyers=data["best_buyers"], recommendation=data["recommendation"],
-                             confidence=data["confidence"])
+                             confidence=data["confidence"], evidence=data["evidence"],
+                             ai_warnings=data.get("warnings", []))
 
 
 # ---------------- draft message ----------------
@@ -134,11 +157,14 @@ def draft_message(req: S.DraftRequest, repo: ContextRepository = Depends(get_rep
     if not cust:
         raise HTTPException(404, f"Müşteri bulunamadı: {req.customer_code}")
     prod = repo.product(req.product_code) if req.product_code else None
-    data, reason = agent.draft_message(req.message_type, cust, prod, req.additional_instruction)
+    cust = {**cust, "history": ST.get_memory("customer", req.customer_code)}
+    data, r = agent.draft_message(req.message_type, cust, prod, req.additional_instruction,
+                                  ctx=_ctx_or_none(repo))
     if data is None:
-        return S.DraftResponse(available=False, reason=reason, channel=req.message_type)
-    return S.DraftResponse(available=True, channel=req.message_type,
-                           message=data["message"], warnings=data.get("warnings", []))
+        return S.DraftResponse(available=False, reason=r["reason"], ai_error_category=r["category"],
+                               channel=req.message_type)
+    return S.DraftResponse(available=True, channel=req.message_type, message=data["message"],
+                           warnings=data.get("warnings", []), evidence=data["evidence"])
 
 
 # ---------------- scenario (deterministic) ----------------

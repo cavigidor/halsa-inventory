@@ -31,6 +31,11 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT, entity_type TEXT, entity_id TEXT,
             ts TEXT, kind TEXT,            -- contacted|offer|outcome|followup|rec_accepted|rec_rejected
             detail TEXT, next_followup TEXT)""")
+        # AI çağrı gözlemi: YALNIZCA meta veri. Prompt, kanıt paketi, model cevabı ve anahtar SAKLANMAZ.
+        c.execute("""CREATE TABLE IF NOT EXISTS ai_calls(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, task TEXT, attempt INTEGER,
+            provider TEXT, model TEXT, success INTEGER, error_category TEXT,
+            latency_ms INTEGER, input_tokens INTEGER, output_tokens INTEGER)""")
 
 
 def content_key(category, entity_id, content_hash):
@@ -102,3 +107,19 @@ def is_hidden(row, today=None):
         du = row.get("defer_until") if isinstance(row, dict) else None
         return bool(du and du > today)
     return False
+
+
+def record_ai_call(task, attempt=1, provider=None, model=None, success=False, error_category=None,
+                   latency_ms=None, input_tokens=None, output_tokens=None, **_ignored):
+    """Metadata only — never prompts, packets, responses or keys."""
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    with _conn() as c:
+        c.execute("""INSERT INTO ai_calls(ts,task,attempt,provider,model,success,error_category,
+                     latency_ms,input_tokens,output_tokens) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                  (now, task, attempt, provider, model, int(bool(success)), error_category,
+                   latency_ms, input_tokens, output_tokens))
+
+
+def recent_ai_calls(limit=50):
+    with _conn() as c:
+        return [dict(r) for r in c.execute("SELECT * FROM ai_calls ORDER BY id DESC LIMIT ?", (limit,))]
