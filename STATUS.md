@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-09 (M3 close-out: push verified, CI green; live call blocked by sandbox network)._
+_Updated 2026-10-09 (M3 close-out: push verified, CI green, live OpenAI smoke test PASSED)._
 
 ## Git
 - **Branch:** `claude/milestone-3-live-ai`, based on `main`.
@@ -53,27 +53,23 @@ cloud session (the log download was forbidden); expected 106 passed / 7 skipped 
 `main` @ `d37db1f` predates the workflow file, so it has no CI run yet.
 
 ## Live provider test
-ATTEMPTED 2026-10-09 by the owner in the Mac Terminal (`python scripts/live_smoke_test.py`):
-`provider=openai model=gpt-5-mini` → attempt 1 failed with HTTP 429, category `rate_limit`
-(latency 2877 ms, no tokens). The key was accepted (an invalid key gives `auth`); the 429 is
-almost certainly `insufficient_quota` — no credit on the OpenAI API account yet. The pipeline
-behaved as designed: categorized failure, no agent-level retry, no fabricated output.
-Follow-up: quota is now its own category (`quota`) with a billing hint, separate from transient
-`rate_limit`.
-Second attempt (after adding credit): `attempt=1 category=malformed latency_ms=20621`, SDK
-`ValidationError`. Most likely the reasoning model spent the 3000-token output budget on hidden
-reasoning and the JSON was cut off (`responses.parse()` raised before status/usage could be read).
-Fix (D-012): provider now uses `responses.create()` with the same strict JSON schema, checks
-`status`/`incomplete_details` and records usage incl. `reasoning_tokens` BEFORE parsing; the default
-model gets `reasoning.effort=low`; default output cap 4000.
-Third attempt: model completed normally (`reasoning_tokens=256`, ~1.1–1.5k output tokens, 9–11 s), but
-the numeric guard rejected both attempts. These were false positives, not invented financial numbers:
-an echoed Python flag (`lapsed_no_2026_purchase`), the year 2026 from that flag, and step numbering
-"1) 2) 3) 4)". Fix: flags and Python classifications are allow-listed (user-typed instructions are
-not); years inside flags/classifications count as packet years; single-digit list markers at the
-start of the text or after a sentence/line break are treated as layout. The prompt forbids numbered
-steps and raw flag names, and the retry message now names the offending tokens. Re-run pending. The sandboxes still cannot reach
-`api.openai.com`, so the run stays on the Mac.
+**PASSED 2026-10-09** (owner's Mac Terminal, `python scripts/live_smoke_test.py`, synthetic packet):
+`provider=openai model=gpt-5-mini reasoning_effort=low max_output_tokens=3000`
+- attempt 1: rejected by the numeric guard (`numeric_guard`, 12.1 s, 1920 in / 1227 out / 256 reasoning tokens)
+- attempt 2 (the one bounded stricter retry): **success** (9.0 s, 2048 in / 917 out / 256 reasoning tokens)
+- `RESULT: OK — schema valid, 12 fact(s) referenced, all values from Python: True`
+
+Every number in the final summary (₺184.230, ₺0, yearly revenue and order counts) was inserted by
+Python from `[[FACT:..]]` references. The model wrote no numbers itself.
+
+Earlier attempts the same day, all handled as designed (categorized failure, nothing fabricated):
+1. HTTP 429 `insufficient_quota`, because the API account had no credit. Now its own `quota` category.
+2. `malformed` after 20 s. A truncated answer was hidden by `responses.parse()`; fixed in D-012.
+3. The guard rejected both attempts on non-financial tokens; fixed in D-013.
+
+Observation: the passing summary mostly lists facts ("₺61.000, 4, ₺70.230, 5 …") rather than
+interpreting them. That is a prompt-quality item, not a safety issue (TASKS *Next*).
+The cloud and Mac sandboxes still cannot reach `api.openai.com`, so live runs happen in the Mac Terminal.
 
 ## Provider configuration
 Default `AI_PROVIDER=disabled`. Default `reasoning.effort=low` applies only to the default
@@ -95,4 +91,4 @@ OpenAI model. The OpenAI default model `gpt-5-mini` lives in
 - A pre-M3 backup of the Mac folder: `~/Desktop/ME/Projects/StockAgent_backup_2026-10-08_pre-M3`.
 
 ## Immediate next task
-TASKS M3-C2: the owner runs `scripts/live_smoke_test.py` once in the Mac Terminal and records the result.
+TASKS M3-C3: review and merge the pull request `claude/milestone-3-live-ai` → `main`.

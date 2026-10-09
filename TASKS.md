@@ -4,20 +4,13 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 must not be started until it is moved to *Current*.
 
 ## Current — Milestone 3 (close-out)
-- [ ] **M3-C2: Run the single live provider smoke test (owner, in the Mac's own Terminal).**
-  The AI sandboxes cannot reach `api.openai.com` (allowlist proxy, 403), so this runs outside them.
-  On the Mac, put `OPENAI_API_KEY` in `.env` (gitignored) and run
-  `AI_PROVIDER=openai python scripts/live_smoke_test.py` with Python 3.12+. It sends one synthetic packet and makes
-  at most 2 requests. Record provider, model, result, latency and tokens in STATUS.md.
-  If the default model `gpt-5-mini` is not available on the account, set `AI_MODEL`
-  (the default lives only in `config.DEFAULT_MODELS`).
-  Attempt 1 (2026-10-09): HTTP 429 / no credit. Attempt 2: malformed (likely truncated by hidden
-  reasoning); provider fixed (D-012). Attempt 3: guard false positives (flag echo, step numbers);
-  guard refined. Re-run; if it reports `incomplete`, raise AI_MAX_OUTPUT_TOKENS.
-  Done when the script prints `RESULT: OK` and the outcome is recorded.
-- [ ] **M3-C3: Merge `claude/milestone-3-live-ai` into `main`** after C1 and C2, via a PR on GitHub.
+- [ ] **M3-C3: Merge `claude/milestone-3-live-ai` into `main`** via the open pull request (owner review).
 
 ## Next
+- [ ] **Q-1: AI summary quality.** In the passing live run the customer summary mostly listed facts
+  ("₺61.000, 4, ₺70.230, 5 …") instead of interpreting them. Tune `prompts/business_agent.txt` so the
+  summary gives two or three interpretive sentences referencing at most the three or four most
+  relevant facts. Verify with mocked tests (structure only) and one live run. Do not loosen the guard.
 - [ ] **M5-P1 (preparation only): design note for "✨ AI Aksiyon Merkezi".**
   Write `docs/m5_action_center.md` covering how the static `dashboard.html` reaches the FastAPI
   endpoints (same-origin `uvicorn` serving the HTML, or CORS), which endpoints the tab uses
@@ -52,6 +45,8 @@ Milestone 5 must not be started until it is moved to *Current*.
   2020 should count, change `QUAL_YEARS` and that test together.
 
 ## Completed
+- [x] 2026-10-09 — M3-C2: live OpenAI smoke test PASSED (gpt-5-mini, low effort; attempt 2 after one
+  guard-triggered retry; 12 facts referenced, every value from Python). Details in STATUS.md.
 - [x] 2026-10-09 — M3-C1: both branches pushed and verified with `git ls-remote`; CI run
   `37972839805` on `claude/milestone-3-live-ai` @ `dfa57de` succeeded.
 - [x] 2026-10-09 — Repository bootstrap: Milestone 1+2 code imported into git, `.gitignore`
