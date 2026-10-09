@@ -1,0 +1,9 @@
+pandas
+openpyxl
+fastapi
+uvicorn
+pydantic>=2
+httpx
+pytest
+# optional, only if AI_PROVIDER=anthropic:
+# anthropic

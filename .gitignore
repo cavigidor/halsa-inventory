@@ -1,18 +1,50 @@
-# data & generated outputs — NEVER commit
+# =====================================================================
+# StockAgent — what must NEVER reach GitHub
+# Real ERP data, generated reports and secrets stay on the Mac only.
+# =====================================================================
+
+# --- private business data -------------------------------------------
 data/
 dashboards/
 eski/
+reports/
 *.xlsx
+*.xlsm
 *.xls
+*.csv
+
+# --- generated outputs that may contain real company data ------------
 dashboard.html
+*_dashboard.html
 agent_context.json
-agent_state.db
 
-# secrets
+# --- databases (action state, history, memory) -----------------------
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# --- logs -------------------------------------------------------------
+logs/
+*.log
+
+# --- secrets ------------------------------------------------------------
 .env
+.env.*
+!.env.example
+*.pem
+*.key
 
-# python
+# --- python / tooling ---------------------------------------------------
 __pycache__/
 *.pyc
+.venv/
+venv/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- OS / transfer leftovers ----------------------------------------------
 .DS_Store
+*.bundle
+*.tgz
