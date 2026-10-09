@@ -177,4 +177,5 @@ def _meta(res, provider):
     m = dict(res.meta or {})
     m.setdefault("provider", getattr(provider, "name", "?"))
     m.setdefault("model", getattr(provider, "model", None))
-    return {k: m.get(k) for k in ("provider", "model", "latency_ms", "input_tokens", "output_tokens")}
+    return {k: m.get(k) for k in ("provider", "model", "latency_ms", "input_tokens", "output_tokens",
+                                  "reasoning_tokens")}

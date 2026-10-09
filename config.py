@@ -67,6 +67,10 @@ DEFAULT_MODELS = {                       # the ONLY place default model names li
     "openai": "gpt-5-mini",
     "anthropic": "claude-sonnet-4-5",
 }
+# Reasoning effort applied ONLY when the provider's default model is used and
+# AI_REASONING_EFFORT is unset (gpt-5-mini is a reasoning model; "low" keeps hidden
+# reasoning from eating the output-token budget). Ignored for an overridden AI_MODEL.
+DEFAULT_REASONING_EFFORT = {"openai": "low"}
 
 
 def _env_int(name, default, lo, hi):
@@ -77,20 +81,27 @@ def _env_int(name, default, lo, hi):
     return max(lo, min(hi, v))
 
 
-def ai_settings():
-    """Current AI configuration from the environment (bounded, never secret)."""
-    provider = (os.environ.get("AI_PROVIDER", "") or "disabled").strip().lower()
+def ai_settings(provider=None):
+    """Current AI configuration from the environment (bounded, never secret).
+    `provider` overrides AI_PROVIDER (used by scripts/live_smoke_test.py)."""
+    provider = (provider or os.environ.get("AI_PROVIDER", "") or "disabled").strip().lower()
     if provider in ("", "none", "off", "false", "0"):
         provider = "disabled"
+    model_override = (os.environ.get("AI_MODEL", "") or "").strip()
+    effort = (os.environ.get("AI_REASONING_EFFORT", "") or "").strip().lower() or None
+    if effort is None and not model_override:
+        effort = DEFAULT_REASONING_EFFORT.get(provider)
+    if effort in ("none", "off"):
+        effort = None
     return {
         "provider": provider,
-        "model": (os.environ.get("AI_MODEL", "") or "").strip() or DEFAULT_MODELS.get(provider),
+        "model": model_override or DEFAULT_MODELS.get(provider),
         "timeout_seconds": _env_int("AI_TIMEOUT_SECONDS", 30, 1, 120),
-        "max_output_tokens": _env_int("AI_MAX_OUTPUT_TOKENS", 3000, 256, 16000),
+        "max_output_tokens": _env_int("AI_MAX_OUTPUT_TOKENS", 4000, 256, 16000),
         # SDK-level retries for transient errors only (429 / 5xx / connection). Bounded.
         "max_transient_retries": _env_int("AI_MAX_RETRIES", 1, 0, 3),
-        # optional, only for reasoning models (e.g. "low"); empty = not sent
-        "reasoning_effort": (os.environ.get("AI_REASONING_EFFORT", "") or "").strip().lower() or None,
+        # only for reasoning models (e.g. "low"); None = not sent. "none"/"off" disables the default.
+        "reasoning_effort": effort,
     }
 
 

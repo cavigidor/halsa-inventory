@@ -103,3 +103,16 @@ def test_dotenv_later_nonempty_value_wins_and_real_env_wins(tmp_path, monkeypatc
     assert os.environ["AI_PROVIDER"] == "openai"
     assert os.environ["AI_TIMEOUT_SECONDS"] == "45"
     assert os.environ["AI_MODEL"] == "from-real-env"
+
+
+def test_default_reasoning_effort_only_for_default_model(monkeypatch):
+    monkeypatch.delenv("AI_REASONING_EFFORT", raising=False)
+    assert C.ai_settings(provider="openai")["reasoning_effort"] == "low"       # default gpt-5-mini
+    monkeypatch.setenv("AI_MODEL", "some-non-reasoning-model")
+    assert C.ai_settings(provider="openai")["reasoning_effort"] is None        # override: not sent
+    monkeypatch.setenv("AI_REASONING_EFFORT", "medium")
+    assert C.ai_settings(provider="openai")["reasoning_effort"] == "medium"
+    monkeypatch.delenv("AI_MODEL")
+    monkeypatch.setenv("AI_REASONING_EFFORT", "none")
+    assert C.ai_settings(provider="openai")["reasoning_effort"] is None
+    assert C.ai_settings()["reasoning_effort"] is None                          # disabled provider

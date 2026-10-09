@@ -1,10 +1,11 @@
-"""OpenAI adaptörü — Responses API, resmi Python SDK, yapılandırılmış çıktı.
+"""OpenAI adaptörü — Responses API (responses.create), resmi Python SDK, yapılandırılmış çıktı.
 
 - The SDK is imported lazily: importing this module never requires `openai`.
 - The model receives ONLY the evidence packet (JSON) as input, never files,
   DataFrames, databases or directories.
-- Output is parsed against a Pydantic schema (Structured Outputs). Anything that
-  does not validate is returned as ERR_MALFORMED, never "repaired".
+- Output is constrained by a strict JSON schema derived from the Pydantic model
+  (Structured Outputs). Status and usage are checked first (truncation ->
+  ERR_INCOMPLETE); anything that does not validate is ERR_MALFORMED, never "repaired".
 - Every exception is mapped to a categorized AIResult; nothing is raised.
 - `store=False`: the request is not retained for later retrieval on OpenAI's side.
 """
@@ -71,11 +72,16 @@ class OpenAIProvider(AIProvider):
                    else "The 'openai' package is not installed.")
             return AIResult(available=False, error=msg, error_category=why, meta=meta)
 
+        try:
+            text_format = _text_format(response_model)
+        except Exception as e:
+            return AIResult(available=True, error=f"Could not build output schema ({type(e).__name__}).",
+                            error_category=ERR_MALFORMED, meta=meta)
         kwargs = dict(
             model=self.model,
             instructions=system_prompt,
             input=json.dumps(payload, ensure_ascii=False),
-            text_format=response_model,
+            text={"format": text_format},          # strict JSON schema (Structured Outputs)
             max_output_tokens=self.max_output_tokens,
             store=False,
         )
@@ -84,7 +90,9 @@ class OpenAIProvider(AIProvider):
 
         t0 = time.monotonic()
         try:
-            resp = self._get_client().responses.parse(**kwargs)
+            # create() (not parse()): we inspect status/usage BEFORE parsing, so a truncated
+            # answer is reported as "incomplete" with token counts instead of a bare ValidationError.
+            resp = self._get_client().responses.create(**kwargs)
         except Exception as e:  # mapped below; never re-raised
             meta["latency_ms"] = int((time.monotonic() - t0) * 1000)
             cat, msg = _classify_exception(e)
@@ -95,26 +103,51 @@ class OpenAIProvider(AIProvider):
         status = getattr(resp, "status", None)
         if status == "incomplete":
             reason = getattr(getattr(resp, "incomplete_details", None), "reason", None) or "unknown"
-            return AIResult(available=True, error=f"Model output incomplete ({reason}).",
+            hint = (" Raise AI_MAX_OUTPUT_TOKENS or lower AI_REASONING_EFFORT."
+                    if reason == "max_output_tokens" else "")
+            return AIResult(available=True, error=f"Model output incomplete ({reason}).{hint}",
                             error_category=ERR_INCOMPLETE, meta=meta)
         if _has_refusal(resp):
             return AIResult(available=True, error="Model refused the request.",
                             error_category=ERR_REFUSAL, meta=meta)
 
-        parsed = getattr(resp, "output_parsed", None)
-        if parsed is None:
-            return AIResult(available=True, error="No structured output returned.",
+        text = _final_text(resp)
+        if not text:
+            return AIResult(available=True, error=f"No output text returned (status={status}).",
                             error_category=ERR_MALFORMED, meta=meta)
         try:
-            data = parsed.model_dump() if hasattr(parsed, "model_dump") else dict(parsed)
-            response_model.model_validate(data)        # validate again, independently
+            parsed = response_model.model_validate_json(text)
+            data = parsed.model_dump()
         except Exception as e:
-            return AIResult(available=True, error=f"Schema validation failed: {type(e).__name__}",
+            kinds = sorted({err.get("type", "?") for err in getattr(e, "errors", lambda: [])()})[:4]
+            return AIResult(available=True,
+                            error=(f"Schema validation failed ({type(e).__name__}: {', '.join(kinds) or '?'}; "
+                                   f"status={status}, output_chars={len(text)})."),
                             error_category=ERR_MALFORMED, meta=meta)
-        return AIResult(available=True, data=data, raw=getattr(resp, "output_text", None), meta=meta)
+        return AIResult(available=True, data=data, raw=text, meta=meta)
 
 
 # ---------------- helpers ----------------
+def _text_format(response_model):
+    """Strict json_schema text format for a Pydantic model, built by the official SDK helper."""
+    from openai.lib._parsing._responses import type_to_text_format_param
+    return type_to_text_format_param(response_model)
+
+
+def _final_text(resp):
+    """Text of the final answer message (ignores non-final phases, e.g. commentary)."""
+    texts = []
+    for item in getattr(resp, "output", None) or []:
+        if getattr(item, "type", None) not in (None, "message"):
+            continue
+        if getattr(item, "phase", None) not in (None, "final_answer"):
+            continue
+        for c in getattr(item, "content", None) or []:
+            if getattr(c, "type", None) == "output_text" and isinstance(getattr(c, "text", None), str):
+                texts.append(c.text)
+    return texts[-1] if texts else None
+
+
 def _usage(resp):
     u = getattr(resp, "usage", None)
     if u is None:
@@ -124,6 +157,9 @@ def _usage(resp):
         v = getattr(u, k, None)
         if isinstance(v, int):
             out[k] = v
+    r = getattr(getattr(u, "output_tokens_details", None), "reasoning_tokens", None)
+    if isinstance(r, int):
+        out["reasoning_tokens"] = r
     return out
 
 

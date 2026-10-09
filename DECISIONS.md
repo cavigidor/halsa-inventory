@@ -76,3 +76,16 @@ Don't rewrite earlier entries. If one is superseded, add a new entry that says s
 ### D-011 · 2026-10-09 · Python 3.12+ is required
 - **Decision:** `dashboard_builder.py` uses PEP 701 nested-quote f-strings, so CI and the docs
   pin 3.12.
+
+### D-012 · 2026-10-09 · OpenAI calls use `responses.create()` + strict schema; default reasoning effort "low"
+- **Decision:** replace `responses.parse()` with `responses.create(text={"format": <strict json_schema
+  from the Pydantic model via the SDK helper>})`. The provider checks `status`, `incomplete_details`
+  and refusals and records usage (including `reasoning_tokens`) before validating the final-answer
+  text with Pydantic. The default model (`gpt-5-mini`) is sent `reasoning.effort=low` unless
+  `AI_REASONING_EFFORT` is set (`none` disables it), and the default `AI_MAX_OUTPUT_TOKENS` is 4000.
+- **Rationale:** the first live call with credit failed as an opaque `ValidationError` after 20 s.
+  `parse()` raises before the response can be inspected, so truncation by hidden reasoning tokens
+  could not be told apart from bad output.
+- **Consequences:** failures now name the cause (`incomplete` + a hint, or `malformed` with the
+  pydantic error types and output length, never the content). Structured Outputs are still strict,
+  and the D-008 constraints are unchanged.

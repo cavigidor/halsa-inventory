@@ -5,6 +5,8 @@ real `openai` SDK exception classes, so the error mapping is tested against the 
 """
 from types import SimpleNamespace
 
+import json
+
 import httpx
 import openai
 import pytest
@@ -23,7 +25,7 @@ class FakeResponses:
     def __init__(self, result=None, exc=None):
         self.result, self.exc, self.kwargs = result, exc, None
 
-    def parse(self, **kwargs):
+    def create(self, **kwargs):
         self.kwargs = kwargs
         if self.exc:
             raise self.exc
@@ -34,13 +36,23 @@ def fake_client(result=None, exc=None):
     return SimpleNamespace(responses=FakeResponses(result, exc))
 
 
-def fake_response(parsed=None, status="completed", refusal=False, incomplete_reason=None):
-    content = [SimpleNamespace(type="refusal", refusal="no")] if refusal else [SimpleNamespace(type="output_text")]
+def fake_response(text=None, status="completed", refusal=False, incomplete_reason=None, phase=None,
+                  reasoning_tokens=900):
+    """Shape of a Responses API result: output[] message items with output_text content."""
+    if refusal:
+        content = [SimpleNamespace(type="refusal", refusal="no")]
+    else:
+        content = [SimpleNamespace(type="output_text", text=text)] if text is not None else []
     return SimpleNamespace(
-        status=status, output_parsed=parsed, output_text="{}",
+        status=status,
         incomplete_details=SimpleNamespace(reason=incomplete_reason) if incomplete_reason else None,
-        output=[SimpleNamespace(content=content)],
-        usage=SimpleNamespace(input_tokens=120, output_tokens=40, total_tokens=160))
+        output=[SimpleNamespace(type="reasoning", content=None),
+                SimpleNamespace(type="message", phase=phase, content=content)],
+        usage=SimpleNamespace(input_tokens=120, output_tokens=40, total_tokens=160,
+                              output_tokens_details=SimpleNamespace(reasoning_tokens=reasoning_tokens)))
+
+
+GOOD_JSON = json.dumps(GOOD, ensure_ascii=False)
 
 
 def _req():
@@ -58,12 +70,16 @@ def test_follows_existing_interface():
 
 
 def test_success_response_is_validated_and_metered():
-    c = fake_client(fake_response(parsed=S.MessageDraftAI(**GOOD)))
+    c = fake_client(fake_response(text=GOOD_JSON))
     r = OpenAIProvider(SETTINGS, client=c).generate_structured("SYS", PAYLOAD, S.MessageDraftAI)
     assert r.available and r.error is None and r.data == GOOD
     assert r.meta["input_tokens"] == 120 and r.meta["output_tokens"] == 40 and r.meta["model"] == "test-model"
+    assert r.meta["reasoning_tokens"] == 900
     kw = c.responses.kwargs
-    assert kw["text_format"] is S.MessageDraftAI and kw["instructions"] == "SYS"
+    fmt = kw["text"]["format"]
+    assert fmt["type"] == "json_schema" and fmt["strict"] is True and fmt["name"] == "MessageDraftAI"
+    assert fmt["schema"]["additionalProperties"] is False
+    assert kw["instructions"] == "SYS"
     assert kw["max_output_tokens"] == 500 and kw["store"] is False and kw["model"] == "test-model"
     assert isinstance(kw["input"], str)              # JSON evidence only — no files/tools
     assert "tools" not in kw and "file_ids" not in kw
@@ -88,27 +104,42 @@ def test_failures_are_categorized_never_raised(exc, category):
     assert "sk-" not in (r.error or "")
 
 
-def test_malformed_response_no_parsed_output():
-    r = OpenAIProvider(SETTINGS, client=fake_client(fake_response(parsed=None))) \
+def test_no_output_text_is_malformed():
+    r = OpenAIProvider(SETTINGS, client=fake_client(fake_response(text=None))) \
         .generate_structured("S", PAYLOAD, S.MessageDraftAI)
     assert r.data is None and r.error_category == "malformed"
 
 
-def test_schema_invalid_parsed_output():
-    bad = SimpleNamespace(model_dump=lambda: {"message": "x"})     # missing required fields
-    r = OpenAIProvider(SETTINGS, client=fake_client(fake_response(parsed=bad))) \
+def test_schema_invalid_output_is_malformed_with_safe_diagnostics():
+    r = OpenAIProvider(SETTINGS, client=fake_client(fake_response(text='{"message": "x"}'))) \
         .generate_structured("S", PAYLOAD, S.MessageDraftAI)
     assert r.data is None and r.error_category == "malformed"
+    assert "missing" in r.error and "output_chars=" in r.error and '"x"' not in r.error   # no content leaked
+
+
+def test_truncated_json_with_completed_status_is_malformed():
+    r = OpenAIProvider(SETTINGS, client=fake_client(fake_response(text=GOOD_JSON[:25]))) \
+        .generate_structured("S", PAYLOAD, S.MessageDraftAI)
+    assert r.error_category == "malformed" and "json_invalid" in r.error
 
 
 def test_incomplete_and_refusal():
-    r = OpenAIProvider(SETTINGS, client=fake_client(fake_response(status="incomplete",
+    r = OpenAIProvider(SETTINGS, client=fake_client(fake_response(text=GOOD_JSON[:25], status="incomplete",
                                                                   incomplete_reason="max_output_tokens"))) \
         .generate_structured("S", PAYLOAD, S.MessageDraftAI)
-    assert r.error_category == "incomplete"
+    assert r.error_category == "incomplete" and "AI_MAX_OUTPUT_TOKENS" in r.error
+    assert r.meta["output_tokens"] == 40 and r.meta["reasoning_tokens"] == 900      # usage kept on failure
     r = OpenAIProvider(SETTINGS, client=fake_client(fake_response(refusal=True))) \
         .generate_structured("S", PAYLOAD, S.MessageDraftAI)
     assert r.error_category == "refusal"
+
+
+def test_non_final_phase_text_is_ignored():
+    resp = fake_response(text=GOOD_JSON)
+    resp.output.insert(1, SimpleNamespace(type="message", phase="commentary",
+                                          content=[SimpleNamespace(type="output_text", text="not json")]))
+    r = OpenAIProvider(SETTINGS, client=fake_client(resp)).generate_structured("S", PAYLOAD, S.MessageDraftAI)
+    assert r.data == GOOD
 
 
 def test_missing_key_is_unavailable_not_an_error(monkeypatch):
@@ -128,9 +159,9 @@ def test_real_client_construction_uses_finite_timeout_and_bounded_retries(monkey
 
 
 def test_reasoning_effort_only_sent_when_configured():
-    c = fake_client(fake_response(parsed=S.MessageDraftAI(**GOOD)))
+    c = fake_client(fake_response(text=GOOD_JSON))
     OpenAIProvider({**SETTINGS, "reasoning_effort": "low"}, client=c).generate_structured("S", PAYLOAD, S.MessageDraftAI)
     assert c.responses.kwargs["reasoning"] == {"effort": "low"}
-    c2 = fake_client(fake_response(parsed=S.MessageDraftAI(**GOOD)))
+    c2 = fake_client(fake_response(text=GOOD_JSON))
     OpenAIProvider(SETTINGS, client=c2).generate_structured("S", PAYLOAD, S.MessageDraftAI)
     assert "reasoning" not in c2.responses.kwargs

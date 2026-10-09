@@ -21,8 +21,7 @@ def main():
     from services.agent import BusinessActionAgent
     from services.ai.openai_provider import OpenAIProvider
 
-    settings = {**C.ai_settings(), "provider": "openai"}
-    settings["model"] = settings["model"] or C.DEFAULT_MODELS["openai"]
+    settings = C.ai_settings(provider="openai")
     calls = []
     agent = BusinessActionAgent(OpenAIProvider(settings), recorder=calls.append)
     cust = {"customer_code": "900.00.0001", "name": "Sentetik T1 Kirtasiye", "rep": "TEMSILCI-A",
@@ -31,10 +30,12 @@ def main():
                       {"y": 2025, "spend": 53000, "orders": 3}]}
     packet = EV.customer_packet(cust)
     data, r = agent.analyze_customer(cust)
-    print(f"provider=openai model={settings['model']}")
+    print(f"provider=openai model={settings['model']} reasoning_effort={settings.get('reasoning_effort')} "
+          f"max_output_tokens={settings['max_output_tokens']}")
     for c in calls:
         print(f"  attempt={c['attempt']} success={c['success']} category={c.get('error_category')} "
-              f"latency_ms={c.get('latency_ms')} tokens_in={c.get('input_tokens')} tokens_out={c.get('output_tokens')}")
+              f"latency_ms={c.get('latency_ms')} tokens_in={c.get('input_tokens')} "
+              f"tokens_out={c.get('output_tokens')} reasoning_tokens={c.get('reasoning_tokens')}")
     if data is None:
         print(f"RESULT: FAILED ({r['category']}): {r['reason']}")
         return 1

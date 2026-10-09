@@ -42,6 +42,7 @@ see below), then merge to `main`.
 | After M3, cloud, no data | `python -m pytest -q` | **106 passed, 7 skipped (local_data), 1 xfailed** |
 | After .env-loader fix, cloud, no data | `python -m pytest -q` | **107 passed, 7 skipped, 1 xfailed** |
 | After quota category, cloud, no data | `python -m pytest -q` | **108 passed, 7 skipped, 1 xfailed** |
+| After create()+diagnostics, cloud, no data | `python -m pytest -q` | **111 passed, 7 skipped, 1 xfailed** |
 | After M3, Mac VM, real 5 Oct 2026 data | `python -m pytest -q` | **113 passed, 1 xfailed** |
 
 The xfail is the strict known issue DQ-1 (dashboard margin treats missing cost as zero).
@@ -57,11 +58,18 @@ ATTEMPTED 2026-10-09 by the owner in the Mac Terminal (`python scripts/live_smok
 almost certainly `insufficient_quota` — no credit on the OpenAI API account yet. The pipeline
 behaved as designed: categorized failure, no agent-level retry, no fabricated output.
 Follow-up: quota is now its own category (`quota`) with a billing hint, separate from transient
-`rate_limit`. Re-run after adding API credit (TASKS M3-C2). The sandboxes still cannot reach
+`rate_limit`.
+Second attempt (after adding credit): `attempt=1 category=malformed latency_ms=20621`, SDK
+`ValidationError`. Most likely the reasoning model spent the 3000-token output budget on hidden
+reasoning and the JSON was cut off (`responses.parse()` raised before status/usage could be read).
+Fix (D-012): provider now uses `responses.create()` with the same strict JSON schema, checks
+`status`/`incomplete_details` and records usage incl. `reasoning_tokens` BEFORE parsing; the default
+model gets `reasoning.effort=low`; default output cap 4000. Re-run pending (TASKS M3-C2). The sandboxes still cannot reach
 `api.openai.com`, so the run stays on the Mac.
 
 ## Provider configuration
-Default `AI_PROVIDER=disabled`. The OpenAI default model `gpt-5-mini` lives in
+Default `AI_PROVIDER=disabled`. Default `reasoning.effort=low` applies only to the default
+OpenAI model. The OpenAI default model `gpt-5-mini` lives in
 `config.DEFAULT_MODELS`. It has not been verified live; override it with `AI_MODEL`.
 
 ## Not implemented / known issues
