@@ -4,14 +4,18 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 must not be started until it is moved to *Current*.
 
 ## Current
-- [ ] **Merge PR for `claude/q1-summary-quality`** (owner review).
-- [ ] **M5-P1 (preparation only; next after the merge): design note for "✨ AI Aksiyon Merkezi".**
-  Write `docs/m5_action_center.md` covering how the static `dashboard.html` reaches the FastAPI
-  endpoints (same-origin `uvicorn` serving the HTML, or CORS), which endpoints the tab uses
-  (`/api/agent/actions`, complete/defer/dismiss, draft-message), how the evidence chips
-  (`evidence[]`) are shown, and the offline and AI-disabled states. No UI code yet.
+- [ ] **M5-P1 review (owner):** read `docs/m5_action_center.md` and answer its §11 open questions
+  (who uses it and where, AI trigger, number of actions with AI text, draft channels, data refresh).
+  After approval, move M5-1 to Current and record the accepted decisions in DECISIONS.md.
 
 ## Next
+- [ ] **M5-1 Backend prerequisites** (design §7 items 1–5): `GET /` serves `dashboard.html`;
+  `GET /api/agent/actions?ai=0|1` (default 0, no paid call on load); `POST /api/agent/actions/enrich`
+  (batches of 5, `ai_cache` keyed by action_id + prompt version + model); `POST /api/context/refresh`;
+  warm-up thread with `context_ready` in `/api/health`; required `X-StockAgent: 1` header on every
+  POST. Tests per design §9. No UI.
+- [ ] **M5-2 Read-only AI tab** (§4, §6, §8). **M5-3** action state with undo. **M5-4** drafts and the
+  customer drawer. **M5-5** Playwright smoke in CI, mobile layout, owner live check.
 - [ ] **DQ-1: Fix dashboard margin missing-cost handling.**
   `m_margin` uses `fillna(0)` on `Net_Tutar_Maliyet_Dusulmus`, so a missing cost counts as zero
   profit and margin is understated. Exclude rows without cost from both revenue and profit in
@@ -46,6 +50,8 @@ Milestone 5 must not be started until it is moved to *Current*.
   2020 should count, change `QUAL_YEARS` and that test together.
 
 ## Completed
+- [x] 2026-10-09 — PR #2 (Q-1) merged into `main` (`a34ccac`); CI green on `main`.
+- [x] 2026-10-09 — M5-P1: design note `docs/m5_action_center.md` written (awaiting owner review).
 - [x] 2026-10-09 — Q-1: AI summary quality. Prompt and schema guidance, deterministic tidy (D-014),
   numeric-only `missing`, and quality measurement. Live run 4 accepted (see STATUS.md).
 - [x] 2026-10-09 — M3-C3: PR #1 merged into `main` (`60dffdb`). Milestone 3 complete.

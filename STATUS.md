@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-09 (M3 merged to `main`; Q-1 summary quality done on `claude/q1-summary-quality`, PR pending)._
+_Updated 2026-10-09 (M3 and Q-1 merged to `main` @ `a34ccac`; M5-P1 design note written, awaiting review)._
 
 ## Git
 - **Branch:** `claude/milestone-3-live-ai`, based on `main`.
@@ -90,7 +90,7 @@ OpenAI model. The OpenAI default model `gpt-5-mini` lives in
 - Real exports in `./data` (Mac): `2020-5 ekim satışlar.xlsx`, `STOK 5 Ekim 2026.xlsx`, `Cari 5 Ekim 2026.xlsx`.
 - A pre-M3 backup of the Mac folder: `~/Desktop/ME/Projects/StockAgent_backup_2026-10-08_pre-M3`.
 
-## Q-1 (done; awaiting merge)
+## Q-1 (done; merged in PR #2)
 Branch `claude/q1-summary-quality` from `main` @ `60dffdb` (PR #1 merged; Milestone 3 complete).
 Writing-quality prompt rules, schema field guidance and `services/ai/quality.py` measurement are
 implemented.
@@ -125,5 +125,11 @@ Residual model-judgment notes, not formatting: one risk still mentions missing m
 out-of-scope warning, a fact label is capitalized mid-sentence, and one risk is vague. Logged as an
 optional follow-up (TASKS Later: Q-2); not a reason to keep iterating.
 
+## M5-P1 (design note)
+`docs/m5_action_center.md` (branch `claude/m5-p1-design-note`). Proposes: serving the dashboard from
+FastAPI (same origin, no CORS); AI only on a button, with an SQLite cache and batches of 5; a fact vs AI
+separation on cards; a custom-header guard on POSTs; escaping all AI text; warm-up and a data-date
+check; state handling; a test plan; and five bounded M5 slices. No code changed.
+
 ## Immediate next task
-Merge the Q-1 pull request. Then TASKS M5-P1: the design note for "✨ AI Aksiyon Merkezi" (docs only, no UI code).
+Owner reviews the design note and answers §11. Then M5-1 (backend prerequisites).
