@@ -11,7 +11,8 @@ Milestone 5 must not be started until it is moved to *Current*.
   references per field, list length and jargon. It is measured and logged, never enforced, and never
   touches numbers. The smoke test prints a Q-1 verdict.
   Live run 1: metric OK but the text had tacked-on facts, duplicates and listed missing fields;
-  fixed (packet relevance, sharper quality checks, prompt). Remaining: live run 2 on this branch.
+  fixed (packet relevance, sharper quality checks, prompt). Live run 2: the model repeated them, so a
+  deterministic tidy step was added (D-014). Remaining: live run 3 on this branch.
   Done when it prints `RESULT: OK` and `quality (Q-1): OK`, then merge via PR.
   If quality still shows ISSUES, tune the prompt once more; do not loosen the numeric guard.
 

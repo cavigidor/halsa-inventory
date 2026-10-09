@@ -40,10 +40,12 @@ YAZIM KALİTESİ (okuyucu: şirket sahibi; kısa ve karar odaklı):
   En önemli en fazla 4 gerçeği [[FACT:..]] ile an; geri kalanını evidence_fact_ids'e yaz.
 - Yıllık ciro/sipariş değerlerini art arda dizme ("[[FACT:F006]], [[FACT:F007]], [[FACT:F008]]" gibi).
   Gerekirse eğilimi sözle anlat ("son üç yılda düzenli alım vardı") ve tek bir gerçek an.
+- Risk ve fırsat maddeleri ile önerilen aksiyon SAYISIZ, düz metindir: buralarda [[FACT:..]]
+  KULLANMA (dayandığın gerçekleri evidence_fact_ids'e yaz; sayılar kullanıcıya ayrıca gösterilir).
 - Risk ve fırsat maddeleri tek kısa cümle; en fazla 3 madde.
 - Önerilen aksiyon somut olsun: kim, ne yapacak (ör. "Temsilci bu hafta arayıp ihtiyaç sorsun").
 - "Paket", "fact", "kanıt paketi" gibi teknik kelimeleri kullanma; "kayıtlarda" de.
-- Eksik veriyi en fazla tek cümlede belirt; eksik alanların adlarını tek tek sayma ve
+- "missing" ve "warnings" bilgi notudur, aksiyon konusu değildir. Eksik veriyi en fazla tek cümlede belirt; eksik alanların adlarını tek tek sayma ve
   "eksik kayıtları tamamlayın" gibi öneri yazma (veri tamamlama senin görevin değil).
 - Bir gerçeği cümlenin SONUNA eklenti gibi yapıştırma ("...sağlanabilir; [[FACT:F002]]" YANLIŞ).
   Gerçeği cümlenin içinde anlamlı kullan; çoğu madde HİÇ gerçek referansı içermeyebilir.

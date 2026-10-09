@@ -19,7 +19,7 @@ _JARGON = re.compile(r"\b(paket|paketi|pakette|fact|kanıt paketi|flag)\b", re.I
 
 
 # a fact reference glued onto the end of a clause: "...sağlanabilir; [[FACT:F002]]" / "... [[FACT:F009]]."
-_DANGLING = re.compile(r"(?:[;,:]|\s)\s*\[\[FACT:F\d{3,4}\]\]\s*[.!]?\s*$")
+_DANGLING = re.compile(r"[;,]\s*\[\[FACT:F\d{3,4}\]\]\s*[.!]?\s*$")
 
 
 def _resolved_dupes(text, packet):
@@ -72,6 +72,9 @@ def assess(data, packet=None):
                 issues.append(f"{key}: '{d}' written and referenced twice")
             if _missing_listed(val, packet) >= 2:
                 issues.append(f"{key}: lists missing fields one by one")
+            tmp = []
+            _tidy_text(val, key, packet, tmp)
+            issues.extend(f"needs tidy: {x}" for x in tmp)
         elif isinstance(val, list) and all(isinstance(v, str) for v in val):
             counts = [len(FACT_TOKEN.findall(v)) for v in val]
             for i, v in enumerate(val):
@@ -79,6 +82,9 @@ def assess(data, packet=None):
                     issues.append(f"{key}[{i}]: fact reference tacked onto the end")
                 for d in _resolved_dupes(v, packet):
                     issues.append(f"{key}[{i}]: '{d}' written and referenced twice")
+                tmp = []
+                _tidy_text(v, key, packet, tmp)
+                issues.extend(f"needs tidy: {x}" for x in tmp)
             fields[key] = {"items": len(val), "max_item_placeholders": max(counts, default=0)}
             lim = MAX_LIST_ITEMS.get(key)
             if lim is not None and len(val) > lim:
@@ -92,4 +98,123 @@ def assess(data, packet=None):
                     for k, v in sub["fields"].items():
                         fields[f"{key}[{i}].{k}"] = v
                     issues.extend(f"{key}[{i}].{x}" for x in sub["issues"])
-    return {"fields": fields, "issues": issues}
+    return {"fields": fields, "issues": list(dict.fromkeys(issues))}
+
+
+# =====================================================================================
+# Deterministic tidy-up (Q-1 iteration 3)
+# The model tends to use [[FACT:..]] like a citation footnote, gluing one onto the end of
+# sentences. Prompt rules did not stop it, so Python normalizes the prose. This step ONLY
+# REMOVES placeholders / technical tokens (moving their ids into evidence_fact_ids); it can
+# never add a number or change a value. It runs after grounding.check and before resolve.
+# =====================================================================================
+NO_INLINE_FIELDS = {"risks", "opportunities", "recommended_action", "recommendation"}
+_PH = r"\[\[FACT:F\d{3,4}\]\]"
+_PH_RE = re.compile(_PH)
+_PAREN = re.compile(r"\s*\(([^()]*)\)")
+_SEP_DANGLING = re.compile(r"\s*[;,]\s*%s(?:\s*(?:[,;/]|ve)\s*%s)*\s*(?=[.!?](?:\s|$)|$)" % (_PH, _PH))
+_END_AFTER_WORD = re.compile(r"(\S+)(\s+%s)(?=\s*[.!?](?:\s|$)|\s*$)" % _PH)
+# common Turkish finite-verb endings (clause is complete -> a following fact is a citation)
+_VERB_END = re.compile(r"(?:yor|abilir|ebilir|amaz|emez|dır|dir|dur|dür|tır|tir|tur|tür|malı|meli|"
+                       r"sın|sin|sun|sün|sınlar|sinler|ın|in|un|ün|ayın|eyin|acak|ecek|mış|miş|muş|müş|"
+                       r"dı|di|du|dü|tı|ti|tu|tü)$", re.IGNORECASE)
+_TECH_TOKEN = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$")
+
+
+def _clean_spacing(t):
+    t = re.sub(r"\(\s*\)", "", t)
+    t = re.sub(r"[ \t]{2,}", " ", t)
+    t = re.sub(r"\s+([.,;:!?)])", r"\1", t)
+    t = re.sub(r"([;,])\s*([.!?])", r"\2", t)
+    t = re.sub(r"[;,]\s*$", "", t)
+    return t.strip()
+
+
+def _tidy_text(text, field, packet, fixes):
+    moved = []
+    t = text
+    if field in NO_INLINE_FIELDS:
+        found = _PH_RE.findall(t)
+        if found:
+            moved += [m[7:-2] for m in found]
+            t = _PH_RE.sub("", t)
+            fixes.append(f"{field}: {len(found)} inline fact ref(s) moved to evidence")
+    else:
+        # (a) parenthetical groups made only of fact refs, or of a technical identifier
+        def paren(m):
+            inner = m.group(1)
+            rest = re.sub(r"\bve\b", " ", _PH_RE.sub(" ", inner))
+            if _PH_RE.search(inner) and not re.sub(r"[\s,;/–\-]", "", rest):
+                moved.extend(x[7:-2] for x in _PH_RE.findall(inner))
+                fixes.append(f"{field}: parenthetical fact refs moved to evidence")
+                return ""
+            return m.group(0)
+        t = _PAREN.sub(paren, t)
+        # (b) refs glued after ';' / ',' at the end of a clause
+        def sep(m):
+            moved.extend(x[7:-2] for x in _PH_RE.findall(m.group(0)))
+            fixes.append(f"{field}: tacked-on fact ref moved to evidence")
+            return ""
+        t = _SEP_DANGLING.sub(sep, t)
+        # (c) ref right after a finished verb at sentence end ("... başlatabilir [[FACT:F002]].")
+        def verb(m):
+            word = m.group(1).rstrip(".,;:!?\"')")
+            if _VERB_END.search(word):
+                moved.extend(x[7:-2] for x in _PH_RE.findall(m.group(2)))
+                fixes.append(f"{field}: fact ref after a complete clause moved to evidence")
+                return m.group(1)
+            return m.group(0)
+        t = _END_AFTER_WORD.sub(verb, t)
+        # (d) text facts both written out and referenced -> drop the reference
+        if packet is not None:
+            plain = _PH_RE.sub(" ", t)
+            for fid in dict.fromkeys(x[7:-2] for x in _PH_RE.findall(t)):
+                f = packet.by_id.get(fid)
+                if f and f["kind"] in ("text", "buyer") and len(f["display_value"]) >= 2 \
+                        and f["display_value"] in plain:
+                    t = re.sub(r"\s*[;,]?\s*\[\[FACT:%s\]\]" % fid, "", t)
+                    moved.append(fid)
+                    fixes.append(f"{field}: duplicated '{f['display_value']}' reference removed")
+    # (e) technical identifiers in parentheses, e.g. "(lapsed_no_2026_purchase)"
+    def tech(m):
+        if _TECH_TOKEN.match(m.group(1).strip()):
+            fixes.append(f"{field}: technical label removed")
+            return ""
+        return m.group(0)
+    t = _PAREN.sub(tech, t)
+    return _clean_spacing(t), moved
+
+
+def tidy(data, packet=None, _field=None):
+    """Return (tidied_copy, fixes). Moved fact ids are appended to the nearest evidence_fact_ids."""
+    fixes = []
+    if not isinstance(data, dict):
+        return data, fixes
+    out, moved_here = {}, []
+    for key, val in data.items():
+        if key in NON_PROSE_FIELDS or key == "warnings":
+            out[key] = val
+        elif isinstance(val, str):
+            out[key], mv = _tidy_text(val, key, packet, fixes)
+            moved_here += mv
+        elif isinstance(val, list) and all(isinstance(v, str) for v in val):
+            items = []
+            for v in val:
+                tv, mv = _tidy_text(v, key, packet, fixes)
+                moved_here += mv
+                if tv:
+                    items.append(tv)
+            out[key] = items
+        elif isinstance(val, list):
+            sub_items = []
+            for item in val:
+                ti, f = tidy(item, packet)
+                fixes += f
+                sub_items.append(ti)
+            out[key] = sub_items
+        else:
+            out[key] = val
+    if moved_here:
+        ev = list(out.get("evidence_fact_ids", []) or [])
+        out["evidence_fact_ids"] = list(dict.fromkeys(ev + moved_here))
+    return out, fixes

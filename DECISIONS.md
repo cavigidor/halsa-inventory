@@ -100,3 +100,16 @@ Don't rewrite earlier entries. If one is superseded, add a new entry that says s
 - **Consequences:** the guard is still strict about amounts, percentages, counts and ratios (tests
   cover numbers inside enumerated sentences). The prompt also asks for no numbering and no raw
   flag names.
+
+### D-014 · 2026-10-09 · Deterministic prose tidy-up after grounding (writing quality)
+- **Decision:** after `grounding.check` and before `resolve`, `services/ai/quality.tidy` normalizes the
+  model's prose. Risks, opportunities and recommendations are plain text, so inline `[[FACT:..]]` refs
+  move to `evidence_fact_ids` (the UI shows them as evidence). In other fields, citation-style refs
+  (parenthetical groups, after ';' or ',' at a clause end, after a finished Turkish verb, a text fact
+  already written out) and technical labels in parentheses are removed.
+- **Rationale:** two prompt iterations did not stop `gpt-5-mini` from gluing fact refs onto sentence
+  ends. A deterministic fix is reliable and testable, as the numeric guard is.
+- **Safety:** tidy only removes placeholders and labels. It cannot add or alter a number, and its
+  output is re-validated against the schema. Grounding still runs first on the raw output.
+- **Consequences:** some numbers appear only as evidence chips rather than in the sentence. Quality
+  is logged for both the raw and the tidied output, so prompt drift stays visible.

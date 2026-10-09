@@ -157,11 +157,11 @@ _STRICT = ConfigDict(extra="forbid")
 _D_SUMMARY = ("2-3 kısa YORUM cümlesi: durum ne anlama geliyor ve neden önemli. Gerçekleri sıralama; "
               "en önemli en fazla 4 gerçeği [[FACT:..]] ile an. Yıllık rakamları art arda dizme. "
               "'Paket' kelimesini kullanma.")
-_D_POINTS = ("Her madde tek kısa cümle; madde sayısı en fazla 3. [[FACT:..]] gerekmiyorsa kullanma "
-             "(en fazla 1, cümlenin içinde; sona eklenti olarak değil).")
+_D_POINTS = ("Her madde tek kısa cümle, düz metin; madde sayısı en fazla 3. [[FACT:..]] KULLANMA "
+             "(dayanakları evidence_fact_ids'e yaz).")
 _D_INTERP = "1-2 kısa yorum cümlesi; en fazla 2 [[FACT:..]]; gerçekleri sıralama."
-_D_ACTION = ("Somut, uygulanabilir sonraki ticari adım (kim, ne yapmalı); 1-2 cümle; numaralandırma "
-             "yok; en fazla 1 [[FACT:..]]; veri tamamlama önerme.")
+_D_ACTION = ("Somut, uygulanabilir sonraki ticari adım (kim, ne yapmalı); 1-2 cümle; düz metin, "
+             "[[FACT:..]] KULLANMA; numaralandırma yok; veri tamamlama önerme.")
 _D_EVID = "Metindeki iddiaların dayandığı tüm fact_id'ler (metinde anılmayanlar da olabilir)."
 
 
