@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-09 (M3 merged to `main`; Q-1 summary quality in progress on `claude/q1-summary-quality`)._
+_Updated 2026-10-09 (M3 merged to `main`; Q-1 summary quality done on `claude/q1-summary-quality`, PR pending)._
 
 ## Git
 - **Branch:** `claude/milestone-3-live-ai`, based on `main`.
@@ -90,7 +90,7 @@ OpenAI model. The OpenAI default model `gpt-5-mini` lives in
 - Real exports in `./data` (Mac): `2020-5 ekim satışlar.xlsx`, `STOK 5 Ekim 2026.xlsx`, `Cari 5 Ekim 2026.xlsx`.
 - A pre-M3 backup of the Mac folder: `~/Desktop/ME/Projects/StockAgent_backup_2026-10-08_pre-M3`.
 
-## Q-1 (in progress)
+## Q-1 (done; awaiting merge)
 Branch `claude/q1-summary-quality` from `main` @ `60dffdb` (PR #1 merged; Milestone 3 complete).
 Writing-quality prompt rules, schema field guidance and `services/ai/quality.py` measurement are
 implemented.
@@ -116,7 +116,14 @@ as missing, and the margin warning).
 Fixes: tidy runs until stable (max 3 passes) and handles ref sequences; a clause made of 3+ refs is
 removed (ids kept as evidence) and the next sentence re-capitalized; `missing` now lists only numeric
 facts (empty descriptive fields are omitted); the margin warning says margin is out of scope.
-Standard suite: 137 passed, 7 skipped, 1 xfailed. Live run 4 is pending.
+Standard suite: 137 passed, 7 skipped, 1 xfailed.
+**Live run 4: ACCEPTED.** `RESULT: OK` on the first attempt (8.3 s, 2749 in / 1287 out / 832 reasoning tokens),
+12 facts referenced, every value from Python. The model output had 2 quality issues; tidy applied 1 fix
+and the final quality check was OK. Read by a human: the summary interprets rather than lists, the
+opportunities are clean, and the action is concrete (who, what, when).
+Residual model-judgment notes, not formatting: one risk still mentions missing margin data despite the
+out-of-scope warning, a fact label is capitalized mid-sentence, and one risk is vague. Logged as an
+optional follow-up (TASKS Later: Q-2); not a reason to keep iterating.
 
 ## Immediate next task
-TASKS Q-1: live smoke run 2 on `claude/q1-summary-quality`; expect `quality (Q-1): OK` and clean reading.
+Merge the Q-1 pull request. Then TASKS M5-P1: the design note for "✨ AI Aksiyon Merkezi" (docs only, no UI code).
