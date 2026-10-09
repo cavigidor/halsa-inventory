@@ -3,19 +3,15 @@
 Rules: one *Current* task at a time. Each task must be executable in one bounded session.
 Milestone 5 must not be started until it is moved to *Current*.
 
-## Current — Milestone 3 (close-out)
-- [ ] **M3-C3: Merge `claude/milestone-3-live-ai` into `main`** via the open pull request (owner review).
-
-## Next
-- [ ] **Q-1: AI summary quality.** In the passing live run the customer summary mostly listed facts
-  ("₺61.000, 4, ₺70.230, 5 …") instead of interpreting them. Tune `prompts/business_agent.txt` so the
-  summary gives two or three interpretive sentences referencing at most the three or four most
-  relevant facts. Verify with mocked tests (structure only) and one live run. Do not loosen the guard.
-- [ ] **M5-P1 (preparation only): design note for "✨ AI Aksiyon Merkezi".**
+## Current
+- [ ] **Merge PR for `claude/q1-summary-quality`** (owner review).
+- [ ] **M5-P1 (preparation only; next after the merge): design note for "✨ AI Aksiyon Merkezi".**
   Write `docs/m5_action_center.md` covering how the static `dashboard.html` reaches the FastAPI
   endpoints (same-origin `uvicorn` serving the HTML, or CORS), which endpoints the tab uses
   (`/api/agent/actions`, complete/defer/dismiss, draft-message), how the evidence chips
   (`evidence[]`) are shown, and the offline and AI-disabled states. No UI code yet.
+
+## Next
 - [ ] **DQ-1: Fix dashboard margin missing-cost handling.**
   `m_margin` uses `fillna(0)` on `Net_Tutar_Maliyet_Dusulmus`, so a missing cost counts as zero
   profit and margin is understated. Exclude rows without cost from both revenue and profit in
@@ -29,6 +25,11 @@ Milestone 5 must not be started until it is moved to *Current*.
   **Needs owner approval.**
 
 ## Later
+- [ ] **Q-2 (optional): AI judgment quality.** In the accepted Q-1 run a risk still mentioned missing
+  margin data despite the out-of-scope warning, and one risk was vague. Compare one live run with
+  `AI_REASONING_EFFORT=medium` (or a larger model via `AI_MODEL`) against `low`, and decide the default
+  on quality vs latency and cost. A deterministic option: drop risk items that mention margin or
+  profitability ("marj", "kârlılık"), since margin is out of scope (D-014 style tidy).
 - [ ] Milestone 4: live macro provider (TCMB/TÜİK CPI, FX) behind the `macro` interface. Today
   inflation comes from `MANUAL_INFLATION_RATE` or "unavailable".
 - [ ] Milestone 5: implement the "✨ AI Aksiyon Merkezi" tab, after M5-P1 is approved.
@@ -45,6 +46,9 @@ Milestone 5 must not be started until it is moved to *Current*.
   2020 should count, change `QUAL_YEARS` and that test together.
 
 ## Completed
+- [x] 2026-10-09 — Q-1: AI summary quality. Prompt and schema guidance, deterministic tidy (D-014),
+  numeric-only `missing`, and quality measurement. Live run 4 accepted (see STATUS.md).
+- [x] 2026-10-09 — M3-C3: PR #1 merged into `main` (`60dffdb`). Milestone 3 complete.
 - [x] 2026-10-09 — M3-C2: live OpenAI smoke test PASSED (gpt-5-mini, low effort; attempt 2 after one
   guard-triggered retry; 12 facts referenced, every value from Python). Details in STATUS.md.
 - [x] 2026-10-09 — M3-C1: both branches pushed and verified with `git ls-remote`; CI run

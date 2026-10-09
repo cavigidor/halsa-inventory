@@ -28,7 +28,8 @@ STANDARD_WARNINGS = [
     {"code": "missing_is_not_zero",
      "text": "Pakette olmayan veya 'veri yok' olarak işaretlenen değerler bilinmiyor demektir; sıfır kabul edilmez."},
     {"code": "margin_data_gaps",
-     "text": "Maliyet verisi bazı satış satırlarında eksik; kâr marjı bu pakette yoktur ve tahmin edilmemelidir."},
+     "text": "Kâr marjı bu analizin kapsamı dışındadır (maliyet verisi güvenilir değil): marj veya kârlılık "
+             "hakkında yorum, risk ya da öneri yazma; tahmin etme."},
 ]
 
 
@@ -68,6 +69,8 @@ def fmt_decimal(x, digits=2):
     return f"{float(x):.{digits}f}".replace(".", ",")
 
 
+NUMERIC_KINDS = {"money", "count", "percent", "decimal", "year"}
+
 FORMATTERS = {"money": fmt_money, "count": fmt_int, "percent": fmt_pct,
               "decimal": fmt_decimal, "year": lambda v: str(int(v)),
               "text": lambda v: str(v), "buyer": lambda v: str(v),
@@ -99,7 +102,10 @@ class EvidencePacket:
     def fact(self, label, value, kind="text", meaning="", display=None):
         """Add a fact. None -> recorded as missing (never zero). Returns the fact id or None."""
         if value is None or (isinstance(value, str) and value.strip() in ("", "—", "nan", "None")):
-            self.missing.append(label)
+            # "missing is not zero" concerns NUMBERS. Empty descriptive fields (sector, rep, …) are
+            # simply omitted — listing them made the model recommend "completing the data" (Q-1).
+            if kind in NUMERIC_KINDS:
+                self.missing.append(label)
             return None
         if len(self.facts) >= C.MAX_EVIDENCE_FACTS:
             return None
@@ -277,12 +283,19 @@ def customer_packet(cust, ctx=None, memory=None):
     p.fact("Vadesi geçen bakiye", c.get("overdue"), "money")      # None -> missing, never zero
     if (c.get("overdue") or 0) > 0:
         p.flag("has_overdue")
-    p.fact("En eski borç dönemi", c.get("oldest_overdue"), "text")
-    p.fact("2025–2026 ciro", c.get("revenue_25_26"), "money")
-    p.fact("Borç / ciro", c.get("debt_to_revenue_pct"), "percent", display=(
-        None if c.get("debt_to_revenue_pct") is None else fmt_pct(c.get("debt_to_revenue_pct"), signed=False)))
-    p.fact("Tahsilat öncelik puanı (0–100)", c.get("collections_score"), "decimal",
-           display=None if c.get("collections_score") is None else fmt_decimal(c.get("collections_score"), 1))
+    # Collections/risk fields exist only for customers in those lists. A field that does not APPLY
+    # to this customer (key absent) is omitted; a field that applies but has no value (key present,
+    # None) is reported as missing. (Q-1: lapsed customers were shown 4 bogus "missing" fields.)
+    if "oldest_overdue" in c:
+        p.fact("En eski borç dönemi", c.get("oldest_overdue"), "text")
+    if "revenue_25_26" in c:
+        p.fact("2025–2026 ciro", c.get("revenue_25_26"), "money")
+    if "debt_to_revenue_pct" in c:
+        p.fact("Borç / ciro", c.get("debt_to_revenue_pct"), "percent", display=(
+            None if c.get("debt_to_revenue_pct") is None else fmt_pct(c.get("debt_to_revenue_pct"), signed=False)))
+    if "collections_score" in c:
+        p.fact("Tahsilat öncelik puanı (0–100)", c.get("collections_score"), "decimal",
+               display=None if c.get("collections_score") is None else fmt_decimal(c.get("collections_score"), 1))
     active = c.get("still_active") if c.get("still_active") is not None else c.get("still_ordering_2026")
     if active is not None:
         p.fact("2026'da sipariş veriyor mu", bool(active), "bool")

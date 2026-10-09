@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-09 (M3 close-out: push verified, CI green, live OpenAI smoke test PASSED)._
+_Updated 2026-10-09 (M3 merged to `main`; Q-1 summary quality done on `claude/q1-summary-quality`, PR pending)._
 
 ## Git
 - **Branch:** `claude/milestone-3-live-ai`, based on `main`.
@@ -90,5 +90,40 @@ OpenAI model. The OpenAI default model `gpt-5-mini` lives in
 - Real exports in `./data` (Mac): `2020-5 ekim satışlar.xlsx`, `STOK 5 Ekim 2026.xlsx`, `Cari 5 Ekim 2026.xlsx`.
 - A pre-M3 backup of the Mac folder: `~/Desktop/ME/Projects/StockAgent_backup_2026-10-08_pre-M3`.
 
+## Q-1 (done; awaiting merge)
+Branch `claude/q1-summary-quality` from `main` @ `60dffdb` (PR #1 merged; Milestone 3 complete).
+Writing-quality prompt rules, schema field guidance and `services/ai/quality.py` measurement are
+implemented.
+Live run 1 on this branch: `RESULT: OK`, 1 attempt (16.4 s, 2479 in / 1354 out / 704 reasoning), and the
+quality metric said OK. The summary now interprets, but on reading it still had defects the metric
+missed: fact references tacked onto the end of items ("…; T1"), a name written and referenced twice,
+"yok ₺0", and a recommendation listing "missing" fields that do not apply to a lapsed customer.
+Fixes: the packet omits non-applicable collections fields (only genuinely empty ones are `missing`);
+the quality check now detects tacked-on references, duplicated names and listed missing fields; the
+prompt and schema guidance were tightened.
+Live run 2: `RESULT: OK` (1 attempt, 7.8 s). The quality check now caught every defect (6 issues), but
+the model repeated them despite explicit rules: it uses `[[FACT:..]]` like a citation footnote.
+Fix (D-014): a deterministic tidy step after the safety check. Risks, opportunities and the
+recommended action carry no inline facts (refs move to `evidence_fact_ids`). In the summary,
+citation-style refs (parenthetical groups, after ';' or ',' at a clause end, after a finished verb,
+duplicated names) and technical labels are removed. Tidy only removes, never adds a number. Quality
+is measured both on the model output and on the tidied output. Standard suite: 134 passed, 7 skipped,
+1 xfailed.
+Live run 3 (two runs, both `RESULT: OK`; one used the guard retry): tidy fixed several defects, but
+1) a year glued after another ref survived a single tidy pass; 2) a mid-sentence run of three amounts
+was not handled; 3) the model kept turning informational notes into to-dos (an empty "Sektör" listed
+as missing, and the margin warning).
+Fixes: tidy runs until stable (max 3 passes) and handles ref sequences; a clause made of 3+ refs is
+removed (ids kept as evidence) and the next sentence re-capitalized; `missing` now lists only numeric
+facts (empty descriptive fields are omitted); the margin warning says margin is out of scope.
+Standard suite: 137 passed, 7 skipped, 1 xfailed.
+**Live run 4: ACCEPTED.** `RESULT: OK` on the first attempt (8.3 s, 2749 in / 1287 out / 832 reasoning tokens),
+12 facts referenced, every value from Python. The model output had 2 quality issues; tidy applied 1 fix
+and the final quality check was OK. Read by a human: the summary interprets rather than lists, the
+opportunities are clean, and the action is concrete (who, what, when).
+Residual model-judgment notes, not formatting: one risk still mentions missing margin data despite the
+out-of-scope warning, a fact label is capitalized mid-sentence, and one risk is vague. Logged as an
+optional follow-up (TASKS Later: Q-2); not a reason to keep iterating.
+
 ## Immediate next task
-TASKS M3-C3: review and merge the pull request `claude/milestone-3-live-ai` → `main`.
+Merge the Q-1 pull request. Then TASKS M5-P1: the design note for "✨ AI Aksiyon Merkezi" (docs only, no UI code).

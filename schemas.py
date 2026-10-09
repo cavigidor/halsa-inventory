@@ -153,13 +153,24 @@ class ActionStatusResponse(BaseModel):
 # - evidence_fact_ids lists the facts a statement relies on; unknown ids are rejected.
 _STRICT = ConfigDict(extra="forbid")
 
+# Field guidance sent to the model inside the strict JSON schema (Q-1: interpret, don't list facts).
+_D_SUMMARY = ("2-3 kısa YORUM cümlesi: durum ne anlama geliyor ve neden önemli. Gerçekleri sıralama; "
+              "en önemli en fazla 4 gerçeği [[FACT:..]] ile an. Yıllık rakamları art arda dizme. "
+              "'Paket' kelimesini kullanma.")
+_D_POINTS = ("Her madde tek kısa cümle, düz metin; madde sayısı en fazla 3. [[FACT:..]] KULLANMA "
+             "(dayanakları evidence_fact_ids'e yaz).")
+_D_INTERP = "1-2 kısa yorum cümlesi; en fazla 2 [[FACT:..]]; gerçekleri sıralama."
+_D_ACTION = ("Somut, uygulanabilir sonraki ticari adım (kim, ne yapmalı); 1-2 cümle; düz metin, "
+             "[[FACT:..]] KULLANMA; numaralandırma yok; veri tamamlama önerme.")
+_D_EVID = "Metindeki iddiaların dayandığı tüm fact_id'ler (metinde anılmayanlar da olabilir)."
+
 
 class AIActionItem(BaseModel):
     model_config = _STRICT
     action_ref: str = Field(description="items[].action_ref from the evidence packet, e.g. A01")
-    interpretation: str
-    recommendation: str
-    evidence_fact_ids: List[str]
+    interpretation: str = Field(description=_D_INTERP)
+    recommendation: str = Field(description=_D_ACTION)
+    evidence_fact_ids: List[str] = Field(description=_D_EVID)
     confidence: Confidence
 
 
@@ -171,29 +182,30 @@ class AIActionsOut(BaseModel):
 
 class CustomerAnalysisAI(BaseModel):
     model_config = _STRICT
-    summary: str
-    risks: List[str]
-    opportunities: List[str]
-    recommended_action: str
-    evidence_fact_ids: List[str]
+    summary: str = Field(description=_D_SUMMARY)
+    risks: List[str] = Field(description=_D_POINTS)
+    opportunities: List[str] = Field(description=_D_POINTS + " KAPALI müşteride boş liste.")
+    recommended_action: str = Field(description=_D_ACTION)
+    evidence_fact_ids: List[str] = Field(description=_D_EVID)
     warnings: List[str]
     confidence: Confidence
 
 
 class ProductAnalysisAI(BaseModel):
     model_config = _STRICT
-    status: str
-    risk: str
-    opportunity: str
+    status: str = Field(description=_D_INTERP)
+    risk: str = Field(description=_D_INTERP)
+    opportunity: str = Field(description=_D_INTERP)
     best_buyer_fact_ids: List[str] = Field(description="fact ids of 'Aday alıcı N' facts, best first")
-    recommendation: str
-    evidence_fact_ids: List[str]
+    recommendation: str = Field(description=_D_ACTION)
+    evidence_fact_ids: List[str] = Field(description=_D_EVID)
     warnings: List[str]
     confidence: Confidence
 
 
 class MessageDraftAI(BaseModel):
     model_config = _STRICT
-    message: str
-    evidence_fact_ids: List[str]
+    message: str = Field(description="Müşteriye gidecek kısa, nazik taslak; içsel analiz/puan yok; "
+                                     "en fazla 2 [[FACT:..]].")
+    evidence_fact_ids: List[str] = Field(description=_D_EVID)
     warnings: List[str]

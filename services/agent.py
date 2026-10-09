@@ -18,6 +18,7 @@ import config as C
 import schemas as S
 from services import evidence as EV
 from services.ai import grounding as G
+from services.ai import quality as Q
 from services.ai.base import AIResult, ERR_PACKET, ERR_UNKNOWN
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -90,7 +91,10 @@ class BusinessActionAgent:
                         "reason": res.error or "unavailable", "category": res.error_category or "unknown"}
             try:
                 response_model.model_validate(res.data)
-                resolved = G.check_and_resolve(res.data, packet)
+                G.check(res.data, packet)                       # safety first (ids + numeric guard)
+                tidied, tidy_fixes = Q.tidy(res.data, packet)    # only REMOVES refs/labels (Q-1)
+                response_model.model_validate(tidied)
+                resolved = G.resolve(tidied, packet)
             except G.GroundingError as g:
                 last_err = g
                 entry.update(success=False, error_category=g.category)
@@ -106,8 +110,14 @@ class BusinessActionAgent:
                         "reason": f"malformed: {type(e).__name__}", "category": "malformed"}
             entry.update(success=True, error_category=None)
             self.recorder(entry)
+            model_issues = Q.assess(res.data, packet)["issues"]   # what the model wrote
+            quality = Q.assess(tidied, packet)["issues"]           # what the user gets (measured only)
+            if quality:
+                log.info("ai output quality issues task=%s: %s", task, "; ".join(quality[:5]))
             return {"ok": True, "data": resolved, "packet": packet, "reason": None, "category": None,
-                    "warnings": list(resolved.get("warnings", []) or []), "raw_ids": G.referenced_ids(res.data)}
+                    "warnings": list(resolved.get("warnings", []) or []), "raw_ids": G.referenced_ids(tidied),
+                    "quality_issues": quality, "model_quality_issues": model_issues,
+                    "tidy_fixes": tidy_fixes}
         return {"ok": False, "data": None, "packet": packet, "warnings": [],
                 "reason": f"{last_err.category}: {last_err}", "category": last_err.category}
 
