@@ -277,12 +277,19 @@ def customer_packet(cust, ctx=None, memory=None):
     p.fact("Vadesi geçen bakiye", c.get("overdue"), "money")      # None -> missing, never zero
     if (c.get("overdue") or 0) > 0:
         p.flag("has_overdue")
-    p.fact("En eski borç dönemi", c.get("oldest_overdue"), "text")
-    p.fact("2025–2026 ciro", c.get("revenue_25_26"), "money")
-    p.fact("Borç / ciro", c.get("debt_to_revenue_pct"), "percent", display=(
-        None if c.get("debt_to_revenue_pct") is None else fmt_pct(c.get("debt_to_revenue_pct"), signed=False)))
-    p.fact("Tahsilat öncelik puanı (0–100)", c.get("collections_score"), "decimal",
-           display=None if c.get("collections_score") is None else fmt_decimal(c.get("collections_score"), 1))
+    # Collections/risk fields exist only for customers in those lists. A field that does not APPLY
+    # to this customer (key absent) is omitted; a field that applies but has no value (key present,
+    # None) is reported as missing. (Q-1: lapsed customers were shown 4 bogus "missing" fields.)
+    if "oldest_overdue" in c:
+        p.fact("En eski borç dönemi", c.get("oldest_overdue"), "text")
+    if "revenue_25_26" in c:
+        p.fact("2025–2026 ciro", c.get("revenue_25_26"), "money")
+    if "debt_to_revenue_pct" in c:
+        p.fact("Borç / ciro", c.get("debt_to_revenue_pct"), "percent", display=(
+            None if c.get("debt_to_revenue_pct") is None else fmt_pct(c.get("debt_to_revenue_pct"), signed=False)))
+    if "collections_score" in c:
+        p.fact("Tahsilat öncelik puanı (0–100)", c.get("collections_score"), "decimal",
+               display=None if c.get("collections_score") is None else fmt_decimal(c.get("collections_score"), 1))
     active = c.get("still_active") if c.get("still_active") is not None else c.get("still_ordering_2026")
     if active is not None:
         p.fact("2026'da sipariş veriyor mu", bool(active), "bool")

@@ -43,7 +43,13 @@ YAZIM KALİTESİ (okuyucu: şirket sahibi; kısa ve karar odaklı):
 - Risk ve fırsat maddeleri tek kısa cümle; en fazla 3 madde.
 - Önerilen aksiyon somut olsun: kim, ne yapacak (ör. "Temsilci bu hafta arayıp ihtiyaç sorsun").
 - "Paket", "fact", "kanıt paketi" gibi teknik kelimeleri kullanma; "kayıtlarda" de.
-- Eksik veriyi tek cümlede belirt; tüm eksik alanları tek tek sayma.
+- Eksik veriyi en fazla tek cümlede belirt; eksik alanların adlarını tek tek sayma ve
+  "eksik kayıtları tamamlayın" gibi öneri yazma (veri tamamlama senin görevin değil).
+- Bir gerçeği cümlenin SONUNA eklenti gibi yapıştırma ("...sağlanabilir; [[FACT:F002]]" YANLIŞ).
+  Gerçeği cümlenin içinde anlamlı kullan; çoğu madde HİÇ gerçek referansı içermeyebilir.
+- Aynı bilgiyi hem yazıp hem [[FACT:..]] ile tekrar etme (ör. adı yazdıysan referans ekleme).
+- Değeri sıfır olan bir gerçeği "yok" ile birlikte kullanma; ya "vadesi geçen borcu yok" de,
+  ya da [[FACT:..]] kullan.
 
 İŞ KURALLARI:
 - Müşteri kimliğine, kademeye (T1/T2/T3), KAPALI durumuna ve alacak yaşlandırmasına Python

@@ -107,7 +107,7 @@ class BusinessActionAgent:
                         "reason": f"malformed: {type(e).__name__}", "category": "malformed"}
             entry.update(success=True, error_category=None)
             self.recorder(entry)
-            quality = Q.assess(res.data)["issues"]          # writing quality: measured, never enforced
+            quality = Q.assess(res.data, packet)["issues"]          # writing quality: measured, never enforced
             if quality:
                 log.info("ai output quality issues task=%s: %s", task, "; ".join(quality[:5]))
             return {"ok": True, "data": resolved, "packet": packet, "reason": None, "category": None,

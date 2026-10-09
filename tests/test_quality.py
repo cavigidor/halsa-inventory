@@ -84,3 +84,46 @@ def test_quality_issues_are_reported_but_never_reject():
     data, r = agent.analyze_customer(cust)
     assert data is not None and r["ok"]                     # accepted (quality is not safety)
     assert any("back-to-back" in i for i in r["quality_issues"])
+
+
+# ---------------- second live run (2026-10-09): passed old metrics but read badly ----------------
+def _smoke_packet():
+    from services import evidence as EV
+    return EV.customer_packet({"customer_code": "900.00.0001", "name": "Sentetik T1 Kirtasiye",
+                               "rep": "TEMSILCI-A", "winback_tier": 1, "historical_spend": 184230,
+                               "last_active_year": 2025, "overdue": 0,
+                               "years": [{"y": 2023, "spend": 61000, "orders": 4}]})
+
+
+def _fid(p, label):
+    return next(f["fact_id"] for f in p.facts if f["label"] == label)
+
+
+def test_lapsed_customer_gets_no_bogus_missing_fields():
+    p = _smoke_packet()
+    for label in ("En eski borç dönemi", "2025–2026 ciro", "Borç / ciro", "Tahsilat öncelik puanı (0–100)"):
+        assert label not in p.missing
+    assert "Sektör" in p.missing          # genuinely empty -> still reported
+
+
+def test_second_live_run_defects_are_flagged():
+    p = _smoke_packet()
+    rep, tier, y23 = _fid(p, "Temsilci"), _fid(p, "Geri kazanım kademesi"), _fid(p, "2023 ciro")
+    out = {**GOOD,
+           "summary": f"Değerli müşteri. Temsilci TEMSILCI-A sorumludur [[FACT:{rep}]].",
+           "opportunities": [f"Geri kazanımda önceliğe uygundur; [[FACT:{tier}]]",
+                             f"Tekrar sipariş tetiklenebilir [[FACT:{y23}]]"],
+           "recommended_action": "Temsilci arasın; eksik kayıtlar (Sektör, Temsilci) tamamlansın."}
+    issues = Q.assess(out, p)["issues"]
+    assert any("opportunities[0]: fact reference tacked" in i for i in issues)
+    assert any("opportunities[1]: fact reference tacked" in i for i in issues)
+    assert any("'TEMSILCI-A' written and referenced twice" in i for i in issues)
+    p.missing.append("Temsilci")
+    assert any("lists missing fields" in i for i in Q.assess(out, p)["issues"])
+
+
+def test_reference_inside_sentence_is_fine():
+    p = _smoke_packet()
+    spend = _fid(p, "Toplam geçmiş harcama")
+    out = {**GOOD, "summary": f"Geçmiş harcaması [[FACT:{spend}]] olan değerli müşteri uzun süredir alım yapmıyor."}
+    assert Q.assess(out, p)["issues"] == []

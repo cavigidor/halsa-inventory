@@ -18,12 +18,36 @@ _RUN = re.compile(r"(?:\[\[FACT:F\d{3,4}\]\][\s,;/–\-]*(?:ve\s+)?){%d,}" % FAC
 _JARGON = re.compile(r"\b(paket|paketi|pakette|fact|kanıt paketi|flag)\b", re.IGNORECASE)
 
 
+# a fact reference glued onto the end of a clause: "...sağlanabilir; [[FACT:F002]]" / "... [[FACT:F009]]."
+_DANGLING = re.compile(r"(?:[;,:]|\s)\s*\[\[FACT:F\d{3,4}\]\]\s*[.!]?\s*$")
+
+
+def _resolved_dupes(text, packet):
+    """Text facts written verbatim AND referenced in the same field ("TEMSILCI-A ... [[FACT:F002]]")."""
+    if packet is None:
+        return []
+    out = []
+    for fid in set(FACT_TOKEN.findall(text)):
+        f = packet.by_id.get(fid)
+        if f and f["kind"] in ("text", "buyer") and len(f["display_value"]) >= 2:
+            if f["display_value"] in FACT_TOKEN.sub(" ", text):
+                out.append(f["display_value"])
+    return out
+
+
+def _missing_listed(text, packet):
+    if packet is None:
+        return 0
+    return sum(1 for m in packet.missing if m and m in text)
+
+
 def _sentences(text):
     return len([x for x in re.split(r"(?<=[.!?])\s+", text.strip()) if x.strip()])
 
 
-def assess(data):
-    """Return {"fields": {...}, "issues": [...]} for raw (unresolved) model output."""
+def assess(data, packet=None):
+    """Return {"fields": {...}, "issues": [...]} for raw (unresolved) model output.
+    With the packet, also checks duplicated names and listed missing fields."""
     fields, issues = {}, []
     for key, val in (data or {}).items():
         if key in NON_PROSE_FIELDS or key == "warnings":
@@ -42,8 +66,19 @@ def assess(data):
                 issues.append(f"{key}: technical wording (paket/fact)")
             if key == "summary" and fields[key]["sentences"] > 4:
                 issues.append(f"summary: {fields[key]['sentences']} sentences (max 4)")
+            if _DANGLING.search(val) and not val.strip().startswith("[[FACT"):
+                issues.append(f"{key}: fact reference tacked onto the end")
+            for d in _resolved_dupes(val, packet):
+                issues.append(f"{key}: '{d}' written and referenced twice")
+            if _missing_listed(val, packet) >= 2:
+                issues.append(f"{key}: lists missing fields one by one")
         elif isinstance(val, list) and all(isinstance(v, str) for v in val):
             counts = [len(FACT_TOKEN.findall(v)) for v in val]
+            for i, v in enumerate(val):
+                if _DANGLING.search(v) and not v.strip().startswith("[[FACT"):
+                    issues.append(f"{key}[{i}]: fact reference tacked onto the end")
+                for d in _resolved_dupes(v, packet):
+                    issues.append(f"{key}[{i}]: '{d}' written and referenced twice")
             fields[key] = {"items": len(val), "max_item_placeholders": max(counts, default=0)}
             lim = MAX_LIST_ITEMS.get(key)
             if lim is not None and len(val) > lim:
@@ -53,7 +88,7 @@ def assess(data):
         elif isinstance(val, list):                       # e.g. AIActionsOut.items
             for i, item in enumerate(val):
                 if isinstance(item, dict):
-                    sub = assess(item)
+                    sub = assess(item, packet)
                     for k, v in sub["fields"].items():
                         fields[f"{key}[{i}].{k}"] = v
                     issues.extend(f"{key}[{i}].{x}" for x in sub["issues"])

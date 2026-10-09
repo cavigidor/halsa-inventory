@@ -93,8 +93,15 @@ OpenAI model. The OpenAI default model `gpt-5-mini` lives in
 ## Q-1 (in progress)
 Branch `claude/q1-summary-quality` from `main` @ `60dffdb` (PR #1 merged; Milestone 3 complete).
 Writing-quality prompt rules, schema field guidance and `services/ai/quality.py` measurement are
-implemented. The standard suite gives 128 passed, 7 skipped, 1 xfailed. The live verification
-run is pending.
+implemented.
+Live run 1 on this branch: `RESULT: OK`, 1 attempt (16.4 s, 2479 in / 1354 out / 704 reasoning), and the
+quality metric said OK. The summary now interprets, but on reading it still had defects the metric
+missed: fact references tacked onto the end of items ("…; T1"), a name written and referenced twice,
+"yok ₺0", and a recommendation listing "missing" fields that do not apply to a lapsed customer.
+Fixes: the packet omits non-applicable collections fields (only genuinely empty ones are `missing`);
+the quality check now detects tacked-on references, duplicated names and listed missing fields; the
+prompt and schema guidance were tightened. Standard suite: 131 passed, 7 skipped, 1 xfailed.
+Live run 2 is pending.
 
 ## Immediate next task
-TASKS Q-1: one live smoke run on `claude/q1-summary-quality`; expect `quality (Q-1): OK`.
+TASKS Q-1: live smoke run 2 on `claude/q1-summary-quality`; expect `quality (Q-1): OK` and clean reading.
