@@ -1,6 +1,7 @@
 # M5 design note — "✨ AI Aksiyon Merkezi" tab
 
-Status: **approved by the owner 2026-10-09** (decisions recorded as D-015 to D-020 in DECISIONS.md).
+Status: **approved by the owner 2026-10-09** (decisions recorded as D-015 to D-020 in DECISIONS.md;
+extensibility for future sources added 2026-10-10 as D-022, see §14 and `docs/roadmap_m6_m7.md`).
 This is a design document only; no M5 code has been written yet. Implementation follows the bounded
 slices in §11.
 
@@ -181,7 +182,8 @@ data-date mismatch warning (§10) stays as a safety net.
 1. **M5-1 Backend prerequisites (no UI).** `GET /` serves the dashboard; `GET /api/agent/actions`
    never calls the provider and returns cached AI text; `POST /api/agent/actions/enrich`
    (≤5 ids, one call, `ai_cache`); a deterministic `reason` per action; the `X-StockAgent` guard on all
-   POSTs; warm-up with `context_ready`. Tests: no provider call on GET (spy), the 5-id limit, a cache hit
+   POSTs; warm-up with `context_ready`. Plus the extensibility seams from §14: the generic action
+   contract with a `source` field, the action-source registry, and `GET /api/agent/categories`. Tests: no provider call on GET (spy), the 5-id limit, a cache hit
    with no second call, facts change → cache miss, 403 without the header, `/` served.
 2. **M5-2 Read-only tab.** Cards, the reason, facts, the AI block, evidence chips, filters, the top-5 /
    next-5 / per-card AI controls, and every §10 state (except refresh). The dashboard gets one tab
@@ -208,7 +210,35 @@ data-date mismatch warning (§10) stays as a safety net.
 
 - **Multi-user / remote deployment** (§2): a future milestone.
 - **Scheduled or morning AI generation** (§4): a future option after usage, cost and value are observed.
-- **Sales-growth modules**, being explored separately: high-potential / low-penetration accounts,
-  cross-sell, a salesperson daily work queue, customer 360, January fair planning and tracking,
-  lightweight sales follow-up / CRM, new-buyer discovery, and salesperson portfolio assignment.
+- **New data sources (M6) and the sales operating system (M7):** six additional monthly reports and
+  the modules they enable (high potential / low penetration, collections detail, Trodat SKU
+  intelligence, owner finance and cash planning, the daily sales queue, customer 360, cross-sell, the
+  January fair, light CRM, new-buyer discovery). Documented in `docs/roadmap_m6_m7.md`. M5 does not
+  ingest any new Excel source.
 - **Geri Kazanım** already exists (dashboard tab + win-back actions) and is **not** rebuilt.
+
+## 14. Extensibility: future action sources plug in without redesign (D-022)
+
+M6/M7 will add new deterministic action types, for example `underpenetration`, `collection_first`
+(TAHSİLAT ÖNCELİKLİ), `cross_sell`, `follow_up_due` and `fair_invite`. M5 therefore builds the queue
+around **one generic contract** instead of four hard-coded categories:
+
+- **Action contract** (every action, any source): `action_id` (stable: category + entity + facts
+  hash), `source`, `category`, `entity_type` (`customer` / `product` / later `account`), `entity_id`,
+  `title`, `reason` (deterministic sentence), `facts[]`, `drivers`, `score` (0–100, Python),
+  `priority`, `confidence`, `requires_approval`. AI fields stay optional (`interpretation`,
+  `recommendation`, `evidence[]`).
+- **Action-source registry** (M5-1): today's `build_actions` becomes the first registered source(s)
+  behind one small interface (`produce(context) -> list[action]`). A new M6/M7 source registers itself
+  and nothing else changes: not the agent, not the enrich endpoint, not the cache, not the UI.
+- **Server-described categories** (M5-1): `GET /api/agent/categories` returns `{key, label_tr,
+  color, entity_type}` for each registered category. The tab builds its filter chips and badges from
+  this list, so a new category needs **no UI change**.
+- **Ranking stays global and deterministic.** All sources produce comparable 0–100 scores through
+  `services/scoring.py` (`action_priority`). Cross-source weighting is a Python/config decision,
+  never an AI one.
+- **Evidence packets are per entity type.** `services/evidence.py` gets one builder per entity type;
+  new sources add facts to the packet through the same `fact()` API, so grounding and the numeric
+  guard apply unchanged.
+- **Actions without a customer (owner views)**, such as cash-planning items from kredi takip, use
+  `entity_type` values of their own and can be filtered out of salesperson-facing queues later (D-016).

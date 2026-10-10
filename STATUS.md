@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-09 (M3 and Q-1 merged to `main` @ `a34ccac`; M5 design approved, PR #3 docs-only, awaiting merge)._
+_Updated 2026-10-10 (M3 and Q-1 on `main` @ `a34ccac`; M5 design approved and M6/M7 roadmap documented in PR #3, docs only, awaiting merge)._
 
 ## Git
 - **Branch:** `claude/milestone-3-live-ai`, based on `main`.
@@ -136,6 +136,14 @@ owner's decisions:
 - The dashboard is served same-origin, with a POST guard and escaped AI text (D-020).
 
 There are six bounded implementation slices (M5-1 to M5-6). No code has changed in this checkpoint.
+
+## Roadmap (documented 2026-10-10, not started)
+Six additional monthly owner reports (hedef raporu, kredi takip, the detailed collections report,
+bütçe, the Trodat sales report, gider/gelir) are planned for **M6** (validated importers → normalized
+model → entity resolution) and **M7** (sales operating system). See `docs/roadmap_m6_m7.md` and
+D-021/D-022. None is ingested yet. The real files stay local and gitignored. Twelve owner questions are
+open and do not block M5. M5-1 gains the extensibility seams (generic action contract, source registry,
+server-described categories) so M6/M7 actions plug in without redesign.
 
 ## Immediate next task
 Owner merges PR #3. Then M5-1 (backend prerequisites, no UI).

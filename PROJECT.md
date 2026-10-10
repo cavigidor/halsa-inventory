@@ -87,12 +87,22 @@ services/store.py     SQLite: action status, history, memory, ai_calls metadata 
 | 3 | Real LLM (OpenAI) behind the abstraction, with numeric safety | done (see STATUS.md) |
 | 4 | Live macro data (TCMB/TÜİK inflation, FX) | later |
 | 5 | "✨ AI Aksiyon Merkezi" tab: deterministic action queue first, AI on demand (design: `docs/m5_action_center.md`) | design approved; implementation next |
+| 6 | Additional data sources / sales intelligence foundation: validated importers for hedef raporu, detailed collections, Trodat sales, gider/gelir, kredi takip, bütçe (`docs/roadmap_m6_m7.md`) | planned (D-021) |
+| 7 | Sales operating system: daily sales queue, customer 360, cross-sell, January fair command center, light CRM, new-buyer discovery | planned (D-021) |
 | — | Multi-user / remote deployment (auth, admin and salesperson roles, private deployment, backups) | future, out of scope for M5 (D-016) |
 
 ## Product principle (D-015)
 The deterministic action queue is the product: Python decides, ranks and explains every action and
 every number. AI only interprets selected actions and drafts messages, and the system is fully useful
 with AI disabled.
+
+## Data-source architecture (D-021)
+Every Excel source, current or future, flows: source-specific validator/importer → normalized
+deterministic model → entity resolution → analytics/services → actions → dashboard/API → optional AI
+explanation. Dashboard code never depends on a specific workbook layout. Validation is fail-closed.
+Sources planned for M6: hedef raporu (potential, territory, visits), the detailed collections report,
+the Trodat sales report (SKU intelligence), and the owner-only sources gider/gelir, kredi takip and
+bütçe (bütçe gated by cell-level validation because of formula errors).
 
 ## Privacy boundary
 GitHub holds code, tests, prompts, schemas, docs, synthetic fixtures, CI and config templates.

@@ -162,3 +162,30 @@ Don't rewrite earlier entries. If one is superseded, add a new entry that says s
 - **Decision:** `GET /` serves `dashboard.html`, so no CORS is needed (allowing a `null` origin was
   rejected). Every POST requires `X-StockAgent: 1`, and paid AI is POST-only. AI text is always
   rendered escaped. Double-clicking the file still works, and the AI tab then shows an offline card.
+
+### D-021 · 2026-10-10 · Roadmap M6/M7 and the source-pipeline rule for new Excel reports
+- **Decision (owner):** six additional monthly reports (hedef raporu, kredi takip, the detailed
+  collections report, bütçe, the Trodat sales report, gider/gelir) become part of StockAgent in **M6
+  (Additional Data Sources / Sales Intelligence Foundation)**, followed by **M7 (Sales Operating
+  System)**. None is ingested in M5.
+- **Rule:** every source goes through Excel → source-specific validator/importer → normalized
+  deterministic model → entity resolution → analytics → actions → dashboard/API → optional AI
+  explanation. There are no spreadsheet-specific features in dashboard code. Only stable, useful fields
+  are imported, never whole sheets. Validation is fail-closed (formula errors such as those in bütçe
+  surface as validation errors). Sales identity stays `Pro_kodu`/`ProjeIsmi`, and other identifiers
+  join only through an explicit entity-resolution step with a match report. Real files stay local and
+  gitignored; GitHub holds importers, schemas, validation rules, synthetic fixtures, tests and docs.
+- **Consequences:** `docs/roadmap_m6_m7.md` holds the sources, intended uses, the M6/M7 module list and
+  12 open owner questions (for example the meaning of `Haftalık Kaşe Adedi`), which are recorded and not
+  guessed. Owner-only sources (gider/gelir, kredi takip, bütçe) feed an Owner / Yönetim view, not
+  salesperson screens. Personal names (for example salespeople) are not written into the repo, only roles.
+
+### D-022 · 2026-10-10 · M5 action contract is generic so M6/M7 sources plug in without redesign
+- **Decision:** M5-1 introduces a generic action contract (with a `source` field), an action-source
+  registry (`produce(context) -> list[action]`) and server-described categories
+  (`GET /api/agent/categories`). The UI builds filters and badges from the server list. Ranking stays
+  global and deterministic via `services/scoring.py`. Evidence builders are per entity type.
+- **Rationale:** M6/M7 will add underpenetration, collection-first, cross-sell, follow-up and fair
+  actions. Adding one must not require changing the agent, the enrich endpoint, the cache or the tab.
+- **Consequences:** a small amount of extra structure in M5-1. Today's four categories become the first
+  registered sources. Details are in `docs/m5_action_center.md` §14.
