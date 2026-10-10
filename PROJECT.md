@@ -86,7 +86,13 @@ services/store.py     SQLite: action status, history, memory, ai_calls metadata 
 | 2 | FastAPI backend and provider-agnostic AI layer, runs without a key | done |
 | 3 | Real LLM (OpenAI) behind the abstraction, with numeric safety | done (see STATUS.md) |
 | 4 | Live macro data (TCMB/TÜİK inflation, FX) | later |
-| 5 | "✨ AI Aksiyon Merkezi" tab in the dashboard | next (not started) |
+| 5 | "✨ AI Aksiyon Merkezi" tab: deterministic action queue first, AI on demand (design: `docs/m5_action_center.md`) | design approved; implementation next |
+| — | Multi-user / remote deployment (auth, admin and salesperson roles, private deployment, backups) | future, out of scope for M5 (D-016) |
+
+## Product principle (D-015)
+The deterministic action queue is the product: Python decides, ranks and explains every action and
+every number. AI only interprets selected actions and drafts messages, and the system is fully useful
+with AI disabled.
 
 ## Privacy boundary
 GitHub holds code, tests, prompts, schemas, docs, synthetic fixtures, CI and config templates.

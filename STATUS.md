@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-09 (M3 and Q-1 merged to `main` @ `a34ccac`; M5-P1 design note written, awaiting review)._
+_Updated 2026-10-09 (M3 and Q-1 merged to `main` @ `a34ccac`; M5 design approved, PR #3 docs-only, awaiting merge)._
 
 ## Git
 - **Branch:** `claude/milestone-3-live-ai`, based on `main`.
@@ -125,11 +125,17 @@ Residual model-judgment notes, not formatting: one risk still mentions missing m
 out-of-scope warning, a fact label is capitalized mid-sentence, and one risk is vague. Logged as an
 optional follow-up (TASKS Later: Q-2); not a reason to keep iterating.
 
-## M5-P1 (design note)
-`docs/m5_action_center.md` (branch `claude/m5-p1-design-note`). Proposes: serving the dashboard from
-FastAPI (same origin, no CORS); AI only on a button, with an SQLite cache and batches of 5; a fact vs AI
-separation on cards; a custom-header guard on POSTs; escaping all AI text; warm-up and a data-date
-check; state handling; a test plan; and five bounded M5 slices. No code changed.
+## M5-P1 (design approved)
+`docs/m5_action_center.md` (branch `claude/m5-p1-design-note`, PR #3, docs only) has been updated with the
+owner's decisions:
+- The deterministic queue is the product, and AI only explains (D-015).
+- M5 is local-only; multi-user / remote deployment is a future milestone, and M5 must not block it (D-016).
+- AI runs only on request: top 5 by default, then "next 5" or per-action, with a cache (D-017).
+- Drafts are WhatsApp first, channel × purpose, copy-only, natural B2B tone (D-018).
+- The monthly refresh is controlled: validate → build → verify → swap (D-019).
+- The dashboard is served same-origin, with a POST guard and escaped AI text (D-020).
+
+There are six bounded implementation slices (M5-1 to M5-6). No code has changed in this checkpoint.
 
 ## Immediate next task
-Owner reviews the design note and answers §11. Then M5-1 (backend prerequisites).
+Owner merges PR #3. Then M5-1 (backend prerequisites, no UI).

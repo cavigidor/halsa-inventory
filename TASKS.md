@@ -4,18 +4,26 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 must not be started until it is moved to *Current*.
 
 ## Current
-- [ ] **M5-P1 review (owner):** read `docs/m5_action_center.md` and answer its §11 open questions
-  (who uses it and where, AI trigger, number of actions with AI text, draft channels, data refresh).
-  After approval, move M5-1 to Current and record the accepted decisions in DECISIONS.md.
+- [ ] **Merge PR #3 (M5 design, docs only).** The owner approved the design on 2026-10-09; the decisions
+  are recorded as D-015 to D-020. M5-1 starts only after this merge.
 
-## Next
-- [ ] **M5-1 Backend prerequisites** (design §7 items 1–5): `GET /` serves `dashboard.html`;
-  `GET /api/agent/actions?ai=0|1` (default 0, no paid call on load); `POST /api/agent/actions/enrich`
-  (batches of 5, `ai_cache` keyed by action_id + prompt version + model); `POST /api/context/refresh`;
-  warm-up thread with `context_ready` in `/api/health`; required `X-StockAgent: 1` header on every
-  POST. Tests per design §9. No UI.
-- [ ] **M5-2 Read-only AI tab** (§4, §6, §8). **M5-3** action state with undo. **M5-4** drafts and the
-  customer drawer. **M5-5** Playwright smoke in CI, mobile layout, owner live check.
+## Next (M5 slices, design §11; one bounded checkpoint each)
+- [ ] **M5-1 Backend prerequisites (no UI).** `GET /` serves `dashboard.html`. `GET /api/agent/actions`
+  never calls the provider and returns cached AI text (update the M2 test that expects enrichment on
+  GET). `POST /api/agent/actions/enrich` takes ≤5 open action ids and makes one provider call, with an
+  `ai_cache` table keyed by action_id + prompt version + model. A deterministic Turkish `reason` per
+  action. The `X-StockAgent: 1` guard on every POST (403 without it). A warm-up thread and
+  `context_ready` in `/api/health`. Tests per design §11.
+- [ ] **M5-2 Read-only tab.** Cards (reason, facts, AI block, evidence chips), filters, top-5 / next-5 /
+  per-card AI controls, and every §10 state except refresh. A separate `_ai_panel()`; the existing
+  dashboard table code is untouched.
+- [ ] **M5-3 Action state.** Done / defer / dismiss with a 5-second undo.
+- [ ] **M5-4 Drafts and the customer drawer.** WhatsApp first, then e-posta; channel × purpose
+  (collection, offer, winback, sales_followup, fair_invite); D-018 tone; copy-only; KAPALI refusals.
+- [ ] **M5-5 Controlled monthly refresh.** validate → build → verify → swap (D-019), endpoint and CLI,
+  a refresh button and report; tests prove nothing is swapped on failure.
+- [ ] **M5-6 Verification and polish.** A Playwright smoke test in CI (mock provider), the mobile layout,
+  and the owner's live check.
 - [ ] **DQ-1: Fix dashboard margin missing-cost handling.**
   `m_margin` uses `fillna(0)` on `Net_Tutar_Maliyet_Dusulmus`, so a missing cost counts as zero
   profit and margin is understated. Exclude rows without cost from both revenue and profit in
@@ -29,6 +37,15 @@ Milestone 5 must not be started until it is moved to *Current*.
   **Needs owner approval.**
 
 ## Later
+- [ ] **Multi-user / remote deployment (future milestone, out of scope for M5, D-016):**
+  authenticated access, father/admin role, salesperson roles, private deployment, secure business-data
+  handling, backups, possibly per-salesperson action queues.
+- [ ] **Scheduled AI generation (future option, D-017):** only after the usage, cost and value of
+  on-demand AI comments are observed.
+- [ ] **Sales-growth ideas parking lot (NOT started; explored separately):** high-potential /
+  low-penetration accounts, cross-sell, a salesperson daily work queue, customer 360, January fair
+  planning and tracking, lightweight sales follow-up / CRM, new-buyer discovery, and salesperson
+  portfolio assignment. The existing Geri Kazanım functionality is not rebuilt.
 - [ ] **Q-2 (optional): AI judgment quality.** In the accepted Q-1 run a risk still mentioned missing
   margin data despite the out-of-scope warning, and one risk was vague. Compare one live run with
   `AI_REASONING_EFFORT=medium` (or a larger model via `AI_MODEL`) against `low`, and decide the default
@@ -36,7 +53,6 @@ Milestone 5 must not be started until it is moved to *Current*.
   profitability ("marj", "kârlılık"), since margin is out of scope (D-014 style tidy).
 - [ ] Milestone 4: live macro provider (TCMB/TÜİK CPI, FX) behind the `macro` interface. Today
   inflation comes from `MANUAL_INFLATION_RATE` or "unavailable".
-- [ ] Milestone 5: implement the "✨ AI Aksiyon Merkezi" tab, after M5-P1 is approved.
 - [ ] Restore or rewrite `arama_listesi.py` (call-tracker CSV export). It is referenced in older
   notes but was not in the Milestone 1/2 deliveries and is not on the Mac.
 - [ ] Replace deprecated `@app.on_event("startup")` with a FastAPI lifespan handler.
@@ -51,7 +67,8 @@ Milestone 5 must not be started until it is moved to *Current*.
 
 ## Completed
 - [x] 2026-10-09 — PR #2 (Q-1) merged into `main` (`a34ccac`); CI green on `main`.
-- [x] 2026-10-09 — M5-P1: design note `docs/m5_action_center.md` written (awaiting owner review).
+- [x] 2026-10-09 — M5-P1: design note `docs/m5_action_center.md` written, reviewed and approved by the owner
+  (decisions D-015 to D-020).
 - [x] 2026-10-09 — Q-1: AI summary quality. Prompt and schema guidance, deterministic tidy (D-014),
   numeric-only `missing`, and quality measurement. Live run 4 accepted (see STATUS.md).
 - [x] 2026-10-09 — M3-C3: PR #1 merged into `main` (`60dffdb`). Milestone 3 complete.

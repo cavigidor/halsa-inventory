@@ -113,3 +113,52 @@ Don't rewrite earlier entries. If one is superseded, add a new entry that says s
   output is re-validated against the schema. Grounding still runs first on the raw output.
 - **Consequences:** some numbers appear only as evidence chips rather than in the sentence. Quality
   is logged for both the raw and the tidied output, so prompt drift stays visible.
+
+### D-015 · 2026-10-09 · The deterministic action queue is the product; AI only explains
+- **Decision (owner):** the AI Aksiyon Merkezi must be fully useful with AI disabled. Python provides
+  every action's title, category, priority, score, facts, entity and a deterministic "reason"
+  immediately. AI adds interpretation, explanation, a suggested approach and optional drafts only. It
+  never decides which action matters, never ranks or prioritizes, and never creates financial facts.
+- **Consequences:** the actions endpoint works without a provider. The UI orders cards by Python score
+  only. A deterministic `reason` field is added in M5-1.
+
+### D-016 · 2026-10-09 · M5 is local-only; multi-user / remote deployment is a separate future milestone
+- **Decision (owner):** M5 runs on the Mac only (bound to 127.0.0.1, no LAN or internet, no login).
+  The end state includes the owner's father and the sales team, so a later **Multi-user / remote
+  deployment** milestone will cover authenticated access, admin and salesperson roles, private
+  deployment, secure data handling, backups and per-salesperson queues. It is out of scope for M5.
+- **Consequences:** M5 must not block it. The UI uses only the HTTP API; host and port are config;
+  action state stays behind `services/store.py` (so `user_id`/`assigned_to` can be added later); and the
+  POST header guard is a seam for real auth and CSRF tokens.
+
+### D-017 · 2026-10-09 · AI runs only on explicit request; top 5 by default; cached
+- **Decision (owner):** there are no automatic or scheduled paid calls for now; usage, cost and value
+  are observed first. Loading the tab shows all deterministic actions with no provider call.
+  "✨ AI yorumlarını oluştur" enriches the top 5 open actions by Python score. "Sonraki 5…" and a
+  per-action control enrich more.
+- **Consequences:** `GET /api/agent/actions` never calls the provider (a behavior change from M2).
+  `POST /api/agent/actions/enrich` accepts ≤5 open action ids and makes one call. An `ai_cache` table is
+  keyed by action_id (which includes a facts hash) + prompt version + model.
+
+### D-018 · 2026-10-09 · Message drafts: WhatsApp first, channel × purpose, copy-only
+- **Decision (owner):** the channels are WhatsApp (first) and e-posta. Drafts are displayed and copied,
+  and a human sends them. There is never automatic sending. The tone is professional, concise and
+  natural Turkish B2B. The default greeting is context-dependent ("Merhaba [isim/firma],"); "Sayın …" is
+  optional for formal e-mail. The purposes are tahsilat, teklif, geri kazanım, satış takibi and fuar
+  daveti, with minimal scope.
+- **Consequences:** the API splits `channel` from `purpose` (backward-compatible mapping of
+  `message_type`). KAPALI customers get only collection drafts (Python refusal, D-009).
+
+### D-019 · 2026-10-09 · Controlled monthly refresh: validate → build → verify → swap
+- **Decision (owner):** one explicit refresh after the monthly exports are replaced. It validates the
+  files, builds the context and dashboard in staging, verifies reconciliation and plausibility, then
+  atomically swaps the dashboard and the in-memory context. On any failure nothing changes, and the
+  report says which step failed.
+- **Consequences:** `POST /api/context/refresh` and `python -m services.refresh` share one pipeline,
+  with one refresh at a time; `dashboard.prev.html` is kept. The dashboard/backend data-date mismatch
+  warning stays as a safety net.
+
+### D-020 · 2026-10-09 · Dashboard served same-origin by FastAPI; POST header guard; escaped AI text
+- **Decision:** `GET /` serves `dashboard.html`, so no CORS is needed (allowing a `null` origin was
+  rejected). Every POST requires `X-StockAgent: 1`, and paid AI is POST-only. AI text is always
+  rendered escaped. Double-clicking the file still works, and the AI tab then shows an offline card.
