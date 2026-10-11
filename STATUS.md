@@ -141,9 +141,17 @@ There are six bounded implementation slices (M5-1 to M5-6). No code has changed 
 Six additional monthly owner reports (hedef raporu, kredi takip, the detailed collections report,
 bütçe, the Trodat sales report, gider/gelir) are planned for **M6** (validated importers → normalized
 model → entity resolution) and **M7** (sales operating system). See `docs/roadmap_m6_m7.md` and
-D-021/D-022. None is ingested yet. The real files stay local and gitignored. Twelve owner questions are
-open and do not block M5. M5-1 gains the extensibility seams (generic action contract, source registry,
-server-described categories) so M6/M7 actions plug in without redesign.
+D-021 to D-026. None is ingested yet, and the real files stay local and gitignored.
+
+The owner's answers were incorporated on 2026-10-10:
+- Data-confidence statuses (D-023): `Haftalık Kaşe Adedi`, `Risk` and `Kredi` are stale historical
+  fields; CRM coverage is incomplete; the 2020–2026 sales report and its activity/source (fair) field are
+  trusted after verification.
+- The new hires are office sales support, not field salespeople (D-024).
+- Fair attribution starts from existing data (D-025).
+
+Questions are resolved or reduced to M6-0 technical verification. M5-1 includes the extensibility seams
+so M6/M7 actions plug in without redesign.
 
 ## Immediate next task
 Owner merges PR #3. Then M5-1 (backend prerequisites, no UI).

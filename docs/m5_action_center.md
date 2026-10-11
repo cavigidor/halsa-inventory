@@ -33,8 +33,9 @@ actions; AI explains selected ones.
 
 ## 2. Users and deployment scope (D-016)
 
-- **End state:** the owner's father uses it, and later the sales team (2 people now, 2 more expected)
-  may use parts of it from their own computers.
+- **End state:** the owner's father uses it, and later the sales team may use parts of it from their
+  own computers: two primary salespeople plus planned office-based sales-support assistants (not field
+  salespeople, D-024).
 - **M5 scope: local-only on the Mac.** The backend binds to `127.0.0.1`. It is not exposed to the LAN
   or internet, and there is no login or authentication. The security model in §6 applies.
 - **M5 must not block a later secure deployment.** Concretely:

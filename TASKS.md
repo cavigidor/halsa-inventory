@@ -45,15 +45,19 @@ Milestone 5 must not be started until it is moved to *Current*.
 - [ ] **Scheduled AI generation (future option, D-017):** only after the usage, cost and value of
   on-demand AI comments are observed.
 - [ ] **M6 — Additional data sources / sales intelligence foundation (planned, D-021; after M5).**
-  See `docs/roadmap_m6_m7.md`. Sequence: M6-0 source inventory and owner Q&A (local header inspection,
-  docs only) → M6-1 importer framework (validation report, fail-closed, entity-resolution match report,
-  synthetic fixtures) → M6-2 hedef raporu → M6-3 detailed collections (+ `TAHSİLAT ÖNCELİKLİ` after
-  threshold sign-off) → M6-4 Trodat sales → M6-5 owner sources (gider/gelir, kredi takip, bütçe only with
-  cell-level validation).
-- [ ] **M7 — Sales operating system (planned, D-021; after M6).** Daily sales queue ("Bugün kimi
-  aramalıyım?"), customer 360, cross-sell, January Fair Command Center, light CRM / follow-up, new-buyer
-  discovery (separate from Geri Kazanım; no external scraping in M5/M6). Python selects and ranks; AI only
-  explains. The existing Geri Kazanım functionality is not rebuilt.
+  See `docs/roadmap_m6_m7.md`. Sequence: M6-0 source inventory and technical verification (local, docs
+  only: headers and types, the 2020–2026 sales report row grain, join identifiers, activity/source values,
+  CRM fields, fair-list locations, rule thresholds) → M6-1 importer framework (validation report,
+  fail-closed, per-field data-confidence status D-023, entity-resolution match report) → M6-2 order
+  activity/source normalization (fair attribution foundation, D-025) → M6-3 hedef raporu (stale
+  `Haftalık Kaşe Adedi` / `Risk` / `Kredi`) → M6-4 detailed collections (+ `TAHSİLAT ÖNCELİKLİ` after
+  threshold sign-off) → M6-5 Trodat sales → M6-6 owner sources (gider/gelir by business line, kredi
+  takip, bütçe only with cell-level validation).
+- [ ] **M7 — Sales operating system (planned, D-021; after M6).** Daily sales queue, customer 360,
+  cross-sell, January Fair Command Center (built on existing trusted fair attribution), light CRM with a
+  coverage/completeness requirement (no salesperson ranking from raw CRM counts, D-024), Sales Support /
+  Inside Sales Support concept, new-buyer discovery and acquisition-source tracking (separate from Geri
+  Kazanım; no web scraping). Python selects and ranks; AI only explains.
 - [ ] **Q-2 (optional): AI judgment quality.** In the accepted Q-1 run a risk still mentioned missing
   margin data despite the out-of-scope warning, and one risk was vague. Compare one live run with
   `AI_REASONING_EFFORT=medium` (or a larger model via `AI_MODEL`) against `low`, and decide the default
@@ -68,17 +72,16 @@ Milestone 5 must not be started until it is moved to *Current*.
   (native structured output, error categories).
 
 ## Blocked / needs a decision
-- **M6/M7 owner questions (do not block M5):** 12 questions in `docs/roadmap_m6_m7.md` §4. They cover
-  the meaning, maintainer, update frequency and reliability of `Haftalık Kaşe Adedi`; the meaning of
-  `Risk` and `Kredi` in the hedef raporu; the salespeople and new-hire assignment (roles only in the repo);
-  whether visits and their outcomes are recorded; historical fair lists; whether fair orders are
-  identifiable in the ERP; and customer + SKU detail in the sales export.
+- **M6/M7 owner questions:** resolved on 2026-10-10 (see `docs/roadmap_m6_m7.md` §7, D-023 to D-025).
+  Only technical verification remains, in M6-0. Nothing blocks M5.
 - **Lapsed window 2020 vs 2021.** The spec says the analysis window is 2020–2025, but the code
   (`dashboard_builder.QUAL_YEARS`) uses 2021–2025. M3 did not change it, and
   `test_lapsed_thresholds_are_the_configured_ones` pins the current value. Owner decides; if
   2020 should count, change `QUAL_YEARS` and that test together.
 
 ## Completed
+- [x] 2026-10-10 — Owner answers incorporated into the roadmap (D-023 data confidence, D-024 sales
+  organization and CRM coverage, D-025 fair/acquisition attribution, D-026 legitimate transactions only).
 - [x] 2026-10-10 — M6/M7 roadmap documented (`docs/roadmap_m6_m7.md`, D-021, D-022). Nothing implemented.
 - [x] 2026-10-09 — PR #2 (Q-1) merged into `main` (`a34ccac`); CI green on `main`.
 - [x] 2026-10-09 — M5-P1: design note `docs/m5_action_center.md` written, reviewed and approved by the owner

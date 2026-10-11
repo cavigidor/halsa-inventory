@@ -189,3 +189,49 @@ Don't rewrite earlier entries. If one is superseded, add a new entry that says s
   actions. Adding one must not require changing the agent, the enrich endpoint, the cache or the tab.
 - **Consequences:** a small amount of extra structure in M5-1. Today's four categories become the first
   registered sources. Details are in `docs/m5_action_center.md` §14.
+
+### D-023 · 2026-10-10 · Data confidence: not all source fields are equally trustworthy
+- **Decision (owner answers):** normalized fields and sources carry deterministic data-quality status
+  where it matters: `trusted`, `incomplete`, `stale`, `unverified` or `invalid`. Python and business rules
+  assign it; the AI never does. A non-trusted field is used only as its status allows. Statuses travel
+  into evidence packets as warnings. **The AI must never upgrade a stale or low-confidence field into a
+  current fact.**
+- **Current classification:**
+  - `trusted` after technical validation: the 2020–2026 sales history and its order activity/source field.
+  - `incomplete`: CRM activity and call/visit outcomes.
+  - `stale`: `Haftalık Kaşe Adedi`, a historical capacity estimate about 30 years old, unmaintained for
+    about 4–5 years. It is kept and never treated as current capacity, and current penetration is never
+    calculated against it as if authoritative.
+  - `stale`: `Risk`/`Kredi`, historical exposure and unsecured-credit limits, unmaintained for about 4–5
+    years. They are reference only and never drive credit, collection, selling-restriction or AI
+    decisions. Current risk logic uses current receivables and collections data and owner-approved rules.
+  - `invalid`: bütçe cells with formula errors, until validation passes.
+- **Consequences:** each M6 importer declares statuses for the fields it exposes. This is not a generic
+  framework. The 12 owner questions in D-021 are now resolved or reduced to M6-0 technical verification
+  (`docs/roadmap_m6_m7.md` §7).
+
+### D-024 · 2026-10-10 · Sales organization and CRM coverage
+- **Decision (owner answers):** there are two primary salespeople, and their names are never in the
+  repo. The planned hires are **office-based sales support / inside-sales assistants**, not field
+  salespeople: no new territories and no performance comparisons for them. CRM logging is inconsistent
+  between roles, so CRM counts are **not** comparable performance metrics.
+- **Consequences:** M7 includes a CRM coverage / data-completeness requirement. CRM-derived metrics
+  carry a coverage warning, and Python never ranks salesperson performance on raw activity counts without
+  approved completeness logic. "Sales Support / Inside Sales Support" is a future concept, likely a
+  follow-up queue, and is not designed in detail yet.
+
+### D-025 · 2026-10-10 · Fair and acquisition attribution start from existing trusted data
+- **Decision (owner answers):** the 2020–2026 sales report's activity/source field reliably records
+  fair names and other order sources, so fair-generated orders are already identifiable. M6 validates
+  and normalizes this field (M6-2) before any new attribution system is built. The January Fair Command
+  Center (M7) starts from existing attribution, and recovered invitation/attendance lists come later. All
+  attribution is deterministic Python. Customer-acquisition sources (Google/inbound, fair, referral,
+  distributor list, historical reactivation, other) are future tracking context. Geri Kazanım and Yeni
+  Potansiyel Müşteri stay separate. No web scraping.
+- **Consequences:** the exact grain and values of the field are verified in M6-0. No SKU-level claims
+  are made until then.
+
+### D-026 · 2026-10-10 · Legitimate recorded transactions only
+- **Decision:** StockAgent models only legitimate, recorded company transactions and validated
+  accounting data. Any financing, shareholder or interest scenario uses recorded values and
+  owner/accountant-approved accounting treatment.

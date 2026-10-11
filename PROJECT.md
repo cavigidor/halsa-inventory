@@ -104,6 +104,13 @@ Sources planned for M6: hedef raporu (potential, territory, visits), the detaile
 the Trodat sales report (SKU intelligence), and the owner-only sources gider/gelir, kredi takip and
 bütçe (bütçe gated by cell-level validation because of formula errors).
 
+**Data confidence (D-023):** fields carry a Python-assigned status: `trusted`, `incomplete`, `stale`,
+`unverified` or `invalid`. The 2020–2026 sales history (including its order activity/source field, used
+for fair attribution) is the trusted commercial core. CRM is incomplete. `Haftalık Kaşe Adedi`, `Risk`
+and `Kredi` are stale historical fields that never drive decisions as current values. The AI never
+upgrades a stale field into a current fact. StockAgent models only legitimate, recorded transactions
+(D-026).
+
 ## Privacy boundary
 GitHub holds code, tests, prompts, schemas, docs, synthetic fixtures, CI and config templates.
 The Mac holds the real Excel exports, SQLite state, `.env` and keys, `agent_context.json`, and
