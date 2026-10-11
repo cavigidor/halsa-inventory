@@ -235,3 +235,24 @@ Don't rewrite earlier entries. If one is superseded, add a new entry that says s
 - **Decision:** StockAgent models only legitimate, recorded company transactions and validated
   accounting data. Any financing, shareholder or interest scenario uses recorded values and
   owner/accountant-approved accounting treatment.
+
+### D-027 · 2026-10-10 · M5-1 implementation notes (assumptions within the approved design)
+- **Action registry:** `services/actions.py` holds the contract, registry and server-described categories.
+  `services/action_sources.py` registers the four built-in sources (collections_aging, overstock_buyers,
+  winback_lapsed, real_growth). They reproduce the M1 `build_actions` output exactly; this was verified
+  identical on synthetic data and on the real 5 Oct 2026 exports (15/15 actions, with and without
+  inflation). Ties keep registration order.
+- **`reason`:** deterministic Turkish templates per category, extended with Python facts (for example
+  still ordering, or overdue debt blocking win-back). It is never written by the AI.
+- **"One provider call" per enrich request** means one grounded request for the uncached actions. The
+  M3 numeric guard may still make its single stricter retry (D-002). Already-cached actions are not sent.
+- **Cache key:** `action_id` (category + entity + facts hash) + `prompt_version` (hash of the system
+  prompt + `AI_PIPELINE_VERSION`) + `provider:model`. Only successful, grounded results are cached.
+  Cached text is **not** served while AI is unavailable. The cache lives in the local SQLite state DB.
+- **Validation:** enrich accepts 1–5 **unique** ids that are currently **open**. Anything else is 422
+  before any provider call. The response lists `enriched`, `cached` and `failed` ids, and returns actions
+  in Python order.
+- **Guard:** `X-StockAgent: 1` is required on **every** mutating request, including the deterministic
+  `/api/scenario` POST, as the design says.
+- **Warm-up:** a background thread builds the context at startup (`WARMUP_CONTEXT=false` disables it).
+  `ContextRepository` builds under a lock, and `/api/health` reports `context_ready` / `context_error`.

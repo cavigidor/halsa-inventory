@@ -1,7 +1,7 @@
 """ContextRepository — agent_context'i bir kez üretir/önbelleğe alır ve varlık-bazlı
 (müşteri/ürün) daraltılmış bağlam sağlar. Agent Excel'e ASLA dokunmaz; bu katmanı okur.
 Testlerde hazır bir context dict enjekte edilebilir (Excel gerekmez)."""
-import os, sys
+import os, sys, threading
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -15,14 +15,29 @@ class ContextRepository:
         self._infl = inflation_rate
         self._cust_idx = None
         self._prod_idx = None
+        self._lock = threading.Lock()   # warm-up thread and requests never build twice in parallel
+        self.last_error = None          # short description of the last failed build (for /api/health)
 
     # ---- context ----
+    def is_ready(self):
+        """True once the deterministic context exists (never triggers a build)."""
+        return self._ctx is not None
+
     def context(self, refresh=False):
-        if self._ctx is None or refresh:
-            if not self._folder:
-                raise RuntimeError("Veri klasörü ayarlı değil.")
-            self._ctx = CTX.build_context(self._folder, inflation_rate=self._infl)
-            self._cust_idx = self._prod_idx = None
+        if self._ctx is not None and not refresh:
+            return self._ctx
+        with self._lock:
+            if self._ctx is None or refresh:
+                if not self._folder:
+                    self.last_error = "Veri klasörü ayarlı değil."
+                    raise RuntimeError(self.last_error)
+                try:
+                    self._ctx = CTX.build_context(self._folder, inflation_rate=self._infl)
+                except Exception as e:
+                    self.last_error = f"{type(e).__name__}: {str(e)[:200]}"
+                    raise
+                self.last_error = None
+                self._cust_idx = self._prod_idx = None
         return self._ctx
 
     def refresh(self):
