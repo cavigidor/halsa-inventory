@@ -119,15 +119,19 @@ def test_actions_with_mock_ai(client):
 
 # ---- customer / product ----
 def test_customer_found(client):
+    # M5-4 (D-031): GET is deterministic; the AI analysis is an explicit guarded POST.
     r = client.get("/api/agent/customer/120.2"); assert r.status_code == 200
-    assert r.json()["ai_available"] is True and r.json()["summary"]
+    assert r.json()["ai_available"] is True and r.json()["summary"] is None and r.json()["display_facts"]
+    a = client.post("/api/agent/customer/120.2/analyze"); assert a.status_code == 200
+    assert a.json()["summary"]
 
 def test_customer_not_found(client):
     assert client.get("/api/agent/customer/NOPE").status_code == 404
 
 def test_product_found(client):
     r = client.get("/api/agent/product/P1"); assert r.status_code == 200
-    assert r.json()["best_buyers"]
+    assert r.json()["best_buyers"] == [] and r.json()["facts"]["product_code"] == "P1"
+    assert client.post("/api/agent/product/P1/analyze").json()["best_buyers"]
 
 def test_product_not_found(client):
     assert client.get("/api/agent/product/NOPE").status_code == 404

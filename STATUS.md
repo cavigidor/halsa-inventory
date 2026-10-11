@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-11 (M5-2 merged to `main` @ `0061a43`; M5-3 action state done on `claude/m5-3-action-state`, PR pending)._
+_Updated 2026-10-11 (M5-3 merged to `main` @ `c9e1a4d`; M5-4 drafts + customer drawer done on `claude/m5-4-drafts-customer-drawer`, PR pending)._
 
 ## Git
 - **Branch:** `claude/milestone-3-live-ai`, based on `main`.
@@ -77,7 +77,9 @@ OpenAI model. The OpenAI default model `gpt-5-mini` lives in
 `config.DEFAULT_MODELS`. It has not been verified live; override it with `AI_MODEL`.
 
 ## Not implemented / known issues
-- Milestone 4 (live macro data) is not started. Milestone 5: M5-1 to M5-3 done; M5-4 to M5-6 not started.
+- Milestone 4 (live macro data) is not started. Milestone 5: M5-1 to M5-4 done; M5-5 and M5-6 not started.
+- `weekly_agent.py` (older, unused, standalone weekly report e-mail to the owner via SMTP) still exists. The app
+  never imports it and it never contacts customers; it is outside the copy-only app surface (D-031).
 - DQ-3: tie order in "Büyüme / Küçülme" depends on the Python hash seed (rows, not values; TASKS *Next*).
 - DQ-1: dashboard margin uses `fillna(0)` for missing cost (owner decision needed).
 - DQ-2: the dashboard "Stok Eritme" list still includes KAPALI customers (owner decision needed).
@@ -212,7 +214,7 @@ Real-data regression (Mac VM, 5 Oct 2026 exports, temp copies of `main` and the 
   between two runs (DQ-3).
 - The dashboard `data-asof` equals the server `as_of_data_date` (2026-10-05).
 
-## M5-3 (done; PR pending)
+## M5-3 (done; merged in PR #6 @ `c9e1a4d`)
 Branch `claude/m5-3-action-state` from `main` @ `0061a43`. The existing SQLite action state is reused; notes in D-029.
 - **Card controls:** "✓ Yapıldı" → `POST /api/actions/{id}/complete`; "✕ Gizle" → `.../dismiss`; "⏸ Ertele" opens
   a date picker (default today + 7, minimum tomorrow) → `.../defer` with `{"until": "YYYY-MM-DD"}`. All send
@@ -245,5 +247,54 @@ Real-data regression (Mac VM, 5 Oct 2026 exports, temp copies, temporary `AGENT_
 - Through the API: 15 open → complete + dismiss + defer → 12 open (the three hidden) → reopen all three → the same
   15 in the same order; no AI calls recorded. The real `data/agent_state.db` was not created or touched.
 
+## M5-4 (done; PR pending)
+Branch `claude/m5-4-drafts-customer-drawer` from `main` @ `c9e1a4d`. Notes in D-030 (drafts) and D-031 (GETs).
+- **Draft contract:** `POST /api/agent/draft-message` takes `customer_code`, `channel` (`whatsapp`|`email`),
+  `purpose` (`collection`|`offer`|`winback`|`sales_followup`|`fair_invite`), optional `product_code` and
+  `additional_instruction` (≤300 chars). Unknown fields, other values, or mixing with the legacy field → 422.
+  Legacy `message_type` is mapped once (`services/drafts.LEGACY_MESSAGE_TYPES`): collection → whatsapp/collection,
+  sales_offer → whatsapp/offer, winback → whatsapp/winback, whatsapp → whatsapp/sales_followup,
+  email → email/sales_followup. The response carries `channel` and `purpose`.
+- **KAPALI:** only `collection` is allowed; every other purpose returns `available: false`,
+  `ai_error_category: "kapali_customer"`, "KAPALI müşteri: yalnızca tahsilat mesajı hazırlanabilir." before any
+  provider call (also with AI disabled). KAPALI status now comes from the full classification
+  (`ctx["closed_customers"]`: order-source attribute or invoice party), not only the top-N risk list.
+- **Draft generation:** a purpose-scoped, customer-facing evidence packet (name, rep; overdue and oldest debt only
+  for collection; previous products, last purchase year for winback, optional product otherwise; no scores, tiers,
+  ratios, growth analysis or KAPALI wording). Channel/purpose rules are a draft-only prompt layer, so the global
+  prompt and the action-cache `prompt_version` are unchanged. Output goes through the numeric guard, fact
+  substitution and a new deterministic customer-facing leak check (AI wording, scores, ranking, tiers, internal
+  category labels, fact ids, technical flags), with the same single stricter retry. No draft cache.
+- **Paid GET fixed:** `GET /api/agent/customer/{code}` and `GET /api/agent/product/{code}` never call the provider
+  (same response shape, AI fields empty; customer adds `display_facts`). The AI analysis moved to guarded
+  `POST .../analyze` (no UI).
+- **Drawer data fix (found on real data):** 6 of the 15 real actions referenced customers outside the top-N
+  `shrinking` list, so their lookups 404'd. The context now carries the already-computed rows of action customers
+  outside each cut (`ctx["action_customers"]`); the top-N lists and the actions are unchanged.
+- **UI:** customer cards only get "✉ Taslak" and "🔍 Müşteri" (product cards never; no customer is inferred from
+  them). The draft panel opens without a request; defaults: WhatsApp and the category's server-described
+  `draft_purpose` (collections → collection, winback → winback, real_decline → sales_followup, unknown →
+  sales_followup). "Taslak oluştur" sends the canonical request with `X-StockAgent: 1`, shows "Taslak hazırlanıyor…",
+  then the text in an editable textarea (plain text), evidence chips and "Kopyala" ("Kopyalandı", or a
+  manual-copy hint). No send button or link. The drawer GETs once per customer per page session (in-memory
+  `Map`, failures not cached), shows Python-formatted facts and notes, a KAPALI tag, and closes with ✕ or Escape.
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (with node + jsdom) | `REQUIRE_JS_TESTS=1 python -m pytest -q` | **246 passed, 7 skipped, 1 xfailed** (48 new backend/structural tests; the jsdom run has 39 tests, 12 new) |
+
+Mutation check: Taslak on product cards, an e-mail default, the legacy field in the UI request, no drawer cache,
+ignoring the server purpose, or caching drawer failures each makes the DOM tests fail.
+Browser check (Chromium, real app, synthetic data, mock provider): opening the draft panel sends nothing; one
+POST per "Taslak oluştur"; reopening the drawer sends no second GET; desktop and 390 px layouts render.
+
+Real-data regression (Mac VM, 5 Oct 2026 exports, temp copies, temporary `AGENT_DB`, mock/spy provider only, no
+live call, nothing sent):
+- Actions: 15 on `main`, 15 on the branch; content identical.
+- Customer GETs for all 15 customer actions: 200, zero provider calls (before the drawer fix: 6 × 404).
+- KAPALI offer draft refused with zero provider calls; one explicit mock draft = one provider call.
+- No send routes; the real `data/agent_state.db` was not created or touched.
+
 ## Immediate next task
-Review and merge the M5-3 PR. Then M5-4 (WhatsApp-first drafts and the customer drawer), per `docs/m5_action_center.md` §11.
+Review and merge the M5-4 PR. Then M5-5 (controlled monthly refresh), per `docs/m5_action_center.md` §11.

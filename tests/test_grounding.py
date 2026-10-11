@@ -172,7 +172,7 @@ def test_kapali_opportunities_removed_by_python():
 
 def test_kapali_winback_draft_refused_without_calling_model():
     prov = Scripted([])
-    data, r = BusinessActionAgent(prov).draft_message("winback", {**CUST, "closed": True})
+    data, r = BusinessActionAgent(prov).draft_message("whatsapp", "winback", {**CUST, "closed": True})
     assert data is None and r["category"] == "kapali_customer" and prov.calls == 0
 
 
@@ -221,7 +221,7 @@ def test_numbers_inside_sentences_still_rejected(text):
 
 
 def test_user_instruction_text_is_not_allowlisted():
-    p = EV.draft_packet("email", {"customer_code": "900.00.0001", "name": "Sentetik"},
+    p = EV.draft_packet("email", "offer", {"customer_code": "900.00.0001", "name": "Sentetik"},
                         instruction="yüzde 15 indirim öner")
     with pytest.raises(G.GroundingError):
         G.check({"message": "Size yüzde 15 indirim sunabiliriz.", "evidence_fact_ids": [], "warnings": []}, p)

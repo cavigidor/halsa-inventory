@@ -50,6 +50,10 @@ function setup(opts = {}) {
     server.status[id] = { status: STATUS[kind], until };
     return { json: { ok: true, action_id: id, status: STATUS[kind], defer_until: until } };
   });
+  const customers = opts.customers || clone(FIX.customers);
+  const customerFn = opts.customerFn || ((code) => (customers[code] ? { json: customers[code] } : { status: 404, json: { detail: 'yok' } }));
+  const draftFn = opts.draftFn || ((b) => ({ json: { ...clone(FIX.draft_sample), channel: b.channel, purpose: b.purpose } }));
+  const copied = [];
   const routes = {
     '/api/health': opts.healthFn || (() => ({ json: health })),
     '/api/agent/categories': () => ({ json: cats }),
@@ -65,6 +69,19 @@ function setup(opts = {}) {
     const body = init.body ? JSON.parse(init.body) : null;
     calls.push({ path, method, headers: { ...(init.headers || {}) }, body });
     if (opts.offline) throw new TypeError('Failed to fetch');
+    const cm = /^\/api\/agent\/customer\/([^/]+)$/.exec(path);
+    if (cm && method === 'GET') {
+      const r = await customerFn(decodeURIComponent(cm[1]));
+      if (r instanceof Error) throw r;
+      const status = r.status || 200;
+      return { ok: status >= 200 && status < 300, status, json: async () => r.json };
+    }
+    if (path === '/api/agent/draft-message' && method === 'POST') {
+      const r = await draftFn(body);
+      if (r instanceof Error) throw r;
+      const status = r.status || 200;
+      return { ok: status >= 200 && status < 300, status, json: async () => r.json };
+    }
     const m = /^\/api\/actions\/([^/]+)\/(complete|defer|dismiss|reopen)$/.exec(path);
     if (m && method === 'POST') {
       const r = await stateFn(m[2], decodeURIComponent(m[1]), body || {});
@@ -80,11 +97,17 @@ function setup(opts = {}) {
   }
   const dom = new JSDOM(HTML, {
     url: opts.url || 'http://127.0.0.1:8000/', runScripts: 'dangerously', pretendToBeVisual: true,
-    beforeParse(w) { w.fetch = fakeFetch; w.__AI_POLL_MS = 5; if (opts.undoMs) w.__AI_UNDO_MS = opts.undoMs; },
+    beforeParse(w) {
+      w.fetch = fakeFetch; w.__AI_POLL_MS = 5; if (opts.undoMs) w.__AI_UNDO_MS = opts.undoMs;
+      const writeText = opts.clipboardFail ? async () => { throw new Error('denied'); } : async (t) => { copied.push(t); };
+      if (!opts.noClipboard) Object.defineProperty(w.navigator, 'clipboard', { value: { writeText }, configurable: true });
+    },
   });
   const doc = dom.window.document;
   const q = (s) => doc.querySelector('#ai ' + s), qa = (s) => [...doc.querySelectorAll('#ai ' + s)];
-  return { dom, win: dom.window, doc, calls, q, qa, actions, server,
+  return { dom, win: dom.window, doc, calls, q, qa, actions, server, copied,
+    gets: (prefix) => calls.filter((c) => c.method === 'GET' && c.path.startsWith(prefix)),
+    draftPosts: () => calls.filter((c) => c.path === '/api/agent/draft-message'),
     open: () => doc.querySelector('.tab[data-t="ai"]').click(),
     posts: () => calls.filter((c) => c.method !== 'GET'),
     statePosts: () => calls.filter((c) => c.method === 'POST' && c.path.startsWith('/api/actions/'))
@@ -586,5 +609,242 @@ test('state survives a reload; an undone action is open again after reload', asy
   assert.ok(now.includes(d), 'the undone action is open');
   assert.deepEqual(now, FIX.actions.actions.map((x) => x.action_id).filter((x) => ![a, b, c].includes(x)));
   assert.equal(r.posts().length, 0);
+});
+
+// ---------------- M5-4: drafts (channel × purpose, copy-only) and the customer drawer ----------------
+const custCards = (t) => t.qa('.aic').filter((c) => t.actions.actions.find((a) => a.action_id === c.dataset.id).entity_type === 'customer');
+const firstCust = (t) => custCards(t)[0];
+const actionOf = (t, c) => t.actions.actions.find((a) => a.action_id === c.dataset.id);
+const setSelect = (sel, v) => { sel.value = v; sel.dispatchEvent(new sel.ownerDocument.defaultView.Event('change')); };
+
+test('✉ Taslak and 🔍 Müşteri appear on customer cards only, never on product cards', async () => {
+  const t = setup();
+  t.open(); await until(cardsReady(t));
+  for (const c of t.qa('.aic')) {
+    const isCust = actionOf(t, c).entity_type === 'customer';
+    assert.equal(!!c.querySelector('.aic-draft'), isCust);
+    assert.equal(!!c.querySelector('.aic-cust'), isCust);
+  }
+  assert.ok(t.qa('.aic').some((c) => actionOf(t, c).entity_type === 'product'), 'synthetic queue has a product action');
+  assert.equal(firstCust(t).querySelector('.aic-draft').textContent, '✉ Taslak');
+  assert.equal(firstCust(t).querySelector('.aic-cust').textContent, '🔍 Müşteri');
+});
+
+test('opening the draft panel makes no request; WhatsApp and the server category purpose are the defaults', async () => {
+  const cats = clone(FIX.categories);
+  cats.push({ key: 'zz_fair', label_tr: 'Fuar (test)', color: '#123456', entity_type: 'customer', source: 'x', draft_purpose: 'fair_invite' });
+  cats.push({ key: 'zz_new', label_tr: 'Yeni (test)', color: '#654321', entity_type: 'customer', source: 'y', draft_purpose: null });
+  const actions = clone(FIX.actions);
+  const base = actions.actions.find((a) => a.entity_type === 'customer');
+  actions.actions.push({ ...clone(base), action_id: 'zz_fair:900.00.0001:aaaa', category: 'zz_fair', score: 1 },
+                       { ...clone(base), action_id: 'zz_new:900.00.0001:bbbb', category: 'zz_new', score: 0.5 });
+  const t = setup({ categories: cats, actions });
+  t.open(); await until(cardsReady(t));
+  const before = t.calls.length;
+  const expected = { winback: 'winback', real_decline: 'sales_followup', collections: 'collection', zz_fair: 'fair_invite', zz_new: 'sales_followup' };
+  for (const c of custCards(t)) {
+    c.querySelector('.aic-draft').click();
+    const p = card(t, c.dataset.id).querySelector('.aic-draftp');
+    assert.equal(p.querySelector('.ai-dch').value, 'whatsapp');
+    assert.equal(p.querySelector('.ai-dpu').value, expected[actionOf(t, c).category], actionOf(t, c).category);
+  }
+  await sleep(20);
+  assert.equal(t.calls.length, before, 'opening drafts sends nothing');
+  const opts = [...t.q('.aic-draftp .ai-dpu').options].map((o) => o.value);
+  assert.deepEqual(opts, ['collection', 'offer', 'winback', 'sales_followup', 'fair_invite']);
+  assert.deepEqual([...t.q('.aic-draftp .ai-dch').options].map((o) => o.value), ['whatsapp', 'email']);
+});
+
+test('Taslak oluştur sends the canonical channel × purpose request with the header; result is plain text and copyable', async () => {
+  let release;
+  const bad = '<img src=x onerror="window.__pwned=1">Merhaba,\nnasılsınız?';
+  const t = setup({ draftFn: (b) => new Promise((r) => { release = () => r({ json: { ...clone(FIX.draft_sample),
+    channel: b.channel, purpose: b.purpose, message: bad, evidence: [{ fact_id: 'F001', label: 'Müşteri', display_value: '<b>x</b>' }] } }); }) });
+  t.open(); await until(cardsReady(t));
+  const c = firstCust(t), id = c.dataset.id, a = actionOf(t, c);
+  c.querySelector('.aic-draft').click();
+  const p = () => card(t, id).querySelector('.aic-draftp');
+  setSelect(p().querySelector('.ai-dch'), 'email');
+  setSelect(p().querySelector('.ai-dpu'), 'offer');
+  const ins = p().querySelector('.ai-din'); ins.value = '  kısa ve sıcak  '; ins.dispatchEvent(new t.win.Event('input'));
+  p().querySelector('.ai-dgo').click();
+  await until(() => t.draftPosts().length === 1);
+  const req = t.draftPosts()[0];
+  assert.deepEqual(req.body, { customer_code: String(a.entity_id), channel: 'email', purpose: 'offer', additional_instruction: 'kısa ve sıcak' });
+  assert.equal(req.headers['X-StockAgent'], '1');
+  assert.ok(!('message_type' in req.body));
+  // generating: status shown, the rest of the tab usable
+  assert.equal(p().querySelector('.aic-dstat').textContent, 'Taslak hazırlanıyor…');
+  assert.ok(p().querySelector('.ai-dgo').disabled);
+  const other = t.qa('.aic').find((x) => x.dataset.id !== id);
+  assert.ok(![...other.querySelectorAll('.ai-sbtn')].some((b) => b.disabled));
+  release();
+  await until(() => p().querySelector('.ai-dmsg'));
+  assert.equal(p().querySelector('.ai-dmsg').value, bad, 'shown verbatim as text');
+  assert.equal(t.doc.getElementById('ai').querySelectorAll('img, .aic-draftp b').length, 0);
+  assert.equal(t.win.__pwned, undefined);
+  assert.equal(p().querySelector('.aic-dhead').textContent, 'E-posta · Teklif');
+  assert.equal(p().querySelector('.aic-chip').textContent, 'Müşteri: <b>x</b>');
+  p().querySelector('.ai-dcopy').click();
+  await until(() => p().querySelector('.ai-dcopied'));
+  assert.deepEqual(t.copied, [bad]);
+  assert.equal(p().querySelector('.ai-dcopied').textContent, 'Kopyalandı');
+  const ta = p().querySelector('.ai-dmsg'); ta.value = 'Düzenlenmiş metin'; ta.dispatchEvent(new t.win.Event('input'));
+  p().querySelector('.ai-dcopy').click();
+  await until(() => t.copied.length === 2);
+  assert.equal(t.copied[1], 'Düzenlenmiş metin', 'Kopyala copies the text as displayed');
+  assert.equal(t.enrichPosts().length, 0);
+  assert.equal(t.statePosts().length, 0, 'drafting never changes action state');
+});
+
+test('copy-only: no send control or messaging link anywhere in the tab', async () => {
+  const t = setup();
+  t.open(); await until(cardsReady(t));
+  firstCust(t).querySelector('.aic-draft').click();
+  firstCust(t).querySelector('.ai-dgo').click();
+  await until(() => t.q('.ai-dmsg'));
+  const panel = t.doc.getElementById('ai');
+  for (const b of panel.querySelectorAll('button, a, [role="button"]')) assert.doesNotMatch(b.textContent, /gönder|send|whatsapp'?a aç/i);
+  assert.equal(panel.querySelectorAll('a[href]').length, 0);
+  assert.doesNotMatch(HTML, /wa\.me|mailto:|web\.whatsapp/);
+  assert.match(t.q('.aic-dfoot').textContent, /kendiniz gönderin/);
+});
+
+test('clipboard failure leaves the draft visible with a manual-copy hint', async () => {
+  for (const o of [{ clipboardFail: true }, { noClipboard: true }]) {
+    const t = setup(o);
+    t.open(); await until(cardsReady(t));
+    firstCust(t).querySelector('.aic-draft').click();
+    firstCust(t).querySelector('.ai-dgo').click();
+    await until(() => t.q('.ai-dmsg'));
+    t.q('.ai-dcopy').click();
+    await until(() => t.q('.ai-dcopied.fail'));
+    assert.equal(t.q('.ai-dcopied').textContent, 'Kopyalanamadı; metni seçip elle kopyalayın.');
+    assert.equal(t.q('.ai-dmsg').value, FIX.draft_sample.message);
+    t.dom.window.close();
+  }
+});
+
+test('KAPALI refusal from the backend is shown as text; the card stays usable', async () => {
+  const t = setup({ draftFn: () => ({ json: clone(FIX.kapali_refusal) }) });
+  t.open(); await until(cardsReady(t));
+  const c = firstCust(t), id = c.dataset.id;
+  c.querySelector('.aic-draft').click();
+  setSelect(card(t, id).querySelector('.ai-dpu'), 'offer');
+  card(t, id).querySelector('.ai-dgo').click();
+  await until(() => card(t, id).querySelector('.ai-derr'));
+  assert.equal(card(t, id).querySelector('.ai-derr').textContent, 'KAPALI müşteri: yalnızca tahsilat mesajı hazırlanabilir.');
+  assert.equal(card(t, id).querySelector('.ai-dmsg'), null);
+  assert.ok(card(t, id).querySelector('.aic-facts li'));
+  card(t, id).querySelector('.aic-done').click();
+  await until(() => !card(t, id));
+});
+
+test('draft failures map to clear messages and never break the card', async () => {
+  const cases = [[{ json: { available: false, ai_error_category: 'quota', reason: 'x' } }, 'OpenAI kredisi yetersiz'],
+                 [{ json: { available: false, ai_error_category: 'internal_leak' } }, 'Taslak iç bilgi içerdiği için gösterilmiyor.'],
+                 [{ json: { available: false, ai_error_category: 'numeric_guard' } }, 'AI metni güvenlik kontrolünden geçmedi, gösterilmiyor'],
+                 [{ json: { available: false, ai_error_category: 'disabled' } }, 'AI kapalı (.env: AI_PROVIDER=openai)'],
+                 [{ status: 500, json: {} }, 'Taslak oluşturulamadı.'], [new TypeError('Failed to fetch'), 'Taslak oluşturulamadı.']];
+  for (const [resp, msg] of cases) {
+    const t = setup({ draftFn: () => resp });
+    t.open(); await until(cardsReady(t));
+    const id = firstCust(t).dataset.id;
+    firstCust(t).querySelector('.aic-draft').click();
+    card(t, id).querySelector('.ai-dgo').click();
+    await until(() => card(t, id).querySelector('.ai-derr'));
+    assert.equal(card(t, id).querySelector('.ai-derr').textContent, msg);
+    assert.ok(!card(t, id).querySelector('.ai-dgo').disabled, 'can try again');
+    assert.ok(card(t, id).querySelector('.aic-reason') && card(t, id).querySelector('.ai-one'));
+    t.dom.window.close();
+  }
+});
+
+test('AI disabled: drafts report unavailable; the drawer and state controls still work', async () => {
+  const t = setup({ health: { ...clone(FIX.health), ai_available: false }, actions: { ...clone(FIX.actions), ai_available: false } });
+  t.open(); await until(cardsReady(t));
+  const c = firstCust(t);
+  c.querySelector('.aic-draft').click();
+  assert.ok(c.querySelector('.ai-dgo').disabled);
+  assert.equal(c.querySelector('.aic-dnote').textContent, 'AI kapalı (.env: AI_PROVIDER=openai)');
+  c.querySelector('.aic-cust').click();
+  await until(() => t.qa('.ai-dr-row').length > 0);
+  assert.equal(t.draftPosts().length, 0);
+});
+
+test('the draft panel survives an AI comment on the same card (state kept, no extra request)', async () => {
+  const t = setup();
+  t.open(); await until(cardsReady(t));
+  const id = firstCust(t).dataset.id;
+  firstCust(t).querySelector('.aic-draft').click();
+  setSelect(card(t, id).querySelector('.ai-dch'), 'email');
+  card(t, id).querySelector('.ai-one').click();
+  await until(() => card(t, id).querySelector('.aic-ai'));
+  assert.equal(card(t, id).querySelector('.aic-draftp .ai-dch').value, 'email');
+  assert.equal(t.draftPosts().length, 0);
+});
+
+test('customer drawer: first open GETs deterministic data, reopening the same customer uses the session cache', async () => {
+  const t = setup();
+  t.open(); await until(cardsReady(t));
+  const c = firstCust(t), code = String(actionOf(t, c).entity_id), data = FIX.customers[code];
+  c.querySelector('.aic-cust').click();
+  await until(() => t.qa('.ai-dr-row').length > 0);
+  assert.ok(visible(t.q('.ai-drawer')));
+  assert.deepEqual(t.gets('/api/agent/customer/').map((x) => decodeURIComponent(x.path)), [`/api/agent/customer/${code}`]);
+  assert.equal(t.q('.ai-dr-name').textContent, data.facts.name);
+  assert.match(t.q('.ai-dr-sub').textContent, new RegExp('^' + code.replace(/\./g, '\\.')));
+  assert.deepEqual(t.qa('.ai-dr-row').map((r) => [r.querySelector('.l').textContent, r.querySelector('.v').textContent]),
+                   data.display_facts.map((f) => [f.label, f.display_value]));
+  t.q('.ai-dr-x').click();
+  assert.ok(!visible(t.q('.ai-drawer')));
+  c.querySelector('.aic-cust').click();
+  await until(() => visible(t.q('.ai-drawer')) && t.qa('.ai-dr-row').length > 0);
+  assert.equal(t.gets('/api/agent/customer/').length, 1, 'cached for this page session');
+  t.doc.dispatchEvent(new t.win.KeyboardEvent('keydown', { key: 'Escape' }));
+  assert.ok(!visible(t.q('.ai-drawer')), 'Escape closes the drawer');
+  const other = custCards(t).find((x) => String(actionOf(t, x).entity_id) !== code);
+  other.querySelector('.aic-cust').click();
+  await until(() => t.gets('/api/agent/customer/').length === 2);
+  assert.equal(t.posts().length, 0, 'the drawer never POSTs (no AI, no state change)');
+  assert.equal(t.enrichPosts().length + t.draftPosts().length + t.statePosts().length, 0);
+});
+
+test('drawer shows KAPALI from the server facts and escapes all text', async () => {
+  const actions = clone(FIX.actions);
+  const base = actions.actions.find((a) => a.entity_type === 'customer');
+  actions.actions.unshift({ ...clone(base), action_id: 'collections:900.00.0007:cccc', category: 'collections', entity_id: '900.00.0007', score: 99 });
+  const customers = clone(FIX.customers);
+  customers['900.00.0007'].display_facts.push({ label: '<img src=x onerror="window.__pwned=1">', display_value: '<script>x</script>' });
+  const t = setup({ actions, customers });
+  t.open(); await until(cardsReady(t));
+  card(t, 'collections:900.00.0007:cccc').querySelector('.aic-cust').click();
+  await until(() => t.qa('.ai-dr-row').length > 0);
+  assert.equal(t.q('.ai-dr-tag').textContent, 'KAPALI');
+  assert.equal(t.q('.ai-drawer').querySelectorAll('img, script').length, 0);
+  assert.equal(t.win.__pwned, undefined);
+  assert.equal(t.qa('.ai-dr-row').at(-1).querySelector('.v').textContent, '<script>x</script>');
+});
+
+test('drawer failure shows a compact message, keeps the tab working, and is not cached', async () => {
+  let n = 0;
+  const t = setup({ customerFn: (code) => (++n === 1 ? { status: 404, json: { detail: 'yok' } } : { json: FIX.customers[code] }) });
+  t.open(); await until(cardsReady(t));
+  const c = firstCust(t);
+  c.querySelector('.aic-cust').click();
+  await until(() => t.q('.ai-dr-msg.err'));
+  assert.equal(t.q('.ai-dr-msg').textContent, 'Müşteri bilgileri yüklenemedi.');
+  assert.equal(t.qa('.aic').length, FIX.actions.actions.length);
+  c.querySelector('.aic-done').click();
+  await until(() => !card(t, c.dataset.id));
+  t.q('.ai-undo-b').click();
+  await until(() => !!card(t, c.dataset.id));
+  card(t, c.dataset.id).querySelector('.aic-cust').click();
+  await until(() => t.qa('.ai-dr-row').length > 0);
+  assert.equal(t.gets('/api/agent/customer/').length, 2, 'a failure is retried on the next open');
+  const t2 = setup({ customerFn: () => new TypeError('Failed to fetch') });
+  t2.open(); await until(cardsReady(t2));
+  firstCust(t2).querySelector('.aic-cust').click();
+  await until(() => t2.q('.ai-dr-msg.err'));
 });
 }

@@ -293,3 +293,39 @@ Don't rewrite earlier entries. If one is superseded, add a new entry that says s
   AI text without a refetch or an AI call.
 - **Unchanged store semantics:** the same facts give the same `action_id`; `upsert_actions` never reopens a
   completed or dismissed action; changed facts make a new action.
+
+### D-030 · 2026-10-11 · Message drafts: channel × purpose contract (M5-4)
+- **Contract:** `POST /api/agent/draft-message` takes `channel` (`whatsapp`|`email`) and `purpose` (`collection`|
+  `offer`|`winback`|`sales_followup`|`fair_invite`) as Pydantic literals, plus `customer_code`, optional
+  `product_code` and `additional_instruction` (≤300 chars). Unknown fields are rejected. The response echoes
+  `channel` and `purpose`.
+- **Legacy:** the mixed `message_type` is accepted only for old callers and mapped in one place
+  (`services/drafts.LEGACY_MESSAGE_TYPES`; generic whatsapp/email → `sales_followup`). It cannot be combined
+  with channel/purpose. The UI never sends it.
+- **KAPALI:** only `collection` drafts; any other purpose is refused in Python before the provider
+  (`kapali_customer`). This supersedes the older rule that blocked only winback and sales_offer. KAPALI status comes
+  from the full classification in the context (`closed_customers`), not only from the top-N risk list.
+- **Prompt layer:** channel and purpose rules are appended to the system prompt for the `message_draft` task only,
+  so `prompt_version` (the action AI-cache key) does not change. The draft packet is purpose-scoped and
+  customer-facing (no scores, tiers, ratios, growth analysis, flags or KAPALI wording).
+- **Customer-facing check:** after grounding and fact substitution, a deterministic check rejects internal wording
+  (AI/system, score, ranking, tier, internal category labels, fact ids, technical flags) as `internal_leak`, with the
+  same single stricter retry as the numeric guard. `additional_instruction` stays untrusted (never allow-listed).
+- **Defaults and copy-only:** categories describe a default `draft_purpose`, so the UI hard-codes no category;
+  the default channel is WhatsApp. Drafts are shown as editable plain text with "Kopyala". There is no send
+  capability, and no draft cache.
+
+### D-031 · 2026-10-11 · Paid AI off GET; drawer data for every action customer (M5-4)
+- **GETs are deterministic:** `GET /api/agent/customer/{code}` and `GET /api/agent/product/{code}` never call the
+  provider. They keep their response shape with the AI fields empty, and the customer GET adds Python-formatted
+  `display_facts` for the drawer. The AI analyses moved to `POST /api/agent/customer/{code}/analyze` and
+  `POST /api/agent/product/{code}/analyze` (guarded like every POST; no UI in M5-4). This completes D-020's
+  "paid AI is POST-only".
+- **Action customers outside top-N:** actions are produced from the full lists, but the context lists are top-N, so
+  a real action's customer could be missing from the index (6/15 on the 5 Oct 2026 data). The context now adds
+  `action_customers` (already-computed rows of those customers per source). The top-N lists, actions and
+  calculations are unchanged.
+- **Drawer:** loaded only on click, cached in a browser `Map` for the page session (never in browser storage or on
+  disk), failures not cached, no AI.
+- **Legacy script:** `weekly_agent.py` (unused, standalone SMTP weekly report to the owner) is not part of the app
+  and is not imported by it. The copy-only guarantee covers the app surface (routes, services, dashboard).

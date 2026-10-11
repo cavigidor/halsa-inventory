@@ -27,6 +27,7 @@ class Category:
     color: str
     entity_type: str
     source: str
+    draft_purpose: str = None  # M5-4: default draft purpose (customer categories only); None = none suggested
 
 
 @dataclass(frozen=True)

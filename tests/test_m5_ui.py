@@ -90,6 +90,9 @@ def test_panel_carries_the_dashboard_data_date(built, synthetic_ctx):
 # ---------------- 5-8, 11: static guarantees of the AI script ----------------
 def test_ai_script_hard_codes_no_category(built):
     js = _ai_script(built["ai"])
+    # the draft contract (channel × purpose enums, D-030) is not a category list; a purpose may share a word
+    # with a category key (purpose "winback"), so those two lines are excluded from this check
+    js = "\n".join(l for l in js.splitlines() if not l.startswith(("const CHANNELS=", "const PURPOSES=")))
     for c in A.categories():
         assert c.key not in js and c.label_tr not in js, c.key
     assert "/api/agent/categories" in js
@@ -109,9 +112,11 @@ def test_ai_script_post_contract(built):
     assert "/api/agent/actions/enrich" in js
     # M5-3 state endpoints, keyed by the real action_id
     assert "'/api/actions/'+encodeURIComponent(id)+'/'+kind" in js and "+'/reopen'" in js
-    # no draft / customer / product AI endpoints yet (M5-4)
-    for path in ("/api/agent/customer", "/api/agent/product", "/api/agent/draft-message"):
-        assert path not in js
+    # M5-4: drafts via POST (the post() helper), the drawer via the deterministic customer GET only
+    assert "post('/api/agent/draft-message',body)" in js
+    assert "getJSON('/api/agent/customer/'+encodeURIComponent(code))" in js
+    for path in ("/analyze", "/api/agent/product"):
+        assert path not in js, "no AI analysis and no product calls from the UI"
 
 
 def test_approved_turkish_state_copy_is_present(built):
@@ -129,12 +134,39 @@ def test_approved_turkish_state_copy_is_present(built):
     assert "</script" not in js.lower()
 
 
-def test_m5_3_controls_present_and_m5_4_m5_5_not_built(built):
+def test_m5_3_m5_4_controls_present_and_m5_5_not_built(built):
     block = _ai_block(built["ai"])
-    for label in ("✓ Yapıldı", "⏸ Ertele", "✕ Gizle", "Geri al", "Aksiyon durumu kaydedilemedi."):
+    for label in ("✓ Yapıldı", "⏸ Ertele", "✕ Gizle", "Geri al", "Aksiyon durumu kaydedilemedi.",
+                  "✉ Taslak", "🔍 Müşteri", "Taslak oluştur", "Kopyala", "Taslak hazırlanıyor…",
+                  "Müşteri bilgileri yüklenemedi."):
         assert label in block, label
-    for label in ("Taslak", "WhatsApp", "Yenile", "draft"):
+    for label in ("Yenile", "/api/refresh", "Yenileme"):    # M5-5 controlled refresh is not built
         assert label not in block, label
+
+
+def test_ai_script_has_no_send_capability(built):
+    """Copy-only (D-018): no send button, no wa.me / mailto / WhatsApp Web link, no messaging API."""
+    js = _ai_script(built["ai"]).lower()
+    for needle in ("wa.me", "mailto:", "web.whatsapp", "api.whatsapp", "gönder'", "'gönder", ">gönder",
+                   "window.open", "location.href", "/send"):
+        assert needle not in js, needle
+    assert "navigator.clipboard.writetext" in js
+
+
+def test_ai_script_keeps_business_data_in_memory_only(built):
+    js = _ai_script(built["ai"])
+    for sink in ("localStorage", "sessionStorage", "indexedDB", "document.cookie"):
+        assert sink not in js, sink
+    assert "cust:new Map()" in js
+
+
+def test_draft_contract_in_ui_matches_schema(built):
+    import typing
+    import schemas as S
+    js = _ai_script(built["ai"])
+    keys = lambda line: re.findall(r"\['([a-z_]+)','", next(l for l in js.splitlines() if l.startswith(line)))
+    assert keys("const CHANNELS=") == list(typing.get_args(S.Channel))
+    assert keys("const PURPOSES=") == list(typing.get_args(S.Purpose))
 
 
 # ---------------- backend support: health exposes the data date only when ready ----------------
@@ -174,10 +206,20 @@ def _fixtures(synthetic_ctx):
     c = TestClient(APP.app, headers=H)
     health, cats, acts = (c.get(p).json() for p in ("/api/health", "/api/agent/categories", "/api/agent/actions"))
     assert spy.calls == 0, "GET endpoints never call the provider"
+    codes = sorted({str(a["entity_id"]) for a in acts["actions"] if a["entity_type"] == "customer"} | {"900.00.0007"})
+    customers = {code: c.get(f"/api/agent/customer/{code}").json() for code in codes}
+    assert spy.calls == 0, "customer GETs never call the provider"
     ids = [a["action_id"] for a in acts["actions"]][:5]
     enrich = c.post("/api/agent/actions/enrich", json={"action_ids": ids}).json()
     assert spy.calls == 1 and enrich["enriched"], "mock enrichment must succeed for the sample"
-    return {"health": health, "categories": cats, "actions": acts, "enrich_sample": enrich}
+    cust = next(str(a["entity_id"]) for a in acts["actions"] if a["entity_type"] == "customer")
+    draft = c.post("/api/agent/draft-message", json={"customer_code": cust, "channel": "whatsapp",
+                                                      "purpose": "sales_followup"}).json()
+    refusal = c.post("/api/agent/draft-message", json={"customer_code": "900.00.0007", "channel": "whatsapp",
+                                                        "purpose": "offer"}).json()
+    assert draft["available"] and refusal["ai_error_category"] == "kapali_customer" and spy.calls == 2
+    return {"health": health, "categories": cats, "actions": acts, "enrich_sample": enrich,
+            "customers": customers, "draft_sample": draft, "kapali_refusal": refusal}
 
 
 def _js_runnable():
