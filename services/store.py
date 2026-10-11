@@ -32,6 +32,13 @@ def init_db():
             ts TEXT, kind TEXT,            -- contacted|offer|outcome|followup|rec_accepted|rec_rejected
             detail TEXT, next_followup TEXT)""")
         # AI çağrı gözlemi: YALNIZCA meta veri. Prompt, kanıt paketi, model cevabı ve anahtar SAKLANMAZ.
+        # AI cache (M5-1, D-017): resolved, grounded AI text per action. Key: action_id (contains a hash
+        # of the Python facts, so changed facts -> new key -> cache miss) + prompt version + model.
+        # Local SQLite only (gitignored), like the rest of the action state.
+        c.execute("""CREATE TABLE IF NOT EXISTS ai_cache(
+            action_id TEXT NOT NULL, prompt_version TEXT NOT NULL, model TEXT NOT NULL,
+            created_at TEXT, payload TEXT,
+            PRIMARY KEY (action_id, prompt_version, model))""")
         c.execute("""CREATE TABLE IF NOT EXISTS ai_calls(
             id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, task TEXT, attempt INTEGER,
             provider TEXT, model TEXT, success INTEGER, error_category TEXT,
@@ -123,3 +130,29 @@ def record_ai_call(task, attempt=1, provider=None, model=None, success=False, er
 def recent_ai_calls(limit=50):
     with _conn() as c:
         return [dict(r) for r in c.execute("SELECT * FROM ai_calls ORDER BY id DESC LIMIT ?", (limit,))]
+
+
+def cache_get_many(action_ids, prompt_version, model):
+    """{action_id: {"payload": dict, "created_at": str}} for cached entries (exact key match only)."""
+    if not action_ids or not model:
+        return {}
+    out = {}
+    with _conn() as c:
+        for aid in action_ids:
+            r = c.execute("SELECT payload, created_at FROM ai_cache WHERE action_id=? AND prompt_version=? "
+                          "AND model=?", (aid, prompt_version, model)).fetchone()
+            if r is not None:
+                try:
+                    out[aid] = {"payload": json.loads(r["payload"]), "created_at": r["created_at"]}
+                except (TypeError, ValueError):
+                    continue
+    return out
+
+
+def cache_put(action_id, prompt_version, model, payload):
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    with _conn() as c:
+        c.execute("INSERT OR REPLACE INTO ai_cache(action_id,prompt_version,model,created_at,payload) "
+                  "VALUES(?,?,?,?,?)", (action_id, prompt_version, model, now,
+                                        json.dumps(payload, ensure_ascii=False)))
+    return now

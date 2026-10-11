@@ -63,7 +63,7 @@ def make_client(synthetic_ctx):
         APP.app.state.repo = ContextRepository(context=synthetic_ctx)
         APP.app.state.provider = provider
         APP.app.state.agent = BusinessActionAgent(provider)
-        return TestClient(APP.app, raise_server_exceptions=False)
+        return TestClient(APP.app, raise_server_exceptions=False, headers={"X-StockAgent": "1"})
     return _mk
 
 
@@ -81,9 +81,11 @@ def test_total_provider_failure_leaves_analytics_identical(make_client, syntheti
     baseline = _deterministic_snapshot(make_client(NullProvider()))
     failing = make_client(Exploding())
     assert _deterministic_snapshot(failing) == baseline
-    acts = failing.get("/api/agent/actions").json()
-    assert acts["ai_available"] is True and acts["ai_error_category"] in Exploding.CATS
-    assert all(a["interpretation"] is None for a in acts["actions"])
+    ids = [a["action_id"] for a in failing.get("/api/agent/actions").json()["actions"]][:5]
+    e = failing.post("/api/agent/actions/enrich", json={"action_ids": ids}).json()
+    assert e["ai_available"] is True and e["ai_error_category"] in Exploding.CATS
+    assert e["failed"] == ids and all(a["interpretation"] is None for a in e["actions"])
+    assert _deterministic_snapshot(failing) == baseline              # still identical after the failure
     code = synthetic_ctx["winback"][0]["code"]
     for path in (f"/api/agent/customer/{code}", f"/api/agent/product/{synthetic_ctx['overstock'][0]['code']}"):
         r = failing.get(path)
@@ -98,7 +100,10 @@ def test_even_a_raising_provider_does_not_break_deterministic_endpoints(make_cli
     assert c.post("/api/scenario", json={"financing_rate": 40}).status_code == 200
     assert c.get("/api/health").status_code == 200
     a = c.get("/api/agent/actions")
-    assert a.status_code == 200 and a.json()["count"] > 0 and a.json()["ai_error_category"] == "unknown"
+    assert a.status_code == 200 and a.json()["count"] > 0
+    ids = [x["action_id"] for x in a.json()["actions"]][:5]
+    e = c.post("/api/agent/actions/enrich", json={"action_ids": ids})
+    assert e.status_code == 200 and e.json()["ai_error_category"] == "unknown"
 
 
 def test_analytics_build_unaffected_by_ai_settings(monkeypatch, synthetic_dir):
@@ -124,7 +129,9 @@ def _walk(node):
 def test_provider_input_is_a_small_evidence_packet(make_client, synthetic_ctx):
     spy = Spy()
     c = make_client(spy)
-    c.get("/api/agent/actions")
+    ids = [a["action_id"] for a in c.get("/api/agent/actions").json()["actions"]][:5]
+    assert spy.payloads == []                                        # GET never reaches the provider
+    c.post("/api/agent/actions/enrich", json={"action_ids": ids})
     code = synthetic_ctx["winback"][0]["code"]
     c.get(f"/api/agent/customer/{code}")
     c.get(f"/api/agent/product/{synthetic_ctx['overstock'][0]['code']}")

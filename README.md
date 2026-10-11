@@ -42,11 +42,20 @@ When there are several files of one kind, the newest is used.
 ## Run
 ```bash
 python dashboard_builder.py data          # -> dashboard.html (gitignored)
-uvicorn app:app --reload                  # API at http://127.0.0.1:8000/docs
+uvicorn app:app --host 127.0.0.1          # local only; dashboard at http://127.0.0.1:8000/ , API docs at /docs
 ```
-Main endpoints: `/api/health`, `/api/context`, `/api/agent/actions`,
-`/api/agent/customer/{code}`, `/api/agent/product/{code}`, `/api/agent/draft-message`,
-`/api/scenario`, `/api/actions/{id}/complete|defer|dismiss`, `/api/ai/calls` (metadata only).
+Main endpoints:
+- **Deterministic:** `/` (the generated dashboard), `/api/health` (including `context_ready`),
+  `/api/context`, `/api/agent/categories`, and `/api/agent/actions`, which lists all open actions ranked
+  by Python and never calls the AI.
+- **AI, explicit and cached:** `POST /api/agent/actions/enrich` with `{"action_ids": [...]}` (at most 5
+  open actions, one provider call), `/api/agent/customer/{code}`, `/api/agent/product/{code}` and
+  `POST /api/agent/draft-message`.
+- **Action state:** `POST /api/actions/{id}/complete|defer|dismiss`.
+- **Other:** `POST /api/scenario`, and `/api/ai/calls` (call metadata only).
+
+Every POST must send the header `X-StockAgent: 1`. This is a local guard against cross-site requests;
+the AI Aksiyon Merkezi tab (M5-2) will send it automatically, and scripts or curl must add it.
 
 ## AI provider configuration (`.env`)
 | Variable | Default | Notes |
@@ -55,7 +64,7 @@ Main endpoints: `/api/health`, `/api/context`, `/api/agent/actions`,
 | `OPENAI_API_KEY` | empty | Optional. The app starts and the analytics work without it |
 | `AI_MODEL` | provider default in `config.DEFAULT_MODELS` | |
 | `AI_TIMEOUT_SECONDS` | 30 | Bounded to 1–120 |
-| `AI_MAX_OUTPUT_TOKENS` | 3000 | Bounded to 256–16000 |
+| `AI_MAX_OUTPUT_TOKENS` | 4000 | Bounded to 256–16000 |
 | `AI_MAX_RETRIES` | 1 | SDK retries for transient errors only, 0–3 |
 | `AI_REASONING_EFFORT` | empty | Only for reasoning models |
 

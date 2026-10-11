@@ -14,6 +14,17 @@ class Health(BaseModel):
     ai_reason: Optional[str] = None
     macro_available: bool
     data_folder: str
+    context_ready: bool = False          # M5-1: warm-up finished (deterministic context built)
+    context_error: Optional[str] = None  # set when the warm-up failed (e.g. data files missing)
+
+
+class CategoryOut(BaseModel):
+    """Server-described action category (D-022): the UI builds filters/badges from this list."""
+    key: str
+    label_tr: str
+    color: str
+    entity_type: str
+    source: str
 
 
 class EvidenceFact(BaseModel):
@@ -39,10 +50,12 @@ class ContextResponse(BaseModel):
 # ---------- actions ----------
 class ActionOut(BaseModel):
     action_id: str
+    source: str = "legacy"               # which deterministic action source produced it (D-022)
     category: str
     entity_type: str
     entity_id: str
     title: str
+    reason: str = ""                     # deterministic Turkish sentence: why the action exists (D-015)
     facts: List[str]
     drivers: Dict[str, Any] = {}
     score: float
@@ -53,6 +66,8 @@ class ActionOut(BaseModel):
     interpretation: Optional[str] = None
     recommendation: Optional[str] = None
     evidence: List[EvidenceFact] = []
+    ai_cached: bool = False              # AI text served from the cache (no provider call)
+    ai_generated_at: Optional[str] = None
 
 class ActionsResponse(BaseModel):
     ai_available: bool
@@ -62,6 +77,22 @@ class ActionsResponse(BaseModel):
     generated_at: str
     count: int
     actions: List[ActionOut]
+
+class EnrichRequest(BaseModel):
+    """Explicit AI request for at most 5 open actions (D-017)."""
+    action_ids: List[str] = Field(min_length=1, max_length=5)
+
+
+class EnrichResponse(BaseModel):
+    ai_available: bool
+    ai_reason: Optional[str] = None
+    ai_error_category: Optional[str] = None
+    ai_warnings: List[str] = []
+    provider_called: bool = False        # False when everything came from the cache or AI is off
+    enriched: List[str] = []             # action_ids that got fresh AI text in this request
+    cached: List[str] = []               # action_ids answered from the cache
+    failed: List[str] = []               # action_ids without AI text after this request
+    actions: List[ActionOut] = []        # the requested actions, in Python score order
 
 # ---------- customer / product analysis ----------
 class CustomerAnalysis(BaseModel):

@@ -4,18 +4,9 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 must not be started until it is moved to *Current*.
 
 ## Current
-- [ ] **Merge PR #3 (design, docs only).** The M5 design was approved on 2026-10-09 (D-015 to D-020).
-  The M6/M7 roadmap and the M5 extensibility rules (D-021, D-022) were added on 2026-10-10. M5-1 starts
-  only after this merge.
+- [ ] **Review and merge the M5-1 PR** (`claude/m5-1-backend`, backend only, no UI). Then M5-2.
 
 ## Next (M5 slices, design §11; one bounded checkpoint each)
-- [ ] **M5-1 Backend prerequisites (no UI).** Includes the D-022 extensibility seams: generic action
-  contract with `source`, an action-source registry, and `GET /api/agent/categories`. `GET /` serves `dashboard.html`. `GET /api/agent/actions`
-  never calls the provider and returns cached AI text (update the M2 test that expects enrichment on
-  GET). `POST /api/agent/actions/enrich` takes ≤5 open action ids and makes one provider call, with an
-  `ai_cache` table keyed by action_id + prompt version + model. A deterministic Turkish `reason` per
-  action. The `X-StockAgent: 1` guard on every POST (403 without it). A warm-up thread and
-  `context_ready` in `/api/health`. Tests per design §11.
 - [ ] **M5-2 Read-only tab.** Cards (reason, facts, AI block, evidence chips), filters, top-5 / next-5 /
   per-card AI controls, and every §10 state except refresh. A separate `_ai_panel()`; the existing
   dashboard table code is untouched.
@@ -80,6 +71,11 @@ Milestone 5 must not be started until it is moved to *Current*.
   2020 should count, change `QUAL_YEARS` and that test together.
 
 ## Completed
+- [x] 2026-10-10 — M5-1 backend prerequisites: generic action contract + source registry +
+  `GET /api/agent/categories`; deterministic `reason`; `GET /api/agent/actions` never calls the provider;
+  `POST /api/agent/actions/enrich` (≤5 open ids, one call, `ai_cache`); `X-StockAgent` guard on all
+  mutating requests; `GET /` serves the dashboard; warm-up with `context_ready`. Notes in D-027.
+- [x] 2026-10-10 — PR #3 (design + roadmap, docs only) merged into `main` (`f9c42fb`).
 - [x] 2026-10-10 — Owner answers incorporated into the roadmap (D-023 data confidence, D-024 sales
   organization and CRM coverage, D-025 fair/acquisition attribution, D-026 legitimate transactions only).
 - [x] 2026-10-10 — M6/M7 roadmap documented (`docs/roadmap_m6_m7.md`, D-021, D-022). Nothing implemented.
