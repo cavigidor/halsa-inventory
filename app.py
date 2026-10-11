@@ -120,11 +120,14 @@ def dashboard():
 @app.get("/api/health", response_model=S.Health)
 def health(agent: BusinessActionAgent = Depends(get_agent), repo: ContextRepository = Depends(get_repo)):
     p = agent.provider
+    ready = repo.is_ready()
+    asof = (repo.context() or {}).get("as_of_data_date") if ready else None   # no build: already cached
     return S.Health(ai_available=agent.available, ai_provider=p.name,
                     ai_model=getattr(p, "model", None),
                     ai_reason=(None if agent.available else getattr(p, "reason", None)),
                     macro_available=False, data_folder=DATA_FOLDER,
-                    context_ready=repo.is_ready(), context_error=getattr(repo, "last_error", None))
+                    context_ready=ready, context_error=getattr(repo, "last_error", None),
+                    as_of_data_date=asof)
 
 
 @app.get("/api/agent/categories", response_model=list[S.CategoryOut])

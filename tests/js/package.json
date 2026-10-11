@@ -1,0 +1,10 @@
+{
+  "name": "stockagent-ui-tests",
+  "private": true,
+  "description": "DOM tests for the AI Aksiyon Merkezi tab (M5-2). Run via: python -m pytest tests/test_m5_ui.py",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "devDependencies": {
+    "jsdom": "25.0.1"
+  }
+}

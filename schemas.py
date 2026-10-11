@@ -16,6 +16,7 @@ class Health(BaseModel):
     data_folder: str
     context_ready: bool = False          # M5-1: warm-up finished (deterministic context built)
     context_error: Optional[str] = None  # set when the warm-up failed (e.g. data files missing)
+    as_of_data_date: Optional[str] = None  # M5-2: data date of the ready context (dashboard mismatch check)
 
 
 class CategoryOut(BaseModel):

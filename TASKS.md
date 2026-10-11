@@ -4,12 +4,9 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 must not be started until it is moved to *Current*.
 
 ## Current
-- [ ] **Review and merge the M5-1 PR** (`claude/m5-1-backend`, backend only, no UI). Then M5-2.
+- [ ] **Review and merge the M5-2 PR** (`claude/m5-2-ai-tab`, read-only AI tab). Then M5-3.
 
 ## Next (M5 slices, design §11; one bounded checkpoint each)
-- [ ] **M5-2 Read-only tab.** Cards (reason, facts, AI block, evidence chips), filters, top-5 / next-5 /
-  per-card AI controls, and every §10 state except refresh. A separate `_ai_panel()`; the existing
-  dashboard table code is untouched.
 - [ ] **M5-3 Action state.** Done / defer / dismiss with a 5-second undo.
 - [ ] **M5-4 Drafts and the customer drawer.** WhatsApp first, then e-posta; channel × purpose
   (collection, offer, winback, sales_followup, fair_invite); D-018 tone; copy-only; KAPALI refusals.
@@ -28,6 +25,11 @@ Milestone 5 must not be started until it is moved to *Current*.
   The AI context was fixed in M3 (D-009). The dashboard's `m_overstock_move` buyer lists still
   include KAPALI customers. On the 5 Oct 2026 data, 2 of the top 20 overstock products were affected.
   **Needs owner approval.**
+
+- [ ] **DQ-3: Deterministic tie order in "Büyüme / Küçülme".** `m_momentum` iterates a `set` of customer
+  codes and sorts by `pct` only, so rows with equal `pct` appear in hash-seed order and two builds of the
+  same data differ byte-wise (found during the M5-2 real-data check; values are identical). Fix: sort by
+  `(pct, code)`. It changes no number but changes row order, so it is a separate small task.
 
 ## Later
 - [ ] **Multi-user / remote deployment (future milestone, out of scope for M5, D-016):**
@@ -71,6 +73,9 @@ Milestone 5 must not be started until it is moved to *Current*.
   2020 should count, change `QUAL_YEARS` and that test together.
 
 ## Completed
+- [x] 2026-10-11 — M5-2 read-only AI Aksiyon Merkezi tab (`_ai_panel()`, server-described filters,
+  top-5 / next-5 / per-card AI, every §10 state except refresh, jsdom DOM tests in CI). Notes in D-028.
+- [x] 2026-10-11 — PR #4 (M5-1) merged into `main` (`df4ba28`).
 - [x] 2026-10-10 — M5-1 backend prerequisites: generic action contract + source registry +
   `GET /api/agent/categories`; deterministic `reason`; `GET /api/agent/actions` never calls the provider;
   `POST /api/agent/actions/enrich` (≤5 open ids, one call, `ai_cache`); `X-StockAgent` guard on all

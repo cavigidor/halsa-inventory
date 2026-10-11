@@ -214,7 +214,7 @@ def m_collections(path):
     return rows, owed_map
 
 # ---------- oluştur ----------
-def build(data_folder,out_path,today=None):
+def build(data_folder,out_path,today=None,ai_panel=True):
     today=today or dt.date.today()
     sp=_latest(data_folder,is_stock); ep=_latest(data_folder,is_sales); ap=_latest(data_folder,is_aging)
     low,over,total=m_stock(sp)
@@ -289,13 +289,274 @@ def build(data_folder,out_path,today=None):
            'Çapraz satış (5 ürün → 5 firma)']
     d_tr=f"{today.day} {AYLAR[today.month]} {today.year}"
     meta={'date':d_tr,'stock':os.path.basename(sp) if sp else '','sales':os.path.basename(ep) if ep else '',
-          'aging':os.path.basename(ap) if ap else '','tiers':tier_counts,'total':total,'has_aging':has_aging}
-    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later))
+          'aging':os.path.basename(ap) if ap else '','tiers':tier_counts,'total':total,'has_aging':has_aging,
+          'asof':_asof_iso(sdf)}
+    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel))
     return out_path,{'low':len(low),'over':len(over),'lapsed':len(lap),'coll':len(coll),
                      'momentum':len(momentum),'margin':len(margin),'ordersize':len(ordersize),
                      'osmove':len(osmove),'risk':len(risk)}
 
-def _html(modules,stats,meta,later):
+# ---------------- M5-2: AI Aksiyon Merkezi tab (read-only) ----------------
+# One tab button + one panel, added next to the existing dashboard without touching its tables.
+# The panel is server-driven: it shows the deterministic action queue from the local FastAPI app
+# (GET /api/agent/categories, GET /api/agent/actions) and asks for AI text only when the user clicks
+# (POST /api/agent/actions/enrich, at most 5 ids, header X-StockAgent: 1). No business logic in JS:
+# order, numbers, reasons and categories all come from Python. Model text is set via textContent only.
+def _asof_iso(sdf):
+    """Latest sales date (ISO), the same rule as services/context.py. Used only by the AI tab to warn
+    when the dashboard file and the server were built from different data."""
+    if sdf is None: return ''
+    a=pd.to_datetime(sdf['_date'],errors='coerce').max()
+    return a.date().isoformat() if pd.notna(a) else ''
+
+_AI_CSS=r"""
+#ai .ai-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 10px}
+#ai .ai-chip{font-size:12px;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:3px 10px;color:var(--muted)}
+#ai .ai-chip.on{color:#1a7f4b;border-color:#bfe3cf;background:#f0faf4}
+#ai .ai-chip.down{color:#b42318;border-color:#f3c4c4;background:#fdf3f3}
+#ai .ai-date{font-size:12px;color:var(--muted);margin-left:auto}
+#ai .ai-btn{border:1px solid var(--lap);background:var(--lap);color:#fff;font:inherit;font-weight:600;font-size:13px;padding:7px 12px;border-radius:8px;cursor:pointer}
+#ai .ai-btn:disabled{opacity:.55;cursor:wait}
+#ai .ai-one{background:var(--card);color:var(--lap);padding:4px 10px;font-size:12px}
+#ai .ai-state{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:8px 0 12px}
+#ai .ai-state.off,#ai .ai-state.err{border-color:#f3c4c4;background:#fdf3f3}
+#ai .ai-state.wait,#ai .ai-state.empty{color:var(--muted)}
+#ai .ai-status{font-size:12px;margin:0 0 10px;color:var(--muted)}
+#ai .ai-status.err{color:#b42318;font-weight:600}#ai .ai-status.ok{color:#1a7f4b}
+#ai .ai-warn{background:var(--warn-bg);border:1px solid #f5d9a8;color:var(--warn);border-radius:8px;padding:9px 12px;margin:0 0 10px;font-size:13px;font-weight:600}
+#ai .ai-filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
+#ai .ai-f{--c:var(--ink);border:1px solid var(--line);background:var(--card);color:var(--muted);font:inherit;font-size:12px;font-weight:600;padding:5px 11px;border-radius:999px;cursor:pointer}
+#ai .ai-f:hover{color:var(--ink)}#ai .ai-f.on{background:var(--c);border-color:var(--c);color:#fff}
+#ai .aic{background:var(--card);border:1px solid var(--line);border-left:4px solid #9aa3ad;border-radius:10px;padding:11px 14px;margin:0 0 10px}
+#ai .aic.pri-critical{border-left-color:var(--crit)}#ai .aic.pri-high{border-left-color:var(--low)}#ai .aic.pri-medium{border-left-color:var(--gold)}
+#ai .aic-top{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11px}
+#ai .aic-pri{font-weight:800;letter-spacing:.06em;color:#6b7480}
+#ai .pri-critical .aic-pri{color:var(--crit)}#ai .pri-high .aic-pri{color:var(--low)}#ai .pri-medium .aic-pri{color:var(--gold)}
+#ai .aic-score{font-family:"SF Mono",Menlo,Consolas,monospace;color:var(--muted)}
+#ai .aic-cat{color:#fff;background:#6b7480;border-radius:4px;padding:1px 7px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;font-size:10px}
+#ai .aic-conf{color:var(--muted);margin-left:auto}
+#ai .aic-title{font-size:15px;font-weight:700;margin:6px 0 3px;letter-spacing:-.01em}
+#ai .aic-reason{margin:0 0 6px}
+#ai .aic-facts{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:3px 16px;font-size:12.5px;font-variant-numeric:tabular-nums}
+#ai .aic-facts li::before{content:'•';color:var(--muted);margin-right:5px}
+#ai .aic-ai{margin:9px 0 2px;border:1px dashed #c4b5fd;background:#faf7ff;border-radius:8px;padding:8px 11px}
+#ai .aic-ai-h{font-size:11px;font-weight:700;color:var(--lap);text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+#ai .aic-cached{font-weight:500;text-transform:none;letter-spacing:0;color:var(--muted);margin-left:8px}
+#ai .aic-int,#ai .aic-rec{margin:3px 0}
+#ai .aic-ev{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:5px;font-size:11px}
+#ai .aic-ev-l{color:var(--muted);font-weight:700}
+#ai .aic-chip{background:#fff;border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-variant-numeric:tabular-nums}
+#ai .aic-err{font-size:12px;color:#b42318;margin:7px 0 0}
+#ai .aic-acts{margin-top:8px}
+#ai .ai-more{text-align:center;margin:4px 0 8px}
+#ai .ai-none{color:var(--muted);font-style:italic}
+@media(max-width:600px){#ai .ai-date{margin-left:0;width:100%}#ai .aic-conf{margin-left:0}}
+"""
+
+_AI_BODY="""
+<h2 class="sec">✨ AI Aksiyon Merkezi</h2>
+<p class="note">Bugün ne yapmalı, neden ve hangi rakamlara dayanıyor. Sıralama, sayılar ve gerekçeler Python'dandır; AI yorumu yalnızca siz istediğinizde oluşturulur ve öneridir.</p>
+<div class="ai-bar"><span class="ai-chip ai-srv" hidden></span><span class="ai-chip ai-aist" hidden></span>
+<button class="ai-btn ai-gen" type="button" hidden>✨ AI yorumlarını oluştur</button><span class="ai-date"></span></div>
+<div class="ai-warn" hidden></div>
+<div class="ai-state" role="status" hidden></div>
+<div class="ai-status" role="status" aria-live="polite" hidden></div>
+<div class="ai-filters" hidden></div>
+<div class="ai-list"></div>
+<div class="ai-more"><button class="ai-btn ai-next" type="button" hidden>Sonraki 5 için AI yorumu oluştur</button></div>
+<p class="note">Sıralama ve sayılar Python'dandır; AI metinleri öneridir ve rakam üretmez.</p>
+"""
+
+_AI_JS=r"""
+(function(){
+'use strict';
+const root=document.getElementById('ai'), tabBtn=document.querySelector('.tab[data-t="ai"]');
+if(!root||!tabBtn) return;
+const ASOF=root.getAttribute('data-asof')||'';
+const MAX_IDS=5;                                   // server contract: at most 5 ids and one provider call per request
+const POLL_MS=window.__AI_POLL_MS||3000, POLL_MAX_MS=120000;
+const POST_HEADERS={'Content-Type':'application/json','X-StockAgent':'1'};   // local CSRF guard (D-020)
+const MSG={
+  offline:'Sunucu çalışmıyor. Terminalde uvicorn app:app --host 127.0.0.1 çalıştırıp http://127.0.0.1:8000 adresini açın. Diğer sekmeler normal çalışır.',
+  warming:'Veriler hazırlanıyor…',
+  ctxError:'Veriler yüklenemedi: ',
+  loadFail:'Aksiyonlar yüklenemedi',
+  disabled:'AI kapalı (.env: AI_PROVIDER=openai)',
+  running:'Oluşturuluyor… (≈10–20 sn)',
+  empty:'Bugün için açık aksiyon yok.',
+  noneInFilter:'Bu kategoride açık aksiyon yok.',
+  mismatch:'Pano ve sunucu farklı veri tarihleri kullanıyor; veriyi yenileyin.',
+  other:'AI yorumu üretilemedi'
+};
+const GUARD='AI metni güvenlik kontrolünden geçmedi, gösterilmiyor', NET="OpenAI'ye ulaşılamadı";
+const ERR={quota:'OpenAI kredisi yetersiz',rate_limit:'Çok fazla istek, biraz sonra deneyin',timeout:NET,connection:NET,
+  auth:'API anahtarı geçersiz',numeric_guard:GUARD,fact_reference:GUARD};
+const PRI={critical:'KRİTİK',high:'YÜKSEK',medium:'ORTA',low:'DÜŞÜK'};
+const CONF={high:'yüksek',medium:'orta',low:'düşük'};
+const AY=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+const st={started:false,aiOn:false,model:null,cats:[],catByKey:{},order:[],byId:{},filter:'',busy:false,
+          tried:new Set(),errors:{},cardEl:{}};
+
+const $=s=>root.querySelector(s);
+function el(tag,cls,text){const e=document.createElement(tag); if(cls) e.className=cls;
+  if(text!=null) e.textContent=String(text); return e;}
+function show(n,on){n.hidden=!on;}
+function line(sel,text,kind){const n=$(sel); n.textContent=text||''; n.className=sel.slice(1)+(kind?' '+kind:''); show(n,!!text);}
+const setState=(t,k)=>line('.ai-state',t,k), setStatus=(t,k)=>line('.ai-status',t,k);
+function safeColor(c){return /^#[0-9a-fA-F]{3,8}$/.test(String(c||''))?c:null;}
+function fmtDate(iso){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||'')); return m?(+m[3])+' '+AY[+m[2]-1]+' '+m[1]:'';}
+function fmtScore(s){const n=Number(s); return Number.isFinite(n)?n.toLocaleString('tr-TR',{maximumFractionDigits:1}):'—';}
+function hasAI(a){return !!(a&&(a.interpretation||a.recommendation));}
+async function getJSON(url){const r=await fetch(url,{headers:{'Accept':'application/json'}});
+  if(!r.ok){const e=new Error('HTTP '+r.status); e.status=r.status; throw e;} return r.json();}
+
+function srvChip(ok){const c=$('.ai-srv'); c.textContent=ok?'● Sunucu bağlı':'○ Sunucu yok'; c.className='ai-chip ai-srv '+(ok?'on':'down'); show(c,true);}
+function aiChip(){const c=$('.ai-aist'); show(c,true);
+  if(st.aiOn){c.textContent='AI: açık'+(st.model?' · '+st.model:''); c.className='ai-chip ai-aist on';}
+  else{c.textContent=MSG.disabled; c.className='ai-chip ai-aist';}}
+function offline(){srvChip(false); setState(MSG.offline,'off');}
+
+function start(){
+  if(st.started) return; st.started=true;
+  if(location.protocol==='file:'){offline(); return;}   // file:// has origin null; the API is same-origin only
+  pollHealth(0);
+}
+async function pollHealth(elapsed){
+  let h;
+  try{h=await getJSON('/api/health');}catch(e){offline(); return;}
+  srvChip(true);
+  if(!h.context_ready){
+    if(h.context_error){setState(MSG.ctxError+h.context_error,'err'); return;}
+    setState(MSG.warming,'wait');
+    // Poll health only (never AI). After ~2 min, try loading once; the server finishes the build then.
+    if(elapsed<POLL_MAX_MS){setTimeout(()=>pollHealth(elapsed+POLL_MS),POLL_MS); return;}
+  }
+  loadAll(h);
+}
+function checkDate(srv){
+  $('.ai-date').textContent=(srv||ASOF)?'Veri: '+fmtDate(srv||ASOF):'';
+  const w=$('.ai-warn');
+  if(ASOF&&srv&&ASOF!==srv){w.textContent=MSG.mismatch+' (pano: '+fmtDate(ASOF)+' · sunucu: '+fmtDate(srv)+')'; show(w,true);}
+  else show(w,false);
+}
+async function loadAll(h){
+  st.aiOn=!!h.ai_available; st.model=h.ai_model||null; checkDate(h.as_of_data_date);
+  let cats,res;
+  try{[cats,res]=await Promise.all([getJSON('/api/agent/categories'),getJSON('/api/agent/actions')]);}   // provider-free GETs
+  catch(e){if(!e.status){offline(); return;} setState(MSG.loadFail+' (HTTP '+e.status+').','err'); return;}
+  setState('');
+  st.aiOn=!!res.ai_available;
+  st.cats=Array.isArray(cats)?cats:[]; st.catByKey={}; st.cats.forEach(c=>{st.catByKey[c.key]=c;});
+  const acts=Array.isArray(res.actions)?res.actions:[];
+  st.order=acts.map(a=>a.action_id); st.byId={}; acts.forEach(a=>{st.byId[a.action_id]=a;});   // Python order, never re-sorted
+  aiChip(); renderFilters(); renderList();
+}
+
+function visible(){return st.order.filter(id=>!st.filter||st.byId[id].category===st.filter);}
+function renderFilters(){
+  const box=$('.ai-filters'); box.replaceChildren();
+  const counts={}; st.order.forEach(id=>{const k=st.byId[id].category; counts[k]=(counts[k]||0)+1;});
+  const chip=(key,label,color,n)=>{const b=el('button','ai-f'+(st.filter===key?' on':''),label+' ('+n+')');
+    b.type='button'; b.dataset.k=key; if(color) b.style.setProperty('--c',color);
+    b.addEventListener('click',()=>{st.filter=key; renderFilters(); renderList();}); return b;};
+  box.append(chip('','Tümü',null,st.order.length));
+  st.cats.forEach(c=>box.append(chip(c.key,c.label_tr,safeColor(c.color),counts[c.key]||0)));   // server-described (D-022)
+  Object.keys(counts).filter(k=>!st.catByKey[k]).forEach(k=>box.append(chip(k,k,null,counts[k])));
+  show(box,st.order.length>0);
+}
+function renderList(){
+  const list=$('.ai-list'); list.replaceChildren(); st.cardEl={};
+  if(!st.order.length){setState(MSG.empty,'empty'); updateButtons(); return;}
+  const ids=visible();
+  if(!ids.length) list.append(el('p','ai-none',MSG.noneInFilter));
+  ids.forEach(id=>{const c=card(st.byId[id]); st.cardEl[id]=c; list.append(c);});
+  updateButtons();
+}
+function card(a){
+  const pri=PRI[a.priority]?a.priority:'low';
+  const c=el('article','aic pri-'+pri); c.dataset.id=a.action_id;
+  const top=el('div','aic-top');
+  top.append(el('span','aic-pri',PRI[a.priority]||a.priority||''), el('span','aic-score','skor '+fmtScore(a.score)));
+  const cat=st.catByKey[a.category], badge=el('span','aic-cat',cat?cat.label_tr:a.category), col=cat&&safeColor(cat.color);
+  if(col) badge.style.background=col;
+  top.append(badge);
+  if(a.confidence) top.append(el('span','aic-conf','güven: '+(CONF[a.confidence]||a.confidence)));
+  c.append(top, el('h3','aic-title',a.title));
+  if(a.reason){const r=el('p','aic-reason'); r.append(el('b',null,'Neden: '),document.createTextNode(a.reason)); c.append(r);}
+  if(Array.isArray(a.facts)&&a.facts.length){const f=el('ul','aic-facts'); f.setAttribute('aria-label','Python rakamları');
+    a.facts.forEach(x=>f.append(el('li',null,x))); c.append(f);}
+  if(hasAI(a)) c.append(aiBlock(a));
+  else if(st.errors[a.action_id]) c.append(el('p','aic-err',st.errors[a.action_id]));
+  if(st.aiOn&&!hasAI(a)){const row=el('div','aic-acts'), b=el('button','ai-btn ai-one','✨ Bu aksiyon için AI yorumu');
+    b.type='button'; b.disabled=st.busy; b.addEventListener('click',()=>enrich([a.action_id])); row.append(b); c.append(row);}
+  return c;
+}
+function aiBlock(a){   // advisory area, visually separate from the Python facts above
+  const b=el('div','aic-ai'), h=el('div','aic-ai-h','✨ AI yorumu (öneridir)');
+  if(a.ai_cached) h.append(el('span','aic-cached','önbellekten'));
+  b.append(h);
+  if(a.interpretation) b.append(el('p','aic-int',a.interpretation));
+  if(a.recommendation){const p=el('p','aic-rec'); p.append(el('b',null,'Öneri: '),document.createTextNode(a.recommendation)); b.append(p);}
+  if(Array.isArray(a.evidence)&&a.evidence.length){const ev=el('div','aic-ev'); ev.append(el('span','aic-ev-l','Dayanak:'));
+    a.evidence.forEach(e=>ev.append(el('span','aic-chip',(e.label||e.fact_id)+': '+(e.display_value==null?'—':e.display_value))));
+    b.append(ev);}
+  return b;
+}
+function pending(){return visible().filter(id=>!hasAI(st.byId[id])&&!st.tried.has(id));}
+function updateButtons(){
+  const left=pending().length, started=st.order.some(id=>hasAI(st.byId[id])||st.tried.has(id));
+  const gen=$('.ai-gen'), nx=$('.ai-next');
+  show(gen,st.aiOn&&left>0); show(nx,st.aiOn&&left>0&&started);
+  gen.disabled=nx.disabled=st.busy;
+  root.querySelectorAll('.ai-one').forEach(b=>{b.disabled=st.busy;});
+}
+function replaceCard(id){const old=st.cardEl[id]; if(!old||!old.parentNode) return;
+  const n=card(st.byId[id]); old.replaceWith(n); st.cardEl[id]=n;}
+
+// Top 5 / next 5: the next actions without AI text, in Python order within the current filter.
+function enrichNext(){const ids=pending().slice(0,MAX_IDS); if(ids.length) enrich(ids);}
+async function enrich(ids){
+  if(st.busy||!st.aiOn||!ids.length) return;
+  ids=ids.slice(0,MAX_IDS);
+  st.busy=true; setStatus(MSG.running,'run'); updateButtons();
+  let data=null;
+  try{const r=await fetch('/api/agent/actions/enrich',{method:'POST',headers:POST_HEADERS,body:JSON.stringify({action_ids:ids})});
+      if(r.ok) data=await r.json();}
+  catch(e){data=null;}
+  st.busy=false;
+  const wasOn=st.aiOn;
+  if(data){
+    (data.actions||[]).forEach(a=>{if(st.byId[a.action_id]) st.byId[a.action_id]=a;});
+    if(data.ai_available===false) st.aiOn=false;
+    const msg=data.ai_available===false?MSG.disabled:(ERR[data.ai_error_category]||MSG.other);
+    const failed=data.failed||[], ok=(data.enriched||[]).concat(data.cached||[]);
+    failed.forEach(id=>{st.errors[id]=msg; st.tried.add(id);});
+    ok.forEach(id=>{delete st.errors[id];});
+    if(failed.length) setStatus(msg,'err'); else setStatus('AI yorumları hazır.','ok');
+  }else{
+    ids.forEach(id=>{st.errors[id]=MSG.other; st.tried.add(id);}); setStatus(MSG.other,'err');
+  }
+  if(wasOn!==st.aiOn){aiChip(); renderList();} else {ids.forEach(replaceCard); updateButtons();}
+}
+
+tabBtn.addEventListener('click',start);   // lazy: nothing is fetched until the tab is opened
+$('.ai-gen').addEventListener('click',enrichNext);
+$('.ai-next').addEventListener('click',enrichNext);
+})();
+"""
+
+def _ai_panel(meta):
+    """(tab button, panel block) for the AI Aksiyon Merkezi. The block is wrapped in markers so tests
+    can strip it and prove the rest of the dashboard is byte-identical to the build without it."""
+    asof=html.escape(str(meta.get('asof') or ''),quote=True)
+    btn='<button class="tab" data-t="ai">✨ AI Aksiyon Merkezi</button>'
+    block=('\n<!--AI-TAB-START-->\n<style>'+_AI_CSS+'</style>\n'
+           f'<div id="ai" class="panel" data-asof="{asof}">'+_AI_BODY+'</div>\n'
+           '<script>'+_AI_JS+'</script>\n<!--AI-TAB-END-->')
+    return btn,block
+
+
+def _html(modules,stats,meta,later,ai_panel=True):
     blob=json.dumps(modules,ensure_ascii=False).replace('</','<\\/')
     tabs=['overview']+list(modules.keys())
     tabbtns=''.join(f'<button class="tab" data-t="{t}">{("Genel Bakış" if t=="overview" else modules[t]["title"])}'
@@ -303,6 +564,7 @@ def _html(modules,stats,meta,later):
     statcards=''.join(f'<div class="stat"><div class="n">{v}</div><div class="l">{l}</div></div>' for l,v in stats)
     laterlist=''.join(f'<li>{html.escape(x)}</li>' for x in later)
     src=f"Stok: {meta['stock']} · Satış: {meta['sales']}"+(f" · Alacaklar: {meta['aging']}" if meta['has_aging'] else '')
+    ai_btn,ai_block=_ai_panel(meta) if ai_panel else ('','')
     return f"""<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Şirket Panosu — {meta['date']}</title>
 <style>
@@ -364,7 +626,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <header><div class="eyebrow">Şirket Panosu</div>
 <h1>Şirket Panosu — {meta['date']}</h1>
 <div class="sub">{src} · {meta['total']:,} ürün</div></header>
-<div class="tabs">{tabbtns}</div>
+<div class="tabs">{tabbtns}{ai_btn}</div>
 <div id="overview" class="panel on">
 <h2 class="sec">Aktif Analizler</h2>
 <p class="note">İlk istediğiniz ikisi — <b>stok uyarıları</b> (azalan + fazla) ve <b>kayıp müşteriler</b> (geri kazanım) — çalışıyor. Gezinmek, aramak ve sıralamak için yukarıdaki sekmelere tıklayın. Her şey doğrudan tablolarınızdan hesaplanır: filtreleme, müşteri ve stok kodu üzerinden birleştirme ve aritmetik — hiçbir şey tahmin değil.</p>
@@ -374,7 +636,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <p class="note">Hazır olduğunuzda açabileceğimiz, tamamen gerçeğe dayalı diğer analizler — her biri yalnızca ilgili sayfanın <code>data</code> klasöründe olmasını ister, sonra kendi sekmesi olur. Yapay zekâ yok, bunlarla aynı.</p>
 <ul class="later">{laterlist}</ul>
 </div>
-<div id="panels"></div>
+<div id="panels"></div>{ai_block}
 <script>
 const DATA={blob};
 const fmtMoney=v=>'₺'+Math.round(v).toLocaleString('tr-TR');
