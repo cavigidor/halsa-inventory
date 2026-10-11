@@ -55,7 +55,15 @@ Main endpoints:
 - **Other:** `POST /api/scenario`, and `/api/ai/calls` (call metadata only).
 
 Every POST must send the header `X-StockAgent: 1`. This is a local guard against cross-site requests;
-the AI Aksiyon Merkezi tab (M5-2) will send it automatically, and scripts or curl must add it.
+the AI Aksiyon Merkezi tab sends it automatically, and scripts or curl must add it.
+
+### ✨ AI Aksiyon Merkezi tab
+Open **http://127.0.0.1:8000/** (not the file) and click the last tab. It lists the open actions ranked
+by Python with the reason and the facts, filterable by the categories the server describes. Opening the
+tab never calls the AI. "✨ AI yorumlarını oluştur" (then "Sonraki 5") or the per-card button asks for AI
+comments on at most 5 actions per click; AI text is shown separately, marked "öneridir", and cached.
+Opened as a file or with the server stopped, the tab shows how to start the server; the other tabs work
+as before.
 
 ## AI provider configuration (`.env`)
 | Variable | Default | Notes |
@@ -82,9 +90,11 @@ AI_PROVIDER=openai python scripts/live_smoke_test.py
 ```bash
 python -m pytest -q                 # standard suite: synthetic data, no key, no network
 python -m pytest -m local_data -q   # on the Mac only: real exports in ./data
+npm ci --prefix tests/js            # optional: enables the AI-tab DOM tests (Node 20+); skipped otherwise
 ```
 The standard suite uses `tests/fixtures/synthetic_erp.py`, which contains invented customers,
-codes and amounts only. CI (`.github/workflows/tests.yml`) runs it on Python 3.12.
+codes and amounts only. CI (`.github/workflows/tests.yml`) runs it on Python 3.12, with Node 22 and
+`REQUIRE_JS_TESTS=1` so the AI-tab DOM tests (`tests/js/`, jsdom) must run there.
 
 ## Never commit
 Real Excel/CSV exports, `data/`, `dashboard.html` and other generated reports,

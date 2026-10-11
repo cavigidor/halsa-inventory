@@ -19,7 +19,8 @@ data/*.xlsx (private, Mac only)
    ▼
 dashboard_builder.py ── m_stock / m_collections / load_sales / m_lapsed / m_momentum /
    │                    m_margin / m_ordersize / m_overstock_move / m_risk
-   │──► dashboard.html            (Layer 1: deterministic Turkish dashboard, in use)
+   │──► dashboard.html            (Layer 1: deterministic Turkish dashboard, in use; plus the
+   │                              server-driven "✨ AI Aksiyon Merkezi" tab from _ai_panel(), M5-2)
    ▼
 services/context.py   build_context(): normalized, top-N "agent context"; the action queue comes from
    │                  registered sources (services/actions.py + action_sources.py), ranked by
@@ -55,6 +56,7 @@ services/store.py     SQLite: action status, history, memory, ai_calls metadata 
 | `prompts/business_agent.txt` | System prompt (rules only, never data) |
 | `schemas.py` | API and strict AI-output Pydantic schemas |
 | `tests/fixtures/synthetic_erp.py` | Synthetic ERP exports used by CI |
+| `tests/js/` | jsdom DOM tests for the AI tab (node, pinned `package-lock.json`; run via `tests/test_m5_ui.py`) |
 | `weekly_agent.py` | Older optional weekly email agent (unused) |
 
 ## Domain rules (invariants)
@@ -89,7 +91,7 @@ services/store.py     SQLite: action status, history, memory, ai_calls metadata 
 | 2 | FastAPI backend and provider-agnostic AI layer, runs without a key | done |
 | 3 | Real LLM (OpenAI) behind the abstraction, with numeric safety | done (see STATUS.md) |
 | 4 | Live macro data (TCMB/TÜİK inflation, FX) | later |
-| 5 | "✨ AI Aksiyon Merkezi" tab: deterministic action queue first, AI on demand (design: `docs/m5_action_center.md`) | design approved; implementation next |
+| 5 | "✨ AI Aksiyon Merkezi" tab: deterministic action queue first, AI on demand (design: `docs/m5_action_center.md`) | in progress: M5-1 backend and M5-2 read-only tab done; M5-3 to M5-6 next |
 | 6 | Additional data sources / sales intelligence foundation: validated importers for hedef raporu, detailed collections, Trodat sales, gider/gelir, kredi takip, bütçe (`docs/roadmap_m6_m7.md`) | planned (D-021) |
 | 7 | Sales operating system: daily sales queue, customer 360, cross-sell, January fair command center, light CRM, new-buyer discovery | planned (D-021) |
 | — | Multi-user / remote deployment (auth, admin and salesperson roles, private deployment, backups) | future, out of scope for M5 (D-016) |

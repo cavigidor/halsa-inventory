@@ -17,8 +17,14 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
+      # DOM tests for the AI Aksiyon Merkezi tab (jsdom, pinned in tests/js/package-lock.json).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci --prefix tests/js --no-audit --no-fund
       # Standard suite: synthetic fixtures only. No ERP data, no API key, no paid calls.
       # local_data tests skip themselves when ./data is absent.
       - run: python -m pytest -q
         env:
           AI_PROVIDER: disabled
+          REQUIRE_JS_TESTS: "1"   # the jsdom tests must run in CI, not skip

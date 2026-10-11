@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-10 (design + roadmap merged to `main` @ `f9c42fb`; M5-1 backend prerequisites done on `claude/m5-1-backend`, PR pending)._
+_Updated 2026-10-11 (M5-1 merged to `main` @ `df4ba28`; M5-2 read-only AI tab done on `claude/m5-2-ai-tab`, PR pending)._
 
 ## Git
 - **Branch:** `claude/milestone-3-live-ai`, based on `main`.
@@ -77,7 +77,8 @@ OpenAI model. The OpenAI default model `gpt-5-mini` lives in
 `config.DEFAULT_MODELS`. It has not been verified live; override it with `AI_MODEL`.
 
 ## Not implemented / known issues
-- Milestone 4 (live macro data) and Milestone 5 (dashboard AI tab) are not started.
+- Milestone 4 (live macro data) is not started. Milestone 5: M5-1 and M5-2 done; M5-3 to M5-6 not started.
+- DQ-3: tie order in "Büyüme / Küçülme" depends on the Python hash seed (rows, not values; TASKS *Next*).
 - DQ-1: dashboard margin uses `fillna(0)` for missing cost (owner decision needed).
 - DQ-2: the dashboard "Stok Eritme" list still includes KAPALI customers (owner decision needed).
 - The lapsed qualification window is 2021–2025 in code but 2020–2025 in the spec (TASKS *Blocked*).
@@ -153,7 +154,7 @@ The owner's answers were incorporated on 2026-10-10:
 Questions are resolved or reduced to M6-0 technical verification. M5-1 includes the extensibility seams
 so M6/M7 actions plug in without redesign.
 
-## M5-1 (done; PR pending)
+## M5-1 (done; merged in PR #4 @ `df4ba28`)
 Branch `claude/m5-1-backend` from `main` @ `f9c42fb`. Backend only, no UI. Implementation notes are in D-027.
 - **Action queue:** a generic action contract with `source`, an action-source registry
   (`services/actions.py`, `services/action_sources.py`), `GET /api/agent/categories`, and a deterministic
@@ -173,5 +174,43 @@ Tests:
 | Cloud, no data | `python -m pytest -q` | **166 passed, 7 skipped, 1 xfailed** (29 new M5-1 tests) |
 | Mac VM, real 5 Oct 2026 data (temp copy) | `python -m pytest -q` | **173 passed, 1 xfailed** |
 
+## M5-2 (done; PR pending)
+Branch `claude/m5-2-ai-tab` from `main` @ `df4ba28`. Notes in D-028.
+- **Tab:** one tab button "✨ AI Aksiyon Merkezi" (appended after the existing tabs) and one panel built by
+  `dashboard_builder._ai_panel()`, wrapped in `<!--AI-TAB-START/END-->` markers. `build(..., ai_panel=False)`
+  gives the pre-M5-2 output byte for byte. No existing tab, table or data blob changed.
+- **Cards:** priority (KRİTİK/YÜKSEK/ORTA/DÜŞÜK), score, server category badge, confidence, title,
+  "Neden:" reason and the Python facts, in Python order. A separate dashed "✨ AI yorumu (öneridir)" block
+  holds interpretation, "Öneri:" and the evidence chips (Python label: display value); "önbellekten" when cached.
+- **Filters/badges:** from `GET /api/agent/categories` (no category is hard-coded in the UI).
+- **AI controls:** "✨ AI yorumlarını oluştur" / "Sonraki 5 için AI yorumu oluştur" (the next ≤5 actions
+  without AI text, in Python order within the current filter) and "✨ Bu aksiyon için AI yorumu". One POST
+  per click with `X-StockAgent: 1`; buttons are disabled while a request runs; cards update in place.
+- **No automatic AI:** the tab fetches nothing until opened, then only `/api/health`, categories and actions.
+- **States:** offline / `file://`, warming (polls health every 3 s, up to 2 min, then one load attempt),
+  warm-up error, AI disabled (controls hidden), running, the six error messages (facts stay visible, the
+  per-card retry stays), empty queue, and the yellow data-date mismatch (dashboard `data-asof` vs the new
+  `/api/health.as_of_data_date`, reported only when the context is ready, never building it).
+- **Escaping:** the AI script uses `textContent` / `createElement` only (no `innerHTML`), and server colours
+  are accepted only as hex.
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (with node + jsdom) | `REQUIRE_JS_TESTS=1 python -m pytest -q` | **179 passed, 7 skipped, 1 xfailed** (13 new; one of them runs 16 jsdom tests) |
+
+Mutation check: changing the header value, raising the id limit to 6, rendering text through `innerHTML`,
+or loading on page open each makes the DOM tests fail.
+Visual check: the real app on synthetic data with the mock provider in Chromium (desktop and 390 px):
+cards, the AI block, filters and "Sonraki 5" render as designed; a reload shows cached text with no POST.
+
+Real-data regression (Mac VM, 5 Oct 2026 exports, temp copies of `main` and the branch, nothing committed):
+- Actions: 15 on `main`, 15 on the branch; content identical (category, entity, score, priority, title,
+  reason, facts). Module row counts identical.
+- Dashboard HTML: with a fixed `PYTHONHASHSEED`, the branch build with `ai_panel=False` is byte-identical to
+  `main`, and the default build minus the AI block is too. Without a fixed seed, `main` itself differs
+  between two runs (DQ-3).
+- The dashboard `data-asof` equals the server `as_of_data_date` (2026-10-05).
+
 ## Immediate next task
-Review and merge the M5-1 PR. Then M5-2 (read-only AI tab), per `docs/m5_action_center.md` §11.
+Review and merge the M5-2 PR. Then M5-3 (done / defer / dismiss with undo), per `docs/m5_action_center.md` §11.

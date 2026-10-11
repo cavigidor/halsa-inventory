@@ -48,3 +48,6 @@ venv/
 .DS_Store
 *.bundle
 *.tgz
+
+# --- node (UI tests) ---
+node_modules/

@@ -256,3 +256,22 @@ Don't rewrite earlier entries. If one is superseded, add a new entry that says s
   `/api/scenario` POST, as the design says.
 - **Warm-up:** a background thread builds the context at startup (`WARMUP_CONTEXT=false` disables it).
   `ContextRepository` builds under a lock, and `/api/health` reports `context_ready` / `context_error`.
+
+### D-028 · 2026-10-11 · M5-2 implementation notes (assumptions within the approved design)
+- **Placement:** the AI tab is appended after the existing tabs so their order is unchanged. The panel is
+  one marked block from `_ai_panel()`; `build(..., ai_panel=False)` reproduces the previous HTML exactly,
+  which the tests use to prove the existing dashboard did not change.
+- **Lazy, server-driven panel:** nothing is fetched until the tab is opened. The browser never sorts,
+  scores or filters by anything but the server's category key; it only counts cards per category chip.
+- **"Top 5" and "Sonraki 5"** both take the next ≤5 actions that have no AI text and have not failed in this
+  page session, in Python order, within the current category filter. A failed action keeps its per-card
+  retry button. One click is one POST; buttons are disabled while it runs (no parallel paid requests).
+- **Data-date mismatch:** the design compared `meta.date` (the build date) with the server's data date; the
+  build date is not a data date, so the dashboard now embeds the latest sales date (`data-asof`, same rule
+  as `services/context.py`) and `/api/health` exposes `as_of_data_date` once the context is ready, so the
+  check needs no extra large request.
+- **Warming:** after the 2-minute polling window the tab makes one ordinary actions request instead of
+  giving up (the server finishes or reports the build); it never triggers AI.
+- **DOM tests:** jsdom under Node (`tests/js/`, pinned lockfile), driven by `tests/test_m5_ui.py` with real
+  API responses from the synthetic app and a mock provider. Skipped locally without node/jsdom; CI sets
+  `REQUIRE_JS_TESTS=1` so they must run. The full Playwright smoke test stays in M5-6.
