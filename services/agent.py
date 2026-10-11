@@ -17,6 +17,7 @@ import os
 
 import config as C
 import schemas as S
+from services import drafts as DR
 from services import evidence as EV
 from services.ai import grounding as G
 from services.ai import quality as Q
@@ -78,8 +79,11 @@ class BusinessActionAgent:
                 "category": getattr(self.provider, "category", "disabled"), "warnings": []}
 
     # ---------------- core grounded call ----------------
-    def run(self, task, packet, response_model):
-        """Returns dict(ok, data(resolved), packet, reason, category, warnings)."""
+    def run(self, task, packet, response_model, extra_prompt="", post_check=None):
+        """Returns dict(ok, data(resolved), packet, reason, category, warnings).
+        extra_prompt: task-only rules appended to the system prompt for this call (the global prompt and so
+        the action-cache prompt_version stay unchanged). post_check(resolved, packet) may raise a
+        GroundingError; it gets the same single stricter retry as the numeric guard."""
         if not self.provider.is_available():
             return self._unavailable()
         payload = packet.to_payload()
@@ -90,7 +94,8 @@ class BusinessActionAgent:
             return {"ok": False, "data": None, "packet": packet, "reason": f"packet_rejected: {e}",
                     "category": ERR_PACKET, "warnings": []}
 
-        prompt, last_err = self.system_prompt, None
+        base = self.system_prompt + (extra_prompt or "")
+        prompt, last_err = base, None
         attempts = 1 + max(0, min(1, C.NUMERIC_GUARD_RETRIES))   # hard cap: one retry
         for attempt in range(1, attempts + 1):
             try:
@@ -112,13 +117,15 @@ class BusinessActionAgent:
                 tidied, tidy_fixes = Q.tidy(res.data, packet)    # only REMOVES refs/labels (Q-1)
                 response_model.model_validate(tidied)
                 resolved = G.resolve(tidied, packet)
+                if post_check:
+                    post_check(resolved, packet)
             except G.GroundingError as g:
                 last_err = g
                 entry.update(success=False, error_category=g.category)
                 self.recorder(entry)
                 log.warning("grounding violation (%s) task=%s attempt=%d", g.category, task, attempt)
                 details = "; ".join(g.details[:6]) if g.details else str(g)[:300]
-                prompt = self.system_prompt + STRICT_RETRY.format(why=g.category, details=details[:600])
+                prompt = base + STRICT_RETRY.format(why=g.category, details=details[:600])
                 continue
             except Exception as e:  # schema invalid
                 entry.update(success=False, error_category="malformed")
@@ -188,13 +195,16 @@ class BusinessActionAgent:
         data["evidence"] = G.evidence_for(r.get("raw_ids"), packet)
         return data, r
 
-    def draft_message(self, message_type, customer_facts, product_facts=None, instruction=None, ctx=None):
-        if customer_facts.get("closed") and message_type in ("winback", "sales_offer"):
-            return None, {"ok": False, "reason": "KAPALI müşteri: satış/geri kazanım mesajı üretilmez.",
-                          "category": "kapali_customer"}
-        packet = EV.draft_packet(message_type, customer_facts, product_facts, instruction, ctx,
-                                 customer_facts.get("history"))
-        r = self.run("message_draft", packet, S.MessageDraftAI)
+    def draft_message(self, channel, purpose, customer_facts, product_facts=None, instruction=None, ctx=None):
+        """Copy-only draft (D-018, D-030). Channel and purpose come from the request, never from the model."""
+        if channel not in DR.CHANNELS or purpose not in DR.PURPOSES:
+            raise ValueError(f"invalid channel/purpose: {channel}/{purpose}")
+        why = DR.refusal(customer_facts, purpose)      # KAPALI: collection only, decided before any provider call
+        if why:
+            return None, {"ok": False, "reason": why, "category": DR.ERR_KAPALI}
+        packet = EV.draft_packet(channel, purpose, customer_facts, product_facts, instruction, ctx)
+        r = self.run("message_draft", packet, S.MessageDraftAI, extra_prompt=DR.instructions(channel, purpose),
+                     post_check=DR.check_customer_facing)
         if not r["ok"]:
             return None, r
         data = dict(r["data"])

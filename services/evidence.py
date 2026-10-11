@@ -331,15 +331,37 @@ def product_packet(prod, ctx=None, max_buyers=5):
     return p
 
 
-def draft_packet(message_type, cust, prod=None, instruction=None, ctx=None, memory=None):
-    p = customer_packet(cust, ctx, memory)
-    p.task = "message_draft"
-    p.classify("message_type", message_type)
-    if prod:
-        p.fact("Önerilecek ürün", prod.get("name"), "text")
-        p.allow(prod.get("name"), prod.get("product_code"))
-        p.fact("Önerilecek ürün stok miktarı", prod.get("stock"), "count")
+def draft_packet(channel, purpose, cust, prod=None, instruction=None, ctx=None):
+    """Customer-facing message draft (M5-4, D-030). Purpose-scoped and minimal: only facts a customer
+    message may mention. No scores, tiers, ranking, risk ratios, growth analysis or KAPALI wording."""
+    c = cust or {}
+    p = EvidencePacket("message_draft", as_of=(ctx or {}).get("as_of_data_date"),
+                       entity={"type": "customer", "id": c.get("customer_code"), "name": c.get("name")})
+    p.classify("channel", channel)
+    p.classify("purpose", purpose)
+    p.fact("Müşteri", c.get("name"), "text")
+    p.fact("Temsilci", c.get("rep"), "text")
+    if purpose == "collection":
+        p.fact("Vadesi geçen bakiye", c.get("overdue"), "money")        # None -> missing, never zero
+        if "oldest_overdue" in c:
+            p.fact("En eski borç dönemi", c.get("oldest_overdue"), "text")
+    else:
+        if purpose == "winback":
+            p.fact("Son alım yılı", c.get("last_active_year"), "year")
+        tops = [t for t in (c.get("top_products") or []) if t][:5]
+        if tops:
+            p.fact("Daha önce aldığı ürünler", ", ".join(tops), "text")
+            p.allow(*tops)
+        if prod:
+            p.fact("Önerilecek ürün", prod.get("name"), "text")
+            p.allow(prod.get("name"))
+    if c.get("closed"):
+        p.warn("closed_account", "Bu hesapla yalnızca ödeme hatırlatması yapılır; ürün veya satış önerisi "
+                                 "yok ve hesabın durumundan bahsedilmez.")
     if instruction:
-        p.classify("user_instruction", str(instruction)[:300])
-    p.warn("no_internal_analysis", "Müşteriye giden metinde içsel analiz, puan veya sıralama ifşa edilmez.")
+        p.classify("user_instruction", str(instruction)[:300])   # untrusted: never allow-listed
+    p.warn("customer_facing", "Müşteriye giden metin: iç analiz, puan, sıralama, kategori adı, yapay zekâ "
+                              "ifadesi, fact kimliği veya teknik etiket yazılmaz.")
+    p.warn("no_invented_numbers", "Tutar, tarih, yüzde, adet, fiyat, indirim veya vade uydurulmaz; yalnızca "
+                                  "[[FACT:..]] ile paketteki değerler kullanılır.")
     return p

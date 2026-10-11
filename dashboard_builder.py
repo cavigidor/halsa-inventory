@@ -361,6 +361,29 @@ background:var(--ink);color:#fff;border-radius:10px;padding:9px 10px 9px 16px;fo
 #ai .ai-undo-b{background:transparent;border:1px solid rgba(255,255,255,.55);color:#fff;font:inherit;font-weight:700;padding:4px 11px;border-radius:7px;cursor:pointer}
 #ai .ai-undo-t.err{color:#fecaca}
 #ai .ai-more{text-align:center;margin:4px 0 8px}
+#ai .aic-draftp{margin-top:9px;border:1px solid var(--line);border-radius:8px;padding:9px 11px;background:#fbfbfc}
+#ai .aic-drow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+#ai .aic-drow label{display:flex;gap:5px;align-items:center}
+#ai .aic-drow select,#ai .aic-drow input{border:1px solid var(--line);border-radius:6px;padding:4px 6px;font:inherit;font-size:12px;color:var(--ink);background:var(--card)}
+#ai .aic-drow .ai-din{flex:1;min-width:160px}
+#ai .aic-drow .ai-btn{padding:5px 11px;font-size:12px}
+#ai .aic-dstat,#ai .aic-dnote{font-size:12px;color:var(--muted);margin:7px 0 0}
+#ai .aic-dres{margin-top:9px}
+#ai .aic-dhead{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+#ai .ai-dmsg{width:100%;min-height:96px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit;font-size:13.5px;line-height:1.5;color:var(--ink);background:#fff;resize:vertical}
+#ai .aic-dfoot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:12px;color:var(--muted)}
+#ai .ai-dcopied{color:#1a7f4b;font-weight:600}#ai .ai-dcopied.fail{color:#b42318}
+#ai .ai-drawer{position:fixed;top:0;right:0;bottom:0;width:380px;max-width:100%;z-index:30;background:var(--card);border-left:1px solid var(--line);box-shadow:-8px 0 30px rgba(0,0,0,.12);display:flex;flex-direction:column}
+#ai .ai-dr-h{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;padding:16px 18px 12px;border-bottom:1px solid var(--line)}
+#ai .ai-dr-name{font-size:16px;font-weight:800;letter-spacing:-.01em}
+#ai .ai-dr-sub{font-size:12px;color:var(--muted);font-family:"SF Mono",Menlo,Consolas,monospace;margin-top:2px}
+#ai .ai-dr-tag{font-size:10px;font-weight:700;letter-spacing:.04em;color:#fff;background:var(--crit);border-radius:4px;padding:1px 6px;margin-left:6px;vertical-align:2px}
+#ai .ai-dr-x{border:1px solid var(--line);background:var(--card);border-radius:8px;font:inherit;padding:3px 9px;cursor:pointer}
+#ai .ai-dr-body{padding:10px 18px;overflow:auto;flex:1}
+#ai .ai-dr-row{display:flex;justify-content:space-between;gap:14px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+#ai .ai-dr-row .l{color:var(--muted)}#ai .ai-dr-row .v{text-align:right;font-variant-numeric:tabular-nums}
+#ai .ai-dr-msg{color:var(--muted);font-size:13px}#ai .ai-dr-msg.err{color:#b42318;font-weight:600}
+#ai .ai-dr-note{font-size:11px;color:var(--muted);padding:10px 18px;margin:0;border-top:1px solid var(--line)}
 #ai .ai-none{color:var(--muted);font-style:italic}
 @media(max-width:600px){#ai .ai-date{margin-left:0;width:100%}#ai .aic-conf{margin-left:0}}
 """
@@ -377,6 +400,9 @@ _AI_BODY="""
 <div class="ai-list"></div>
 <div class="ai-more"><button class="ai-btn ai-next" type="button" hidden>Sonraki 5 için AI yorumu oluştur</button></div>
 <div class="ai-undo" role="status" aria-live="polite" hidden></div>
+<aside class="ai-drawer" role="dialog" aria-label="Müşteri bilgileri" hidden><div class="ai-dr-h"><div><div class="ai-dr-name"></div><div class="ai-dr-sub"></div></div>
+<button class="ai-dr-x" type="button" aria-label="Kapat">✕</button></div><div class="ai-dr-body"></div>
+<p class="ai-dr-note">Python verileri ve kayıtlı notlar; AI yorumu yok.</p></aside>
 <p class="note">Sıralama ve sayılar Python'dandır; AI metinleri öneridir ve rakam üretmez.</p>
 """
 
@@ -404,8 +430,21 @@ const MSG={
   stateFail:'Aksiyon durumu kaydedilemedi.',
   badDate:'Geçerli bir ileri tarih seçin.',
   complete:'Aksiyon tamamlandı.',
-  dismiss:'Aksiyon gizlendi.'
+  dismiss:'Aksiyon gizlendi.',
+  drafting:'Taslak hazırlanıyor…',
+  draftFail:'Taslak oluşturulamadı.',
+  leak:'Taslak iç bilgi içerdiği için gösterilmiyor.',
+  copied:'Kopyalandı',
+  copyFail:'Kopyalanamadı; metni seçip elle kopyalayın.',
+  draftNote:'Yalnızca taslak: inceleyin, kopyalayın ve kendiniz gönderin.',
+  custLoading:'Yükleniyor…',
+  custFail:'Müşteri bilgileri yüklenemedi.',
+  custEmpty:'Gösterilecek bilgi yok.'
 };
+// Draft contract (D-030): mirrors schemas.Channel / schemas.Purpose. Not categories: those come from the server.
+const CHANNELS=[['whatsapp','WhatsApp'],['email','E-posta']];
+const PURPOSES=[['collection','Tahsilat'],['offer','Teklif'],['winback','Geri kazanım'],['sales_followup','Satış takibi'],['fair_invite','Fuar daveti']];
+const DEFAULT_CHANNEL='whatsapp', FALLBACK_PURPOSE='sales_followup';   // D-018: WhatsApp first
 const GUARD='AI metni güvenlik kontrolünden geçmedi, gösterilmiyor', NET="OpenAI'ye ulaşılamadı";
 const ERR={quota:'OpenAI kredisi yetersiz',rate_limit:'Çok fazla istek, biraz sonra deneyin',timeout:NET,connection:NET,
   auth:'API anahtarı geçersiz',numeric_guard:GUARD,fact_reference:GUARD};
@@ -414,7 +453,8 @@ const CONF={high:'yüksek',medium:'orta',low:'düşük'};
 const AY=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 const st={started:false,aiOn:false,model:null,cats:[],catByKey:{},order:[],byId:{},filter:'',busy:false,
           tried:new Set(),errors:{},cardEl:{},
-          gone:new Set(),mut:new Set(),stateErr:{},undo:null};   // gone: left the open queue after a server-confirmed change
+          gone:new Set(),mut:new Set(),stateErr:{},undo:null,
+          draft:{},cust:new Map(),custPending:new Map(),drawer:null};   // cust: drawer data, this page session only (never stored)   // gone: left the open queue after a server-confirmed change
 
 const $=s=>root.querySelector(s);
 function el(tag,cls,text){const e=document.createElement(tag); if(cls) e.className=cls;
@@ -513,9 +553,14 @@ function card(a){
     b.addEventListener('click',fn); return b;};
   row.append(sb('aic-done','✓ Yapıldı',()=>mutate(id,'complete')), sb('aic-defer','⏸ Ertele',()=>toggleDefer(c,id)),
              sb('aic-hide','✕ Gizle',()=>mutate(id,'dismiss')));
+  if(a.entity_type==='customer'){   // drafts and the drawer need a deterministic customer target (never a product)
+    const nb=(cls,label,fn)=>{const b=el('button','ai-sbtn '+cls,label); b.type='button'; b.addEventListener('click',fn); return b;};
+    row.append(nb('aic-draft','✉ Taslak',()=>toggleDraft(id)), nb('aic-cust','🔍 Müşteri',()=>openCustomer(String(a.entity_id))));
+  }
   if(st.aiOn&&!hasAI(a)){const b=el('button','ai-btn ai-one','✨ Bu aksiyon için AI yorumu');
     b.type='button'; b.disabled=st.busy; b.addEventListener('click',()=>enrich([id])); row.append(b);}
   c.append(row);
+  if(st.draft[id]&&st.draft[id].open) c.append(draftPanel(a));
   if(st.stateErr[id]) c.append(el('p','aic-serr',st.stateErr[id]));
   return c;
 }
@@ -540,6 +585,109 @@ function updateButtons(){
 }
 function replaceCard(id){const old=st.cardEl[id]; if(!old||!old.parentNode) return;
   const n=card(st.byId[id]); old.replaceWith(n); st.cardEl[id]=n;}
+
+// ---- drafts (M5-4, D-018/D-030): channel × purpose, explicit click only, copy-only (no send anywhere) ----
+function defaultPurpose(a){const c=st.catByKey[a.category], p=c&&c.draft_purpose;
+  return PURPOSES.some(x=>x[0]===p)?p:FALLBACK_PURPOSE;}   // server-described per category; never chosen by AI
+function toggleDraft(id){
+  const d=st.draft[id];
+  if(!d) st.draft[id]={open:true,channel:DEFAULT_CHANNEL,purpose:defaultPurpose(st.byId[id]),instr:'',busy:false,res:null,err:null,text:'',copy:null};
+  else d.open=!d.open;
+  refreshDraft(id);
+}
+function refreshDraft(id){
+  const c=st.cardEl[id]; if(!c) return;
+  const old=c.querySelector('.aic-draftp'), d=st.draft[id];
+  if(!d||!d.open){if(old) old.remove(); return;}
+  const n=draftPanel(st.byId[id]);
+  if(old) old.replaceWith(n); else c.querySelector('.aic-acts').after(n);
+}
+function selectOf(cls,label,opts,val,onChange){
+  const w=el('label'), s=el('select',cls);
+  opts.forEach(([k,l])=>{const o=el('option',null,l); o.value=k; s.append(o);});
+  s.value=val; s.addEventListener('change',()=>onChange(s.value)); w.append(document.createTextNode(label+' '),s); return w;
+}
+function draftPanel(a){
+  const id=a.action_id, d=st.draft[id], box=el('div','aic-draftp'), row=el('div','aic-drow');
+  const ins=el('input','ai-din'); ins.type='text'; ins.maxLength=300; ins.placeholder='Ek not (isteğe bağlı, ör. ton)'; ins.value=d.instr;
+  ins.setAttribute('aria-label','Ek not'); ins.addEventListener('input',()=>{d.instr=ins.value;});
+  const go=el('button','ai-btn ai-dgo','Taslak oluştur'); go.type='button'; go.disabled=d.busy||!st.aiOn;
+  go.addEventListener('click',()=>makeDraft(id));
+  const x=el('button','ai-sbtn ai-dx','Kapat'); x.type='button'; x.addEventListener('click',()=>{d.open=false; refreshDraft(id);});
+  row.append(selectOf('ai-dch','Kanal',CHANNELS,d.channel,v=>{d.channel=v;}),
+             selectOf('ai-dpu','Amaç',PURPOSES,d.purpose,v=>{d.purpose=v;}), ins, go, x);
+  box.append(row);
+  if(!st.aiOn) box.append(el('p','aic-dnote',MSG.disabled));
+  if(d.busy) box.append(el('p','aic-dstat',MSG.drafting));
+  if(d.err) box.append(el('p','aic-serr ai-derr',d.err));
+  if(d.res){
+    const r=el('div','aic-dres'), lab=(list,k)=>(list.find(x=>x[0]===k)||[k,k])[1];
+    r.append(el('div','aic-dhead',lab(CHANNELS,d.res.channel)+' · '+lab(PURPOSES,d.res.purpose)));
+    const ta=el('textarea','ai-dmsg'); ta.value=d.text; ta.setAttribute('aria-label','Taslak metni');   // plain text, never HTML
+    ta.addEventListener('input',()=>{d.text=ta.value;});
+    r.append(ta);
+    if(Array.isArray(d.res.evidence)&&d.res.evidence.length){const ev=el('div','aic-ev'); ev.append(el('span','aic-ev-l','Dayanak:'));
+      d.res.evidence.forEach(e=>ev.append(el('span','aic-chip',(e.label||e.fact_id)+': '+(e.display_value==null?'—':e.display_value))));
+      r.append(ev);}
+    (d.res.warnings||[]).forEach(w=>r.append(el('p','aic-dnote',w)));
+    const f=el('div','aic-dfoot'), cp=el('button','ai-sbtn ai-dcopy','Kopyala'); cp.type='button';
+    cp.addEventListener('click',()=>copyDraft(id));
+    f.append(cp);
+    if(d.copy) f.append(el('span','ai-dcopied'+(d.copy==='fail'?' fail':''),d.copy==='ok'?MSG.copied:MSG.copyFail));
+    f.append(el('span',null,MSG.draftNote));
+    r.append(f); box.append(r);
+  }
+  return box;
+}
+async function makeDraft(id){
+  const d=st.draft[id], a=st.byId[id]; if(!d||d.busy||!st.aiOn) return;
+  d.busy=true; d.err=null; d.res=null; d.copy=null; refreshDraft(id);
+  const body={customer_code:String(a.entity_id),channel:d.channel,purpose:d.purpose};
+  if(d.instr.trim()) body.additional_instruction=d.instr.trim().slice(0,300);
+  const res=await post('/api/agent/draft-message',body);
+  d.busy=false;
+  if(!res) d.err=MSG.draftFail;
+  else if(!res.available){
+    const cat=res.ai_error_category;
+    d.err=cat==='kapali_customer'?(res.reason||MSG.draftFail)
+         :(cat==='disabled'||cat==='missing_key')?MSG.disabled
+         :cat==='internal_leak'?MSG.leak:(ERR[cat]||MSG.draftFail);
+  } else {d.res=res; d.text=String(res.message||'');}
+  refreshDraft(id);
+}
+async function copyDraft(id){
+  const d=st.draft[id]; let ok=false;
+  try{if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(d.text); ok=true;}}catch(e){ok=false;}
+  d.copy=ok?'ok':'fail'; refreshDraft(id);
+  if(!ok){const ta=st.cardEl[id]&&st.cardEl[id].querySelector('.ai-dmsg'); if(ta){ta.focus(); ta.select();}}   // ready for manual copy
+}
+
+// ---- customer drawer (M5-4): deterministic GET only, lazy, cached in memory for this page session ----
+function drawerHead(name,sub,closed){
+  const n=$('.ai-dr-name'); n.textContent=name||''; if(closed) n.append(el('span','ai-dr-tag','KAPALI'));
+  $('.ai-dr-sub').textContent=sub||'';
+}
+function drawerMsg(code,text,kind){drawerHead(code,'',false); $('.ai-dr-body').replaceChildren(el('p','ai-dr-msg'+(kind?' '+kind:''),text));}
+function renderDrawer(code,data){
+  const f=data.facts||{};
+  drawerHead(f.name||code,code+(f.rep?' · '+f.rep:''),f.closed===true);
+  const body=$('.ai-dr-body'); body.replaceChildren();
+  const rows=Array.isArray(data.display_facts)?data.display_facts:[];
+  if(!rows.length) body.append(el('p','ai-dr-msg',MSG.custEmpty));
+  rows.forEach(r=>{const d=el('div','ai-dr-row'); d.append(el('span','l',r.label),el('span','v',r.display_value)); body.append(d);});
+}
+async function openCustomer(code){
+  st.drawer=code; show($('.ai-drawer'),true);
+  if(st.cust.has(code)){renderDrawer(code,st.cust.get(code)); return;}   // same customer again: no request
+  drawerMsg(code,MSG.custLoading);
+  let p=st.custPending.get(code);
+  if(!p){p=getJSON('/api/agent/customer/'+encodeURIComponent(code)).catch(()=>null); st.custPending.set(code,p);}
+  const data=await p; st.custPending.delete(code);
+  if(data) st.cust.set(code,data);     // failures are not cached, so a later click retries
+  if(st.drawer!==code) return;         // another customer was opened meanwhile
+  if(data) renderDrawer(code,data); else drawerMsg(code,MSG.custFail,'err');
+}
+function closeDrawer(){st.drawer=null; show($('.ai-drawer'),false);}
 
 // ---- action state (M5-3): done / defer / dismiss, server-confirmed, with a 5-second undo ----
 function isoLocal(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
@@ -618,6 +766,8 @@ async function enrich(ids){
 
 tabBtn.addEventListener('click',start);   // lazy: nothing is fetched until the tab is opened
 $('.ai-gen').addEventListener('click',enrichNext);
+$('.ai-dr-x').addEventListener('click',closeDrawer);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&st.drawer) closeDrawer();});
 $('.ai-next').addEventListener('click',enrichNext);
 })();
 """

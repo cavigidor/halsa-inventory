@@ -142,7 +142,19 @@ def build_context(data_folder, inflation_rate=None, macro=None, top_n=None):
         "low_stock": cut(low),
         "risk": cut(risk),
     }
+    # M5-4: every customer code classified KAPALI (order-source attribute or invoice party), so the draft
+    # refusal does not depend on whether the customer happens to be in the top-N risk list.
+    ctx["closed_customers"] = sorted({c for c, a in attr.items() if a.get("closed")} | set(cinv))
     ctx["actions"] = build_actions(ctx, coll_scored, over_cand, lap, shrink_real_neg, infl)
+    # M5-4: the customer drawer and drafts look customers up in the lists above, which are cut to top-N, while
+    # actions are produced from the full lists. Carry the already-computed rows of every customer that has an
+    # action but fell outside a cut (no new calculation; the top-N lists themselves are unchanged).
+    act_codes = {str(a["entity_id"]) for a in ctx["actions"] if a.get("entity_type") == "customer"}
+    def _extra(key, full):
+        have = {str(r["code"]) for r in ctx[key]}
+        return [r for r in full if str(r["code"]) in act_codes and str(r["code"]) not in have]
+    ctx["action_customers"] = {"collections": _extra("collections", coll_scored), "winback": _extra("winback", lap),
+                               "shrinking": _extra("shrinking", shrink)}
     return ctx
 
 

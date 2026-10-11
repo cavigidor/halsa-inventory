@@ -15,6 +15,7 @@ from services.agent import BusinessActionAgent
 from services.ai.factory import get_provider
 from services import scenarios as SCN
 from services import actions as A
+from services import evidence as EV
 from services import action_sources  # noqa: F401  (registers the built-in deterministic sources)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -217,18 +218,49 @@ def agent_actions_enrich(req: S.EnrichRequest, repo: ContextRepository = Depends
 
 
 # ---------------- customer / product ----------------
-@app.get("/api/agent/customer/{customer_code}", response_model=S.CustomerAnalysis)
-def agent_customer(customer_code: str, repo: ContextRepository = Depends(get_repo),
-                   agent: BusinessActionAgent = Depends(get_agent)):
+# D-020 / D-031: paid AI is POST-only. The GETs return deterministic facts (the drawer uses them) and never
+# reach the provider; the AI analysis moved to explicit, guarded POST .../analyze endpoints.
+def _customer_facts(repo, customer_code):
     facts = repo.customer(customer_code)
     if not facts:
         raise HTTPException(404, f"Müşteri bulunamadı: {customer_code}")
-    facts = {**facts, "history": ST.get_memory("customer", customer_code)}
-    data, r = agent.analyze_customer(facts, ctx=_ctx_or_none(repo))
+    return {**facts, "history": ST.get_memory("customer", customer_code)}
+
+
+def _product_facts(repo, product_code):
+    facts = repo.product(product_code)
+    if not facts:
+        raise HTTPException(404, f"Ürün bulunamadı: {product_code}")
+    return facts
+
+
+def _display_facts(facts, ctx):
+    """Python-formatted label/value pairs for the customer drawer (same formatters as the evidence packets)."""
+    pkt = EV.customer_packet(facts, ctx, facts.get("history"))
+    return [{"label": f["label"], "display_value": f["display_value"]} for f in pkt.facts if f["label"] != "Müşteri"]
+
+
+@app.get("/api/agent/customer/{customer_code}", response_model=S.CustomerAnalysis)
+def agent_customer(customer_code: str, repo: ContextRepository = Depends(get_repo),
+                   agent: BusinessActionAgent = Depends(get_agent)):
+    """Deterministic customer facts + stored history. Never calls the AI provider."""
+    facts = _customer_facts(repo, customer_code)
+    return S.CustomerAnalysis(customer_code=customer_code, facts=facts, ai_available=agent.available,
+                              display_facts=_display_facts(facts, _ctx_or_none(repo)))
+
+
+@app.post("/api/agent/customer/{customer_code}/analyze", response_model=S.CustomerAnalysis)
+def agent_customer_analyze(customer_code: str, repo: ContextRepository = Depends(get_repo),
+                           agent: BusinessActionAgent = Depends(get_agent)):
+    """Explicit, paid AI analysis of one customer (guarded POST). No UI in M5-4."""
+    facts = _customer_facts(repo, customer_code)
+    ctx = _ctx_or_none(repo)
+    data, r = agent.analyze_customer(facts, ctx=ctx)
+    disp = _display_facts(facts, ctx)
     if data is None:
         return S.CustomerAnalysis(customer_code=customer_code, facts=facts, ai_available=agent.available,
-                                  reason=r["reason"], ai_error_category=r["category"])
-    return S.CustomerAnalysis(customer_code=customer_code, facts=facts, ai_available=True,
+                                  display_facts=disp, reason=r["reason"], ai_error_category=r["category"])
+    return S.CustomerAnalysis(customer_code=customer_code, facts=facts, ai_available=True, display_facts=disp,
                               summary=data["summary"], risks=data["risks"],
                               opportunities=data["opportunities"],
                               recommended_action=data["recommended_action"], confidence=data["confidence"],
@@ -238,9 +270,16 @@ def agent_customer(customer_code: str, repo: ContextRepository = Depends(get_rep
 @app.get("/api/agent/product/{product_code}", response_model=S.ProductAnalysis)
 def agent_product(product_code: str, repo: ContextRepository = Depends(get_repo),
                   agent: BusinessActionAgent = Depends(get_agent)):
-    facts = repo.product(product_code)
-    if not facts:
-        raise HTTPException(404, f"Ürün bulunamadı: {product_code}")
+    """Deterministic product facts. Never calls the AI provider."""
+    return S.ProductAnalysis(product_code=product_code, facts=_product_facts(repo, product_code),
+                             ai_available=agent.available)
+
+
+@app.post("/api/agent/product/{product_code}/analyze", response_model=S.ProductAnalysis)
+def agent_product_analyze(product_code: str, repo: ContextRepository = Depends(get_repo),
+                          agent: BusinessActionAgent = Depends(get_agent)):
+    """Explicit, paid AI analysis of one product (guarded POST). No UI in M5-4."""
+    facts = _product_facts(repo, product_code)
     data, r = agent.analyze_product(facts, ctx=_ctx_or_none(repo))
     if data is None:
         return S.ProductAnalysis(product_code=product_code, facts=facts, ai_available=agent.available,
@@ -252,21 +291,20 @@ def agent_product(product_code: str, repo: ContextRepository = Depends(get_repo)
                              ai_warnings=data.get("warnings", []))
 
 
-# ---------------- draft message ----------------
+# ---------------- draft message (copy-only; nothing is ever sent) ----------------
 @app.post("/api/agent/draft-message", response_model=S.DraftResponse)
 def draft_message(req: S.DraftRequest, repo: ContextRepository = Depends(get_repo),
                   agent: BusinessActionAgent = Depends(get_agent)):
-    cust = repo.customer(req.customer_code)
-    if not cust:
-        raise HTTPException(404, f"Müşteri bulunamadı: {req.customer_code}")
+    """channel × purpose draft (D-018, D-030). KAPALI customers: collection only (refused before any AI call).
+    Returns text to review and copy; there is no send capability anywhere in the app."""
+    cust = _customer_facts(repo, req.customer_code)
     prod = repo.product(req.product_code) if req.product_code else None
-    cust = {**cust, "history": ST.get_memory("customer", req.customer_code)}
-    data, r = agent.draft_message(req.message_type, cust, prod, req.additional_instruction,
+    data, r = agent.draft_message(req.channel, req.purpose, cust, prod, req.additional_instruction,
                                   ctx=_ctx_or_none(repo))
     if data is None:
         return S.DraftResponse(available=False, reason=r["reason"], ai_error_category=r["category"],
-                               channel=req.message_type)
-    return S.DraftResponse(available=True, channel=req.message_type, message=data["message"],
+                               channel=req.channel, purpose=req.purpose)
+    return S.DraftResponse(available=True, channel=req.channel, purpose=req.purpose, message=data["message"],
                            warnings=data.get("warnings", []), evidence=data["evidence"])
 
 

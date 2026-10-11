@@ -1,6 +1,6 @@
 """API sözleşmesi ve AI çıktı şemaları (Pydantic v2)."""
 from typing import Optional, List, Any, Dict, Literal
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 Priority = Literal["critical", "high", "medium", "low"]
 Confidence = Literal["high", "medium", "low"]
@@ -26,6 +26,13 @@ class CategoryOut(BaseModel):
     color: str
     entity_type: str
     source: str
+    draft_purpose: Optional[str] = None   # M5-4: default draft purpose for customer actions of this category
+
+
+class DisplayFact(BaseModel):
+    """A Python-formatted fact for display (label + Turkish display value). Never AI text."""
+    label: str
+    display_value: str
 
 
 class EvidenceFact(BaseModel):
@@ -100,6 +107,7 @@ class CustomerAnalysis(BaseModel):
     available: bool = True
     customer_code: str
     facts: Dict[str, Any]
+    display_facts: List[DisplayFact] = []     # M5-4 drawer: Python-formatted facts (GET, no AI)
     ai_available: bool
     summary: Optional[str] = None
     risks: List[str] = []
@@ -128,16 +136,38 @@ class ProductAnalysis(BaseModel):
     ai_warnings: List[str] = []
 
 # ---------- draft message ----------
+Channel = Literal["whatsapp", "email"]
+Purpose = Literal["collection", "offer", "winback", "sales_followup", "fair_invite"]
+LegacyMessageType = Literal["whatsapp", "email", "collection", "sales_offer", "winback"]
+
+
 class DraftRequest(BaseModel):
+    """Canonical (M5-4, D-030): channel + purpose. `message_type` is the legacy mixed field, accepted only
+    for old callers and mapped once in services/drafts.LEGACY_MESSAGE_TYPES; it cannot be combined."""
+    model_config = ConfigDict(extra="forbid")
     customer_code: str
-    message_type: Literal["whatsapp", "email", "collection", "sales_offer", "winback"]
+    channel: Optional[Channel] = None
+    purpose: Optional[Purpose] = None
+    message_type: Optional[LegacyMessageType] = None     # deprecated
     product_code: Optional[str] = None
-    additional_instruction: Optional[str] = None
+    additional_instruction: Optional[str] = Field(default=None, max_length=300)
+
+    @model_validator(mode="after")
+    def _channel_purpose(self):
+        from services.drafts import LEGACY_MESSAGE_TYPES
+        if self.message_type is not None:
+            if self.channel is not None or self.purpose is not None:
+                raise ValueError("send either channel + purpose, or the legacy message_type, not both")
+            self.channel, self.purpose = LEGACY_MESSAGE_TYPES[self.message_type]
+        elif self.channel is None or self.purpose is None:
+            raise ValueError("channel and purpose are required")
+        return self
 
 class DraftResponse(BaseModel):
     available: bool
     reason: Optional[str] = None
     channel: Optional[str] = None
+    purpose: Optional[str] = None
     message: Optional[str] = None
     warnings: List[str] = []
     ai_error_category: Optional[str] = None

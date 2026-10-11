@@ -88,7 +88,8 @@ def test_total_provider_failure_leaves_analytics_identical(make_client, syntheti
     assert _deterministic_snapshot(failing) == baseline              # still identical after the failure
     code = synthetic_ctx["winback"][0]["code"]
     for path in (f"/api/agent/customer/{code}", f"/api/agent/product/{synthetic_ctx['overstock'][0]['code']}"):
-        r = failing.get(path)
+        assert failing.get(path).status_code == 200                      # deterministic GET, no AI
+        r = failing.post(path + "/analyze")
         assert r.status_code == 200 and r.json()["reason"] and r.json()["ai_error_category"]
     r = failing.post("/api/agent/draft-message", json={"customer_code": code, "message_type": "email"})
     assert r.status_code == 200 and r.json()["available"] is False
@@ -135,7 +136,10 @@ def test_provider_input_is_a_small_evidence_packet(make_client, synthetic_ctx):
     code = synthetic_ctx["winback"][0]["code"]
     c.get(f"/api/agent/customer/{code}")
     c.get(f"/api/agent/product/{synthetic_ctx['overstock'][0]['code']}")
-    c.post("/api/agent/draft-message", json={"customer_code": code, "message_type": "email"})
+    assert len(spy.payloads) == 1                                    # GETs never reach the provider
+    c.post(f"/api/agent/customer/{code}/analyze")
+    c.post(f"/api/agent/product/{synthetic_ctx['overstock'][0]['code']}/analyze")
+    c.post("/api/agent/draft-message", json={"customer_code": code, "channel": "email", "purpose": "winback"})
     assert len(spy.payloads) >= 4
     for p in spy.payloads:
         assert {"schema_version", "task", "facts", "warnings"} <= set(p)

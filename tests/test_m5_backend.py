@@ -1,5 +1,6 @@
 """M5-1 backend prerequisites (design: docs/m5_action_center.md §4–§6, §11, §14; D-015, D-017, D-020, D-022).
 Synthetic data only; spy/mock providers only (no key, no network, no paid call)."""
+import json
 import time
 
 import pytest
@@ -438,3 +439,292 @@ def test_completed_identical_content_is_not_reopened_by_a_new_build(mk, syntheti
     c2, _ = mk(ctx=synthetic_ctx)
     assert aid not in _ids(c2) and _row(aid)["status"] == "completed"
 
+
+
+# ---------------- M5-4: drafts (channel × purpose), KAPALI refusal, deterministic customer/product GET ----------------
+from services import drafts as DR
+from services.ai.base import AIProvider
+
+KAPALI_CODE = "900.00.0007"          # synthetic KAPALI customer
+OPEN_CODE = "900.00.0001"            # synthetic lapsed (non-KAPALI) customer
+
+
+class ScriptedDraft(AIProvider):
+    """Returns scripted MessageDraftAI outputs and records every payload and prompt."""
+    name, model = "scripted", "scripted-1"
+
+    def __init__(self, outputs=None):
+        self.outputs = list(outputs or [{"message": "Merhaba, nasılsınız?", "evidence_fact_ids": [], "warnings": []}])
+        self.calls, self.payloads, self.prompts = 0, [], []
+
+    def is_available(self):
+        return True
+
+    def generate_structured(self, system_prompt, payload, response_model):
+        self.calls += 1
+        self.payloads.append(payload)
+        self.prompts.append(system_prompt)
+        out = self.outputs.pop(0) if len(self.outputs) > 1 else self.outputs[0]
+        return AIResult(available=True, data=out, meta={"provider": self.name, "model": self.model})
+
+
+def _draft(c, **body):
+    return c.post("/api/agent/draft-message", json={"customer_code": OPEN_CODE, **body})
+
+
+def test_canonical_draft_whatsapp_collection_and_email(mk):
+    c, prov = mk()
+    r = _draft(c, channel="whatsapp", purpose="collection")
+    assert r.status_code == 200 and r.json()["available"] is True
+    assert r.json()["channel"] == "whatsapp" and r.json()["purpose"] == "collection" and r.json()["message"]
+    r = _draft(c, channel="email", purpose="winback")
+    assert r.status_code == 200 and r.json()["channel"] == "email" and r.json()["purpose"] == "winback"
+    assert "Otomatik gönderim yapılmaz" in r.json()["note"]
+
+
+@pytest.mark.parametrize("purpose", ["collection", "offer", "winback", "sales_followup", "fair_invite"])
+def test_all_five_purposes_validate(mk, purpose):
+    c, prov = mk()
+    r = _draft(c, channel="whatsapp", purpose=purpose)
+    assert r.status_code == 200 and r.json()["purpose"] == purpose and prov.calls == 1
+
+
+@pytest.mark.parametrize("body", [
+    {"channel": "sms", "purpose": "collection"},
+    {"channel": "whatsapp", "purpose": "discount"},
+    {"channel": "whatsapp"},
+    {"purpose": "offer"},
+    {},
+    {"channel": "whatsapp", "purpose": "offer", "message_type": "email"},
+    {"channel": "whatsapp", "purpose": "offer", "send": True},
+    {"channel": "whatsapp", "purpose": "offer", "additional_instruction": "x" * 301},
+])
+def test_invalid_draft_requests_are_rejected(mk, body):
+    c, prov = mk()
+    assert _draft(c, **body).status_code == 422
+    assert prov.calls == 0
+
+
+@pytest.mark.parametrize("legacy,channel,purpose", [
+    ("collection", "whatsapp", "collection"), ("sales_offer", "whatsapp", "offer"),
+    ("winback", "whatsapp", "winback"), ("whatsapp", "whatsapp", "sales_followup"),
+    ("email", "email", "sales_followup"),
+])
+def test_legacy_message_type_mapping(mk, legacy, channel, purpose):
+    c, _ = mk()
+    j = _draft(c, message_type=legacy).json()
+    assert (j["channel"], j["purpose"]) == (channel, purpose) == DR.LEGACY_MESSAGE_TYPES[legacy]
+
+
+def test_kapali_collection_draft_is_allowed(mk):
+    c, prov = mk()
+    r = c.post("/api/agent/draft-message", json={"customer_code": KAPALI_CODE, "channel": "whatsapp",
+                                                  "purpose": "collection"})
+    assert r.json()["available"] is True and prov.calls == 1
+
+
+@pytest.mark.parametrize("purpose", ["offer", "winback", "sales_followup", "fair_invite"])
+@pytest.mark.parametrize("channel", ["whatsapp", "email"])
+def test_kapali_non_collection_refused_before_provider(mk, channel, purpose):
+    c, prov = mk()
+    r = c.post("/api/agent/draft-message", json={"customer_code": KAPALI_CODE, "channel": channel,
+                                                  "purpose": purpose, "additional_instruction": "yine de yaz"})
+    j = r.json()
+    assert r.status_code == 200 and j["available"] is False and j["message"] is None
+    assert j["ai_error_category"] == "kapali_customer" and j["reason"] == DR.KAPALI_REFUSAL
+    assert prov.calls == 0
+
+
+def test_kapali_refusal_holds_even_with_ai_disabled(mk):
+    c, _ = mk(provider=NullProvider("AI provider is not configured."))
+    j = c.post("/api/agent/draft-message", json={"customer_code": KAPALI_CODE, "message_type": "sales_offer"}).json()
+    assert j["ai_error_category"] == "kapali_customer"
+
+
+def test_kapali_status_comes_from_the_full_classification_not_the_top_n_risk_list(mk, synthetic_ctx):
+    import copy
+    ctx = copy.deepcopy(synthetic_ctx)
+    for r in ctx["risk"]:
+        r["closed"] = False                       # as if the customer were outside the top-N risk list
+    assert KAPALI_CODE in ctx["closed_customers"]
+    c, prov = mk(ctx=ctx)
+    j = c.post("/api/agent/draft-message", json={"customer_code": KAPALI_CODE, "channel": "whatsapp",
+                                                  "purpose": "offer"}).json()
+    assert j["ai_error_category"] == "kapali_customer" and prov.calls == 0
+
+
+def test_draft_post_requires_guard_header(mk):
+    c, prov = mk(headers={})
+    r = c.post("/api/agent/draft-message", json={"customer_code": OPEN_CODE, "channel": "whatsapp", "purpose": "offer"})
+    assert r.status_code == 403 and prov.calls == 0
+
+
+def test_draft_goes_through_numeric_guard_and_leak_check(mk):
+    invented = {"message": "Merhaba, size yüzde 15 indirim yapabiliriz.", "evidence_fact_ids": [], "warnings": []}
+    leak = {"message": "Merhaba, yapay zekâ sistemimiz puanınızı yüksek buldu.", "evidence_fact_ids": [], "warnings": []}
+    for bad, cat in ((invented, "numeric_guard"), (leak, DR.ERR_LEAK)):
+        prov = ScriptedDraft([bad, bad])
+        c, _ = mk(provider=prov)
+        j = _draft(c, channel="whatsapp", purpose="offer").json()
+        assert j["available"] is False and j["ai_error_category"] == cat and j["message"] is None
+        assert prov.calls == 2, "one stricter retry, then failure"
+
+
+def test_draft_numbers_only_from_python_facts(mk):
+    def packet_fact(prov, label):
+        return next(f["fact_id"] for f in prov.payloads[0]["facts"] if f["label"] == label)
+    probe = ScriptedDraft()
+    c, _ = mk(provider=probe)
+    c.post("/api/agent/draft-message", json={"customer_code": "900.00.0002", "channel": "whatsapp",
+                                              "purpose": "collection"})
+    fid = packet_fact(probe, "Vadesi geçen bakiye")
+    prov = ScriptedDraft([{"message": f"Merhaba, vadesi geçmiş [[FACT:{fid}]] bakiyeniz için görüşebilir miyiz?",
+                           "evidence_fact_ids": [fid], "warnings": []}])
+    c, _ = mk(provider=prov)
+    j = c.post("/api/agent/draft-message", json={"customer_code": "900.00.0002", "channel": "whatsapp",
+                                                  "purpose": "collection"}).json()
+    disp = next(f["display_value"] for f in prov.payloads[0]["facts"] if f["fact_id"] == fid)
+    assert j["available"] is True and disp in j["message"] and "[[" not in j["message"]
+    assert j["evidence"][0]["display_value"] == disp
+
+
+def test_draft_packet_has_no_internal_scores_or_analysis(mk):
+    prov = ScriptedDraft()
+    c, _ = mk(provider=prov)
+    for code in ("900.00.0002", "900.00.0006", OPEN_CODE, KAPALI_CODE):
+        for purpose in ("collection", "offer", "winback", "sales_followup", "fair_invite"):
+            c.post("/api/agent/draft-message", json={"customer_code": code, "channel": "email", "purpose": purpose})
+    assert prov.payloads
+    for p in prov.payloads:
+        blob = json.dumps(p, ensure_ascii=False)
+        labels = " ".join(f["label"] for f in p["facts"])
+        for word in ("puan", "Puan", "kademe", "Kademe", "Borç / ciro", "değişim", "Reel", "skor", "öncelik"):
+            assert word not in labels, word
+        assert "score" not in blob and "KAPALI" not in blob and "winback_tier" not in blob
+        assert {c["name"] for c in p["classifications"]} <= {"channel", "purpose", "user_instruction"}
+        assert p["flags"] == []
+        if dict((c["name"], c["value"]) for c in p["classifications"])["purpose"] != "collection":
+            assert "Vadesi geçen bakiye" not in labels, "debt is not mentioned in sales messages"
+
+
+def test_draft_prompt_layer_is_task_only_and_keeps_action_cache_key(mk):
+    prov = ScriptedDraft()
+    c, _ = mk(provider=prov)
+    pv_before = APP.app.state.agent.prompt_version
+    _draft(c, channel="email", purpose="fair_invite", additional_instruction="kısa olsun")
+    assert APP.app.state.agent.prompt_version == pv_before
+    prompt = prov.prompts[0]
+    assert prompt.startswith(APP.app.state.agent.system_prompt)
+    assert "Kanal: E-posta" in prompt and "fuar daveti" in prompt and "Sayın" in prompt
+    instr = [x for x in prov.payloads[0]["classifications"] if x["name"] == "user_instruction"]
+    assert instr == [{"name": "user_instruction", "value": "kısa olsun"}]
+
+
+def test_draft_with_ai_unavailable_is_structured(mk):
+    c, _ = mk(provider=NullProvider("AI provider is not configured."))
+    r = _draft(c, channel="whatsapp", purpose="winback")
+    j = r.json()
+    assert r.status_code == 200 and j["available"] is False and j["ai_error_category"] == "disabled"
+    assert j["channel"] == "whatsapp" and j["purpose"] == "winback"
+
+
+def test_failed_draft_changes_no_state_or_cache(mk):
+    c, prov = mk()
+    ids = _ids(c)
+    c.post("/api/agent/actions/enrich", json={"action_ids": ids[:1]})
+    pv, key = APP.app.state.agent.prompt_version, APP.app.state.agent.model_key
+    before = (ST.get_statuses(), ST.cache_get_many(ids, pv, key))
+    assert before[1], "one cached action comment exists"
+    APP.app.state.agent.provider = ScriptedDraft([{"message": "Puanınız 88.", "evidence_fact_ids": [], "warnings": []}])
+    assert _draft(c, channel="whatsapp", purpose="offer").json()["available"] is False
+    assert (ST.get_statuses(), ST.cache_get_many(ids, pv, key)) == before
+
+
+def test_customer_get_is_deterministic_with_zero_provider_calls(mk):
+    c, prov = mk()
+    for code in (OPEN_CODE, "900.00.0002", "900.00.0006", KAPALI_CODE):
+        r = c.get(f"/api/agent/customer/{code}")
+        j = r.json()
+        assert r.status_code == 200 and j["summary"] is None and j["facts"]["customer_code"] == code
+        assert j["display_facts"] and all(set(f) == {"label", "display_value"} for f in j["display_facts"])
+    assert c.get(f"/api/agent/customer/{KAPALI_CODE}").json()["facts"]["closed"] is True
+    assert prov.calls == 0
+
+
+def test_product_get_is_deterministic_with_zero_provider_calls(mk, synthetic_ctx):
+    c, prov = mk()
+    code = synthetic_ctx["overstock"][0]["code"]
+    j = c.get(f"/api/agent/product/{code}").json()
+    assert j["facts"]["product_code"] == code and j["recommendation"] is None and prov.calls == 0
+
+
+def test_analysis_endpoints_are_post_only_and_guarded(mk, synthetic_ctx):
+    c, prov = mk()
+    prod = synthetic_ctx["overstock"][0]["code"]
+    for i, path in enumerate((f"/api/agent/customer/{OPEN_CODE}/analyze", f"/api/agent/product/{prod}/analyze")):
+        assert c.get(path).status_code == 405
+        assert c.post(path, headers={"X-StockAgent": "0"}).status_code == 403
+        assert prov.calls == i, "neither GET nor an unguarded POST reaches the provider"
+        assert c.post(path).status_code == 200
+        assert prov.calls == i + 1
+
+
+@pytest.mark.parametrize("path", ["/api/agent/customer/NOPE", "/api/agent/product/NOPE"])
+def test_unknown_customer_or_product_is_a_clean_404(mk, path):
+    c, prov = mk()
+    assert c.get(path).status_code == 404
+    assert c.post(path + "/analyze").status_code == 404
+    assert prov.calls == 0
+    if "customer" in path:
+        r = c.post("/api/agent/draft-message", json={"customer_code": "NOPE", "channel": "whatsapp",
+                                                      "purpose": "collection"})
+        assert r.status_code == 404 and prov.calls == 0
+
+
+def test_categories_describe_a_default_draft_purpose(mk):
+    c, _ = mk()
+    cats = {x["key"]: x for x in c.get("/api/agent/categories").json()}
+    assert cats["collections"]["draft_purpose"] == "collection"
+    assert cats["winback"]["draft_purpose"] == "winback"
+    assert cats["real_decline"]["draft_purpose"] == "sales_followup"
+    assert cats["overstock"]["draft_purpose"] is None          # product action: no customer target
+    assert all(x["draft_purpose"] in (None, *DR.PURPOSES) for x in cats.values())
+
+
+def test_no_send_capability_exists():
+    """Copy-only (D-018): no route of the app and no module it runs can send a message to anyone.
+    weekly_agent.py (an older, unused, standalone weekly report e-mail to the owner; not imported by the
+    app, never customer-facing) is the only file outside this surface and is deliberately not scanned."""
+    import pathlib
+    paths = [r.path for r in APP.app.routes]
+    assert not [p for p in paths if any(w in p.lower() for w in ("send", "gonder", "whatsapp", "mail", "sms"))]
+    root = pathlib.Path(APP.ROOT)
+    surface = [root / "app.py", root / "schemas.py", root / "config.py", root / "dashboard_builder.py",
+               *sorted((root / "services").glob("**/*.py"))]
+    src = "\n".join(p.read_text(encoding="utf-8") for p in surface).lower()
+    for needle in ("smtplib", "wa.me", "api.whatsapp", "twilio", "sendgrid", "gmail", "web.whatsapp", "mailto:"):
+        assert needle not in src, needle
+    assert "weekly_agent" not in src, "the app never imports the legacy e-mail script"
+
+
+def test_every_customer_action_resolves_even_outside_the_top_n_cut(synthetic_dir):
+    """Real-data finding (M5-4): actions use the full lists, the context lists are top-N. With a cut of 1,
+    every customer action must still open in the drawer, and the top-N lists and actions are unchanged."""
+    from services import context as CTX
+    full = CTX.build_context(synthetic_dir, inflation_rate=0.40)
+    small = CTX.build_context(synthetic_dir, inflation_rate=0.40, top_n=1)
+    assert [(a["action_id"], a["score"]) for a in small["actions"]] == [(a["action_id"], a["score"]) for a in full["actions"]]
+    assert len(small["winback"]) == 1 and small["action_customers"]["winback"], "rows carried outside the cut"
+    repo = ContextRepository(context=small)
+    for a in small["actions"]:
+        if a["entity_type"] == "customer":
+            facts = repo.customer(a["entity_id"])
+            assert facts and facts["name"], a["category"]
+    c = TestClient(APP.app, headers=H)
+    APP.app.state.repo = repo
+    APP.app.state.provider = CountingMock()
+    APP.app.state.agent = BusinessActionAgent(APP.app.state.provider)
+    for a in c.get("/api/agent/actions").json()["actions"]:
+        if a["entity_type"] == "customer":
+            assert c.get(f"/api/agent/customer/{a['entity_id']}").status_code == 200
+    assert APP.app.state.provider.calls == 0

@@ -21,10 +21,11 @@ def _money(x):
 
 
 # ---------------- categories (server-described, D-022) ----------------
-CAT_COLLECTIONS = A.Category("collections", "Tahsilat", "#b45309", "customer", "collections_aging")
+CAT_COLLECTIONS = A.Category("collections", "Tahsilat", "#b45309", "customer", "collections_aging", "collection")
 CAT_OVERSTOCK = A.Category("overstock", "Stok Eritme", "#0e7490", "product", "overstock_buyers")
-CAT_WINBACK = A.Category("winback", "Geri Kazanım", "#6d28d9", "customer", "winback_lapsed")
-CAT_REAL_DECLINE = A.Category("real_decline", "Reel Satış Düşüşü", "#9f1239", "customer", "real_growth")
+CAT_WINBACK = A.Category("winback", "Geri Kazanım", "#6d28d9", "customer", "winback_lapsed", "winback")
+CAT_REAL_DECLINE = A.Category("real_decline", "Reel Satış Düşüşü", "#9f1239", "customer", "real_growth",
+                              "sales_followup")
 
 A.DEFAULT_REASONS.update({
     "collections": "Vadesi geçen alacak tahsilat öncelik eşiğini aştı.",

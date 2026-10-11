@@ -52,17 +52,18 @@ class ContextRepository:
             for k, v in kw.items():
                 if v is not None and d.get(k) in (None, "", []):
                     d[k] = v
-        for r in ctx.get("winback", []):
+        extra = ctx.get("action_customers") or {}       # rows of action customers outside the top-N cuts (M5-4)
+        for r in ctx.get("winback", []) + extra.get("winback", []):
             merge(r["code"], name=r["name"], rep=r.get("rep"), sector=r.get("sector"),
                   historical_spend=r.get("spend"), last_active_year=r.get("last"),
                   winback_tier=r.get("tier"), overdue=r.get("overdue"),
                   top_products=[p["name"] for p in r.get("detail", {}).get("products", [])],
                   years=r.get("detail", {}).get("years", []))
-        for r in ctx.get("shrinking", []):
+        for r in ctx.get("shrinking", []) + extra.get("shrinking", []):
             merge(r["code"], name=r["name"], rep=r.get("rep"), sector=r.get("sector"),
                   sales_2025=r.get("y2025"), sales_2026=r.get("y2026"),
                   nominal_pct=r.get("nominal_pct"), real_pct=r.get("real_pct"))
-        for r in ctx.get("collections", []):
+        for r in ctx.get("collections", []) + extra.get("collections", []):
             merge(r["code"], name=r["name"], rep=r.get("rep"),
                   overdue=r.get("overdue"), oldest_overdue=r.get("oldest"),
                   collections_score=r.get("priority_score"),
@@ -71,6 +72,9 @@ class ContextRepository:
             merge(r["code"], name=r["name"], rep=r.get("rep"), overdue=r.get("overdue"),
                   revenue_25_26=r.get("rev"), still_ordering_2026=(r.get("active") == "Evet"),
                   debt_to_revenue_pct=r.get("ratio"), closed=r.get("closed"))
+        for code in ctx.get("closed_customers", []):     # authoritative KAPALI classification (M5-4)
+            if str(code) in cust:
+                cust[str(code)]["closed"] = True
         prod = {}
         for r in ctx.get("low_stock", []):
             prod[str(r["code"])] = {"product_code": str(r["code"]), "name": r["name"],

@@ -45,12 +45,16 @@ python dashboard_builder.py data          # -> dashboard.html (gitignored)
 uvicorn app:app --host 127.0.0.1          # local only; dashboard at http://127.0.0.1:8000/ , API docs at /docs
 ```
 Main endpoints:
-- **Deterministic:** `/` (the generated dashboard), `/api/health` (including `context_ready`),
-  `/api/context`, `/api/agent/categories`, and `/api/agent/actions`, which lists all open actions ranked
-  by Python and never calls the AI.
-- **AI, explicit and cached:** `POST /api/agent/actions/enrich` with `{"action_ids": [...]}` (at most 5
-  open actions, one provider call), `/api/agent/customer/{code}`, `/api/agent/product/{code}` and
-  `POST /api/agent/draft-message`.
+- **Deterministic (never call the AI):** `/` (the generated dashboard), `/api/health` (including
+  `context_ready`), `/api/context`, `/api/agent/categories`, `/api/agent/actions` (all open actions ranked
+  by Python), `/api/agent/customer/{code}` (facts, Python-formatted `display_facts`, stored notes) and
+  `/api/agent/product/{code}`.
+- **AI, explicit POST only:** `POST /api/agent/actions/enrich` with `{"action_ids": [...]}` (at most 5 open
+  actions, one provider call, cached), `POST /api/agent/customer/{code}/analyze`,
+  `POST /api/agent/product/{code}/analyze`, and `POST /api/agent/draft-message` with
+  `{"customer_code", "channel": "whatsapp"|"email", "purpose": "collection"|"offer"|"winback"|"sales_followup"|"fair_invite"}`
+  (optional `product_code`, `additional_instruction`). The old `message_type` field is still accepted and
+  mapped. KAPALI customers get collection drafts only. Drafts are copy-only: nothing is ever sent.
 - **Action state:** `POST /api/actions/{id}/complete|defer|dismiss|reopen` (`reopen` is the undo; `defer` takes
   `{"until": "YYYY-MM-DD"}`, a future date, default +7 days; unknown ids give 404).
 - **Other:** `POST /api/scenario`, and `/api/ai/calls` (call metadata only).
@@ -65,6 +69,9 @@ tab never calls the AI. "✨ AI yorumlarını oluştur" (then "Sonraki 5") or th
 comments on at most 5 actions per click; AI text is shown separately, marked "öneridir", and cached.
 Each card also has "✓ Yapıldı", "⏸ Ertele" (date picker, default +7 days) and "✕ Gizle". The change is saved
 in the local SQLite state DB only after the server confirms it, and a "Geri al" bar allows undo for 5 seconds.
+Customer cards also have "✉ Taslak" (WhatsApp first; choose channel and purpose, then "Taslak oluştur";
+review, "Kopyala" and send it yourself) and "🔍 Müşteri" (a side drawer with the customer's Python facts and
+stored notes, loaded once per page session, with no AI).
 Opened as a file or with the server stopped, the tab shows how to start the server; the other tabs work
 as before.
 
