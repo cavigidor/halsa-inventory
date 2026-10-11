@@ -40,10 +40,23 @@ function setup(opts = {}) {
   const cats = opts.categories || clone(FIX.categories);
   const actions = opts.actions || clone(FIX.actions);
   const calls = [];
+  // Fake action-state store (mirrors services/store.is_hidden), shared across "reloads" via opts.server.
+  const server = opts.server || { status: {} };
+  const today = isoLocal(new Date());
+  const hidden = (s) => !!s && (s.status === 'completed' || s.status === 'ignored' || (s.status === 'deferred' && s.until > today));
+  const STATUS = { complete: 'completed', dismiss: 'ignored', defer: 'deferred', reopen: 'open' };
+  const stateFn = opts.stateFn || ((kind, id, body) => {
+    const until = kind === 'defer' ? body.until : null;
+    server.status[id] = { status: STATUS[kind], until };
+    return { json: { ok: true, action_id: id, status: STATUS[kind], defer_until: until } };
+  });
   const routes = {
     '/api/health': opts.healthFn || (() => ({ json: health })),
     '/api/agent/categories': () => ({ json: cats }),
-    '/api/agent/actions': () => ({ json: actions }),
+    '/api/agent/actions': () => {
+      const open = actions.actions.filter((a) => !hidden(server.status[a.action_id]));
+      return { json: { ...actions, count: open.length, actions: open } };
+    },
     '/api/agent/actions/enrich': opts.enrich || okEnrich(actions.actions),
   };
   async function fakeFetch(url, init = {}) {
@@ -52,6 +65,13 @@ function setup(opts = {}) {
     const body = init.body ? JSON.parse(init.body) : null;
     calls.push({ path, method, headers: { ...(init.headers || {}) }, body });
     if (opts.offline) throw new TypeError('Failed to fetch');
+    const m = /^\/api\/actions\/([^/]+)\/(complete|defer|dismiss|reopen)$/.exec(path);
+    if (m && method === 'POST') {
+      const r = await stateFn(m[2], decodeURIComponent(m[1]), body || {});
+      if (r instanceof Error) throw r;
+      const status = r.status || 200;
+      return { ok: status >= 200 && status < 300, status, json: async () => r.json };
+    }
     const h = routes[path];
     if (!h) return { ok: false, status: 404, json: async () => ({}) };
     const r = await h(body, calls);
@@ -60,14 +80,23 @@ function setup(opts = {}) {
   }
   const dom = new JSDOM(HTML, {
     url: opts.url || 'http://127.0.0.1:8000/', runScripts: 'dangerously', pretendToBeVisual: true,
-    beforeParse(w) { w.fetch = fakeFetch; w.__AI_POLL_MS = 5; },
+    beforeParse(w) { w.fetch = fakeFetch; w.__AI_POLL_MS = 5; if (opts.undoMs) w.__AI_UNDO_MS = opts.undoMs; },
   });
   const doc = dom.window.document;
   const q = (s) => doc.querySelector('#ai ' + s), qa = (s) => [...doc.querySelectorAll('#ai ' + s)];
-  return { dom, win: dom.window, doc, calls, q, qa, actions,
+  return { dom, win: dom.window, doc, calls, q, qa, actions, server,
     open: () => doc.querySelector('.tab[data-t="ai"]').click(),
-    posts: () => calls.filter((c) => c.method !== 'GET') };
+    posts: () => calls.filter((c) => c.method !== 'GET'),
+    statePosts: () => calls.filter((c) => c.method === 'POST' && c.path.startsWith('/api/actions/'))
+      .map((c) => ({ ...c, path: decodeURIComponent(c.path) })),
+    enrichPosts: () => calls.filter((c) => c.path === '/api/agent/actions/enrich') };
 }
+function isoLocal(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function inDays(n) { const d = new Date(); d.setDate(d.getDate() + n); return isoLocal(d); }
+const AY = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+const trDate = (iso) => { const [y, m, d] = iso.split('-'); return `${+d} ${AY[+m - 1]} ${y}`; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(fn, ms = 3000) {
   const t0 = Date.now();
@@ -348,5 +377,214 @@ test('enrich reporting AI unavailable switches the tab to the disabled state', a
   assert.equal(t.qa('.ai-one').length, 0);
   assert.ok(!visible(t.q('.ai-gen')));
   assert.equal(t.qa('.aic').length, base.actions.length);
+});
+
+// ---------------- M5-3: done / defer / dismiss with undo ----------------
+const ids = (t) => t.qa('.aic').map((c) => c.dataset.id);
+const card = (t, id) => t.qa('.aic').find((c) => c.dataset.id === id);
+const STATE_FAIL = 'Aksiyon durumu kaydedilemedi.';
+
+test('✓ Yapıldı: POST complete with the header, card leaves the queue, order kept, undo offered', async () => {
+  const t = setup();
+  t.open(); await until(cardsReady(t));
+  const before = ids(t), nodes = t.qa('.aic'), target = before[1];
+  card(t, target).querySelector('.aic-done').click();
+  await until(() => !card(t, target));
+  const p = t.statePosts();
+  assert.equal(p.length, 1);
+  assert.equal(p[0].path, `/api/actions/${target}/complete`);
+  assert.equal(p[0].headers['X-StockAgent'], '1');
+  assert.deepEqual(ids(t), before.filter((x) => x !== target), 'Python order of the rest is unchanged');
+  t.qa('.aic').forEach((c) => assert.ok(nodes.includes(c), 'other cards are not rebuilt'));
+  assert.equal(t.q('.ai-f').textContent, `Tümü (${before.length - 1})`);
+  const u = t.q('.ai-undo');
+  assert.ok(visible(u));
+  assert.equal(u.querySelector('.ai-undo-t').textContent, 'Aksiyon tamamlandı.');
+  assert.equal(u.querySelector('.ai-undo-b').textContent, 'Geri al');
+  assert.equal(t.enrichPosts().length, 0);
+});
+
+test('✕ Gizle: POST dismiss with the header and the undo message', async () => {
+  const t = setup();
+  t.open(); await until(cardsReady(t));
+  const target = ids(t).at(-1);
+  card(t, target).querySelector('.aic-hide').click();
+  await until(() => !card(t, target));
+  assert.deepEqual(t.statePosts().map((p) => [p.path, p.headers['X-StockAgent']]), [[`/api/actions/${target}/dismiss`, '1']]);
+  assert.equal(t.q('.ai-undo-t').textContent, 'Aksiyon gizlendi.');
+  assert.equal(t.enrichPosts().length, 0);
+});
+
+test('⏸ Ertele: date defaults to +7 days, sends the chosen date, rejects past dates', async () => {
+  const t = setup();
+  t.open(); await until(cardsReady(t));
+  const target = ids(t)[0];
+  card(t, target).querySelector('.aic-defer').click();
+  const inp = card(t, target).querySelector('.aic-deferf input[type="date"]');
+  assert.equal(inp.value, inDays(7));
+  assert.equal(inp.min, inDays(1));
+  inp.value = inDays(-2);
+  card(t, target).querySelector('.aic-defer-ok').click();
+  await sleep(20);
+  assert.equal(t.statePosts().length, 0, 'a past date is not sent');
+  assert.equal(card(t, target).querySelector('.aic-deferf .aic-serr').textContent, 'Geçerli bir ileri tarih seçin.');
+  card(t, target).querySelector('.aic-defer-no').click();
+  assert.equal(card(t, target).querySelector('.aic-deferf'), null, 'Vazgeç closes the picker');
+  card(t, target).querySelector('.aic-defer').click();
+  const chosen = inDays(12);
+  card(t, target).querySelector('.aic-deferf input').value = chosen;
+  card(t, target).querySelector('.aic-defer-ok').click();
+  await until(() => !card(t, target));
+  const p = t.statePosts();
+  assert.equal(p.length, 1);
+  assert.equal(p[0].path, `/api/actions/${target}/defer`);
+  assert.equal(p[0].headers['X-StockAgent'], '1');
+  assert.deepEqual(p[0].body, { until: chosen });
+  assert.equal(t.q('.ai-undo-t').textContent, `Aksiyon ${trDate(chosen)} tarihine ertelendi.`);
+});
+
+test('Geri al: POST reopen, the card returns to its Python position with its cached AI, no AI request', async () => {
+  const actions = clone(FIX.actions);
+  actions.actions[2] = { ...aiText(actions.actions[2], 'C'), ai_cached: true };
+  const t = setup({ actions });
+  t.open(); await until(cardsReady(t));
+  const before = ids(t), target = before[2];
+  card(t, target).querySelector('.aic-done').click();
+  await until(() => !card(t, target));
+  t.q('.ai-undo-b').click();
+  await until(() => !!card(t, target));
+  assert.deepEqual(t.statePosts().map((p) => p.path), [`/api/actions/${target}/complete`, `/api/actions/${target}/reopen`]);
+  assert.equal(t.statePosts()[1].headers['X-StockAgent'], '1');
+  assert.deepEqual(ids(t), before, 'same order, no duplicate');
+  assert.equal(card(t, target).querySelector('.aic-int').textContent, 'Yorum C');
+  assert.equal(card(t, target).querySelector('.aic-cached').textContent, 'önbellekten');
+  assert.ok(!visible(t.q('.ai-undo')));
+  assert.equal(t.q('.ai-f').textContent, `Tümü (${before.length})`);
+  assert.equal(t.enrichPosts().length, 0);
+});
+
+test('undo window: about 5 s by default; when it expires nothing more happens', async () => {
+  const t = setup({ undoMs: 40 });
+  t.open(); await until(cardsReady(t));
+  const target = ids(t)[0];
+  card(t, target).querySelector('.aic-hide').click();
+  await until(() => visible(t.q('.ai-undo')));
+  await until(() => !visible(t.q('.ai-undo')), 1000);
+  await sleep(30);
+  assert.deepEqual(t.statePosts().map((p) => p.path), [`/api/actions/${target}/dismiss`]);
+  assert.ok(!card(t, target), 'the saved state stays');
+  assert.equal(t.server.status[target].status, 'ignored');
+  assert.match(HTML, /UNDO_MS=window\.__AI_UNDO_MS\|\|5000/, 'default undo window is 5 s');
+});
+
+test('failed state change: card stays with its facts and an error; no undo offered', async () => {
+  for (const fail of [() => ({ status: 500, json: { detail: 'x' } }), () => new TypeError('Failed to fetch'),
+                      () => ({ status: 404, json: { detail: 'yok' } })]) {
+    const t = setup({ stateFn: fail });
+    t.open(); await until(cardsReady(t));
+    const before = ids(t), target = before[0];
+    card(t, target).querySelector('.aic-done').click();
+    await until(() => card(t, target)?.querySelector('.aic-serr'));
+    const c = card(t, target);
+    assert.equal(c.querySelector('.aic-serr').textContent, STATE_FAIL);
+    assert.ok(c.querySelector('.aic-facts li') && c.querySelector('.aic-reason'));
+    assert.ok([...c.querySelectorAll('.ai-sbtn')].every((b) => !b.disabled), 'buttons usable again');
+    assert.deepEqual(ids(t), before);
+    assert.ok(!visible(t.q('.ai-undo')));
+    t.dom.window.close();
+  }
+});
+
+test('failed undo: the error is shown and the card stays hidden (server state unchanged)', async () => {
+  const server = { status: {} };
+  const t = setup({ server, stateFn: (kind, id) => {
+    if (kind === 'reopen') return { status: 500, json: {} };
+    server.status[id] = { status: 'completed' };
+    return { json: { ok: true, action_id: id, status: 'completed' } };
+  } });
+  t.open(); await until(cardsReady(t));
+  const target = ids(t)[0];
+  card(t, target).querySelector('.aic-done').click();
+  await until(() => visible(t.q('.ai-undo')));
+  t.q('.ai-undo-b').click();
+  await until(() => t.q('.ai-undo-t')?.textContent === STATE_FAIL);
+  assert.ok(!card(t, target));
+  assert.equal(t.q('.ai-undo-b'), null);
+});
+
+test('a pending change disables the card buttons; a double click sends one request', async () => {
+  let release;
+  const t = setup({ stateFn: (kind, id) => new Promise((r) => { release = () => r({ json: { ok: true, action_id: id, status: 'completed' } }); }) });
+  t.open(); await until(cardsReady(t));
+  const target = ids(t)[0];
+  const b = card(t, target).querySelector('.aic-done');
+  b.click(); b.click();
+  await until(() => t.statePosts().length === 1);
+  assert.ok([...card(t, target).querySelectorAll('.ai-sbtn')].every((x) => x.disabled));
+  assert.equal(t.qa('.aic').length, FIX.actions.actions.length, 'other cards stay usable');
+  release();
+  await until(() => !card(t, target));
+  assert.equal(t.statePosts().length, 1);
+});
+
+test('filters stay correct after state changes (server categories, no reranking)', async () => {
+  const t = setup();
+  t.open(); await until(cardsReady(t));
+  const counts = {};
+  FIX.actions.actions.forEach((a) => { counts[a.category] = (counts[a.category] || 0) + 1; });
+  const [catKey, n] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  const chip = () => t.qa('.ai-f').find((b) => b.dataset.k === catKey);
+  chip().click();
+  const inCat = FIX.actions.actions.filter((a) => a.category === catKey).map((a) => a.action_id);
+  assert.deepEqual(ids(t), inCat);
+  card(t, inCat[0]).querySelector('.aic-hide').click();
+  await until(() => !card(t, inCat[0]));
+  assert.ok(chip().textContent.endsWith(`(${n - 1})`) && chip().classList.contains('on'));
+  assert.deepEqual(ids(t), inCat.slice(1));
+  for (const id of inCat.slice(1)) {
+    card(t, id).querySelector('.aic-done').click();
+    await until(() => !card(t, id));
+  }
+  assert.equal(t.q('.ai-none').textContent, 'Bu kategoride açık aksiyon yok.');
+  assert.ok(chip().textContent.endsWith('(0)'));
+  t.qa('.ai-f')[0].click();
+  assert.equal(t.qa('.aic').length, FIX.actions.actions.length - n);
+});
+
+test('removing the last open action shows "Bugün için açık aksiyon yok."; undo brings it back', async () => {
+  const t = setup();
+  t.open(); await until(cardsReady(t));
+  const all = ids(t);
+  for (const id of all) {
+    card(t, id).querySelector('.aic-done').click();
+    await until(() => !card(t, id));
+  }
+  assert.equal(t.q('.ai-state').textContent, MSG.empty);
+  assert.ok(visible(t.q('.ai-state')) && !visible(t.q('.ai-filters')) && !visible(t.q('.ai-gen')));
+  t.q('.ai-undo-b').click();
+  await until(() => t.qa('.aic').length === 1);
+  assert.deepEqual(ids(t), [all.at(-1)]);
+  assert.ok(!visible(t.q('.ai-state')) && visible(t.q('.ai-filters')));
+});
+
+test('state survives a reload; an undone action is open again after reload', async () => {
+  const server = { status: {} };
+  const t = setup({ server });
+  t.open(); await until(cardsReady(t));
+  const [a, b, c, d] = ids(t);
+  card(t, a).querySelector('.aic-done').click(); await until(() => !card(t, a));
+  card(t, b).querySelector('.aic-hide').click(); await until(() => !card(t, b));
+  card(t, c).querySelector('.aic-defer').click();
+  card(t, c).querySelector('.aic-defer-ok').click(); await until(() => !card(t, c));
+  card(t, d).querySelector('.aic-done').click(); await until(() => !card(t, d));
+  t.q('.ai-undo-b').click(); await until(() => !!card(t, d));
+  t.dom.window.close();
+  const r = setup({ server });               // "reload": a fresh page against the same server state
+  r.open(); await until(cardsReady(r));
+  const now = ids(r);
+  assert.ok(!now.includes(a) && !now.includes(b) && !now.includes(c), 'completed, dismissed, deferred stay hidden');
+  assert.ok(now.includes(d), 'the undone action is open');
+  assert.deepEqual(now, FIX.actions.actions.map((x) => x.action_id).filter((x) => ![a, b, c].includes(x)));
+  assert.equal(r.posts().length, 0);
 });
 }

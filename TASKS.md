@@ -4,10 +4,9 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 must not be started until it is moved to *Current*.
 
 ## Current
-- [ ] **Review and merge the M5-2 PR** (`claude/m5-2-ai-tab`, read-only AI tab). Then M5-3.
+- [ ] **Review and merge the M5-3 PR** (`claude/m5-3-action-state`, done / defer / dismiss with undo). Then M5-4.
 
 ## Next (M5 slices, design §11; one bounded checkpoint each)
-- [ ] **M5-3 Action state.** Done / defer / dismiss with a 5-second undo.
 - [ ] **M5-4 Drafts and the customer drawer.** WhatsApp first, then e-posta; channel × purpose
   (collection, offer, winback, sales_followup, fair_invite); D-018 tone; copy-only; KAPALI refusals.
 - [ ] **M5-5 Controlled monthly refresh.** validate → build → verify → swap (D-019), endpoint and CLI,
@@ -73,6 +72,9 @@ Milestone 5 must not be started until it is moved to *Current*.
   2020 should count, change `QUAL_YEARS` and that test together.
 
 ## Completed
+- [x] 2026-10-11 — M5-3 action state: "✓ Yapıldı" / "⏸ Ertele" (+7 days default) / "✕ Gizle" on each card,
+  server-confirmed, 5-second "Geri al" via the new `POST /api/actions/{id}/reopen`. Notes in D-029.
+- [x] 2026-10-11 — PR #5 (M5-2) merged into `main` (`0061a43`).
 - [x] 2026-10-11 — M5-2 read-only AI Aksiyon Merkezi tab (`_ai_panel()`, server-described filters,
   top-5 / next-5 / per-card AI, every §10 state except refresh, jsdom DOM tests in CI). Notes in D-028.
 - [x] 2026-10-11 — PR #4 (M5-1) merged into `main` (`df4ba28`).

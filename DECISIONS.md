@@ -275,3 +275,21 @@ Don't rewrite earlier entries. If one is superseded, add a new entry that says s
 - **DOM tests:** jsdom under Node (`tests/js/`, pinned lockfile), driven by `tests/test_m5_ui.py` with real
   API responses from the synthetic app and a mock provider. Skipped locally without node/jsdom; CI sets
   `REQUIRE_JS_TESTS=1` so they must run. The full Playwright smoke test stays in M5-6.
+
+### D-029 · 2026-10-11 · M5-3 action-state contract (done / defer / dismiss / undo)
+- **Undo endpoint:** `POST /api/actions/{action_id}/reopen` (guarded by `X-StockAgent: 1` like every POST) calls the
+  existing `set_status(id, "open")`. That clears `completed_at`, `defer_until` and `notes` and appends a
+  `status:open` history event. The action row, its history and the AI cache are kept; nothing is deleted or
+  recreated. It returns `ActionStatusResponse`.
+- **Server-confirmed mutations:** all four state endpoints return 404 for an `action_id` that was never generated
+  (previously a silent no-op that still wrote history). The UI removes a card only after a 2xx and keeps it,
+  with an error, otherwise. There is no optimistic deletion.
+- **Defer date:** `until` must be an ISO date strictly after today (422 otherwise); an empty `until` defaults to
+  today + 7 (design §7). A deferred action without a date would never hide under `is_hidden`, so it is no longer
+  stored. The response includes the stored `defer_until`. Expiry stays the existing `is_hidden` comparison; no
+  scheduler.
+- **Undo UI:** one 5-second "Geri al" bar at a time; a newer change replaces it and the earlier change simply stays
+  saved. The client keeps the removed card's data in memory, so undo restores its Python position and any cached
+  AI text without a refetch or an AI call.
+- **Unchanged store semantics:** the same facts give the same `action_id`; `upsert_actions` never reopens a
+  completed or dismissed action; changed facts make a new action.

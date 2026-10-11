@@ -51,7 +51,8 @@ Main endpoints:
 - **AI, explicit and cached:** `POST /api/agent/actions/enrich` with `{"action_ids": [...]}` (at most 5
   open actions, one provider call), `/api/agent/customer/{code}`, `/api/agent/product/{code}` and
   `POST /api/agent/draft-message`.
-- **Action state:** `POST /api/actions/{id}/complete|defer|dismiss`.
+- **Action state:** `POST /api/actions/{id}/complete|defer|dismiss|reopen` (`reopen` is the undo; `defer` takes
+  `{"until": "YYYY-MM-DD"}`, a future date, default +7 days; unknown ids give 404).
 - **Other:** `POST /api/scenario`, and `/api/ai/calls` (call metadata only).
 
 Every POST must send the header `X-StockAgent: 1`. This is a local guard against cross-site requests;
@@ -62,6 +63,8 @@ Open **http://127.0.0.1:8000/** (not the file) and click the last tab. It lists 
 by Python with the reason and the facts, filterable by the categories the server describes. Opening the
 tab never calls the AI. "✨ AI yorumlarını oluştur" (then "Sonraki 5") or the per-card button asks for AI
 comments on at most 5 actions per click; AI text is shown separately, marked "öneridir", and cached.
+Each card also has "✓ Yapıldı", "⏸ Ertele" (date picker, default +7 days) and "✕ Gizle". The change is saved
+in the local SQLite state DB only after the server confirms it, and a "Geri al" bar allows undo for 5 seconds.
 Opened as a file or with the server stopped, the tab shows how to start the server; the other tabs work
 as before.
 

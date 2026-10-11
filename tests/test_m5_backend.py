@@ -229,6 +229,7 @@ def test_failed_enrich_is_not_cached(mk):
     ("/api/actions/collections:x:1/complete", {}),
     ("/api/actions/collections:x:1/defer", {"until": "2099-01-01"}),
     ("/api/actions/collections:x:1/dismiss", {}),
+    ("/api/actions/collections:x:1/reopen", {}),
     ("/api/agent/draft-message", {"customer_code": "900.00.0001", "message_type": "email"}),
     ("/api/scenario", {"financing_rate": 40}),
 ])
@@ -307,3 +308,133 @@ def test_health_reports_context_error(mk, tmp_path):
         pass
     h = c.get("/api/health").json()
     assert h["context_ready"] is False and h["context_error"]
+
+
+# ---------------- M5-3: action state (done / defer / dismiss / reopen) ----------------
+import datetime as _dt
+
+from services import store as ST
+
+
+def _row(aid):
+    return ST.get_action(aid)
+
+
+def _history(aid):
+    with ST._conn() as c:
+        return [r["event"] for r in c.execute(
+            "SELECT event FROM action_history WHERE action_key=? ORDER BY id", (aid,))]
+
+
+def _future(days):
+    return (_dt.date.today() + _dt.timedelta(days=days)).isoformat()
+
+
+def test_complete_persists_completed_and_hides(mk):
+    c, prov = mk()
+    aid = _ids(c)[0]
+    r = c.post(f"/api/actions/{aid}/complete", json={"notes": "arandı"})
+    assert r.status_code == 200 and r.json() == {"ok": True, "action_id": aid, "status": "completed", "defer_until": None}
+    row = _row(aid)
+    assert row["status"] == "completed" and row["completed_at"] and row["notes"] == "arandı"
+    assert aid not in _ids(c)
+    assert prov.calls == 0
+
+
+def test_dismiss_persists_ignored_and_hides(mk):
+    c, prov = mk()
+    aid = _ids(c)[-1]
+    assert c.post(f"/api/actions/{aid}/dismiss").json()["status"] == "ignored"
+    assert _row(aid)["status"] == "ignored" and aid not in _ids(c)
+    assert prov.calls == 0
+
+
+def test_defer_persists_requested_future_date_and_hides(mk):
+    c, prov = mk()
+    aid = _ids(c)[1]
+    until = _future(10)
+    r = c.post(f"/api/actions/{aid}/defer", json={"until": until}).json()
+    assert r["status"] == "deferred" and r["defer_until"] == until
+    row = _row(aid)
+    assert row["status"] == "deferred" and row["defer_until"] == until
+    assert aid not in _ids(c)
+    assert prov.calls == 0
+
+
+def test_defer_without_date_defaults_to_seven_days(mk):
+    c, _ = mk()
+    aid = _ids(c)[0]
+    r = c.post(f"/api/actions/{aid}/defer", json={}).json()
+    assert r["defer_until"] == _future(7) and _row(aid)["defer_until"] == _future(7)
+    assert aid not in _ids(c)
+
+
+@pytest.mark.parametrize("until", ["2020-01-01", "today", "not-a-date", "2026-13-40"])
+def test_defer_rejects_past_today_or_invalid_dates(mk, until):
+    c, _ = mk()
+    aid = _ids(c)[0]
+    if until == "today":
+        until = _dt.date.today().isoformat()
+    r = c.post(f"/api/actions/{aid}/defer", json={"until": until})
+    assert r.status_code == 422
+    assert _row(aid)["status"] == "open" and aid in _ids(c)
+    assert _history(aid) == ["generated"]
+
+
+def test_deferred_action_returns_after_its_date(mk):
+    """Existing store semantics: hidden while the defer date is in the future, open again afterwards."""
+    c, _ = mk()
+    aid = _ids(c)[0]
+    ST.set_status(aid, "deferred", until=_future(3))
+    assert aid not in _ids(c)
+    ST.set_status(aid, "deferred", until=(_dt.date.today() - _dt.timedelta(days=1)).isoformat())
+    assert aid in _ids(c)
+
+
+@pytest.mark.parametrize("kind,body", [("complete", {}), ("dismiss", {}), ("defer", {"until": "2099-01-01"})])
+def test_reopen_restores_open_in_python_order_and_clears_state(mk, kind, body):
+    c, prov = mk()
+    before = _ids(c)
+    aid = before[1]
+    c.post(f"/api/actions/{aid}/{kind}", json=body)
+    assert aid not in _ids(c)
+    r = c.post(f"/api/actions/{aid}/reopen")
+    assert r.status_code == 200 and r.json()["status"] == "open"
+    row = _row(aid)
+    assert row["status"] == "open" and row["completed_at"] is None and row["defer_until"] is None
+    assert _ids(c) == before, "same action_id, same Python position, no duplicate"
+    status = {"complete": "completed", "dismiss": "ignored", "defer": "deferred"}[kind]
+    assert _history(aid) == ["generated", f"status:{status}", "status:open"]
+    assert prov.calls == 0
+
+
+def test_reopen_keeps_cached_ai_text_and_calls_no_provider(mk):
+    c, prov = mk()
+    ids = _ids(c)
+    c.post("/api/agent/actions/enrich", json={"action_ids": ids[:1]})
+    assert prov.calls == 1
+    c.post(f"/api/actions/{ids[0]}/complete")
+    c.post(f"/api/actions/{ids[0]}/reopen")
+    a = c.get("/api/agent/actions").json()["actions"][0]
+    assert a["action_id"] == ids[0] and a["ai_cached"] is True and a["interpretation"]
+    assert prov.calls == 1, "state changes and undo never call the provider"
+
+
+@pytest.mark.parametrize("kind", ["complete", "defer", "dismiss", "reopen"])
+def test_state_endpoints_404_for_unknown_action(mk, kind):
+    c, prov = mk()
+    _ids(c)
+    r = c.post(f"/api/actions/collections:900.00.9999:deadbeef/{kind}", json={})
+    assert r.status_code == 404
+    assert _history("collections:900.00.9999:deadbeef") == []
+    assert prov.calls == 0
+
+
+def test_completed_identical_content_is_not_reopened_by_a_new_build(mk, synthetic_ctx):
+    """Store semantics kept: the same facts give the same action_id, which upsert never resets to open."""
+    c, _ = mk()
+    aid = _ids(c)[0]
+    c.post(f"/api/actions/{aid}/complete")
+    c2, _ = mk(ctx=synthetic_ctx)
+    assert aid not in _ids(c2) and _row(aid)["status"] == "completed"
+

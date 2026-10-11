@@ -104,11 +104,13 @@ def test_ai_script_has_no_html_injection_sinks(built):
 
 def test_ai_script_post_contract(built):
     js = _ai_script(built["ai"])
-    assert "'X-StockAgent':'1'" in js
+    assert "'X-StockAgent':'1'" in js and js.count("headers:POST_HEADERS") == js.count("method:'POST'") == 2
     assert "MAX_IDS=5" in js and ".slice(0,MAX_IDS)" in js
-    assert js.count("method:'POST'") == 1 and "/api/agent/actions/enrich" in js
-    # only provider-free GETs otherwise; no draft / customer / product AI endpoints in M5-2
-    for path in ("/api/agent/customer", "/api/agent/product", "/api/agent/draft-message", "/api/actions/"):
+    assert "/api/agent/actions/enrich" in js
+    # M5-3 state endpoints, keyed by the real action_id
+    assert "'/api/actions/'+encodeURIComponent(id)+'/'+kind" in js and "+'/reopen'" in js
+    # no draft / customer / product AI endpoints yet (M5-4)
+    for path in ("/api/agent/customer", "/api/agent/product", "/api/agent/draft-message"):
         assert path not in js
 
 
@@ -127,9 +129,11 @@ def test_approved_turkish_state_copy_is_present(built):
     assert "</script" not in js.lower()
 
 
-def test_m5_3_to_m5_5_controls_are_not_built(built):
+def test_m5_3_controls_present_and_m5_4_m5_5_not_built(built):
     block = _ai_block(built["ai"])
-    for label in ("Yapıldı", "Ertele", "Gizle", "Taslak", "Yenile", "Geri al"):
+    for label in ("✓ Yapıldı", "⏸ Ertele", "✕ Gizle", "Geri al", "Aksiyon durumu kaydedilemedi."):
+        assert label in block, label
+    for label in ("Taslak", "WhatsApp", "Yenile", "draft"):
         assert label not in block, label
 
 
