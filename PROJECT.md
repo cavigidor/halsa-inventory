@@ -86,7 +86,30 @@ services/store.py     SQLite: action status, history, memory, ai_calls metadata 
 | 2 | FastAPI backend and provider-agnostic AI layer, runs without a key | done |
 | 3 | Real LLM (OpenAI) behind the abstraction, with numeric safety | done (see STATUS.md) |
 | 4 | Live macro data (TCMB/TÜİK inflation, FX) | later |
-| 5 | "✨ AI Aksiyon Merkezi" tab in the dashboard | next (not started) |
+| 5 | "✨ AI Aksiyon Merkezi" tab: deterministic action queue first, AI on demand (design: `docs/m5_action_center.md`) | design approved; implementation next |
+| 6 | Additional data sources / sales intelligence foundation: validated importers for hedef raporu, detailed collections, Trodat sales, gider/gelir, kredi takip, bütçe (`docs/roadmap_m6_m7.md`) | planned (D-021) |
+| 7 | Sales operating system: daily sales queue, customer 360, cross-sell, January fair command center, light CRM, new-buyer discovery | planned (D-021) |
+| — | Multi-user / remote deployment (auth, admin and salesperson roles, private deployment, backups) | future, out of scope for M5 (D-016) |
+
+## Product principle (D-015)
+The deterministic action queue is the product: Python decides, ranks and explains every action and
+every number. AI only interprets selected actions and drafts messages, and the system is fully useful
+with AI disabled.
+
+## Data-source architecture (D-021)
+Every Excel source, current or future, flows: source-specific validator/importer → normalized
+deterministic model → entity resolution → analytics/services → actions → dashboard/API → optional AI
+explanation. Dashboard code never depends on a specific workbook layout. Validation is fail-closed.
+Sources planned for M6: hedef raporu (potential, territory, visits), the detailed collections report,
+the Trodat sales report (SKU intelligence), and the owner-only sources gider/gelir, kredi takip and
+bütçe (bütçe gated by cell-level validation because of formula errors).
+
+**Data confidence (D-023):** fields carry a Python-assigned status: `trusted`, `incomplete`, `stale`,
+`unverified` or `invalid`. The 2020–2026 sales history (including its order activity/source field, used
+for fair attribution) is the trusted commercial core. CRM is incomplete. `Haftalık Kaşe Adedi`, `Risk`
+and `Kredi` are stale historical fields that never drive decisions as current values. The AI never
+upgrades a stale field into a current fact. StockAgent models only legitimate, recorded transactions
+(D-026).
 
 ## Privacy boundary
 GitHub holds code, tests, prompts, schemas, docs, synthetic fixtures, CI and config templates.

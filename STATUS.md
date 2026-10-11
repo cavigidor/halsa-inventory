@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-09 (M3 merged to `main`; Q-1 summary quality done on `claude/q1-summary-quality`, PR pending)._
+_Updated 2026-10-10 (M3 and Q-1 on `main` @ `a34ccac`; M5 design approved and M6/M7 roadmap documented in PR #3, docs only, awaiting merge)._
 
 ## Git
 - **Branch:** `claude/milestone-3-live-ai`, based on `main`.
@@ -90,7 +90,7 @@ OpenAI model. The OpenAI default model `gpt-5-mini` lives in
 - Real exports in `./data` (Mac): `2020-5 ekim satışlar.xlsx`, `STOK 5 Ekim 2026.xlsx`, `Cari 5 Ekim 2026.xlsx`.
 - A pre-M3 backup of the Mac folder: `~/Desktop/ME/Projects/StockAgent_backup_2026-10-08_pre-M3`.
 
-## Q-1 (done; awaiting merge)
+## Q-1 (done; merged in PR #2)
 Branch `claude/q1-summary-quality` from `main` @ `60dffdb` (PR #1 merged; Milestone 3 complete).
 Writing-quality prompt rules, schema field guidance and `services/ai/quality.py` measurement are
 implemented.
@@ -125,5 +125,33 @@ Residual model-judgment notes, not formatting: one risk still mentions missing m
 out-of-scope warning, a fact label is capitalized mid-sentence, and one risk is vague. Logged as an
 optional follow-up (TASKS Later: Q-2); not a reason to keep iterating.
 
+## M5-P1 (design approved)
+`docs/m5_action_center.md` (branch `claude/m5-p1-design-note`, PR #3, docs only) has been updated with the
+owner's decisions:
+- The deterministic queue is the product, and AI only explains (D-015).
+- M5 is local-only; multi-user / remote deployment is a future milestone, and M5 must not block it (D-016).
+- AI runs only on request: top 5 by default, then "next 5" or per-action, with a cache (D-017).
+- Drafts are WhatsApp first, channel × purpose, copy-only, natural B2B tone (D-018).
+- The monthly refresh is controlled: validate → build → verify → swap (D-019).
+- The dashboard is served same-origin, with a POST guard and escaped AI text (D-020).
+
+There are six bounded implementation slices (M5-1 to M5-6). No code has changed in this checkpoint.
+
+## Roadmap (documented 2026-10-10, not started)
+Six additional monthly owner reports (hedef raporu, kredi takip, the detailed collections report,
+bütçe, the Trodat sales report, gider/gelir) are planned for **M6** (validated importers → normalized
+model → entity resolution) and **M7** (sales operating system). See `docs/roadmap_m6_m7.md` and
+D-021 to D-026. None is ingested yet, and the real files stay local and gitignored.
+
+The owner's answers were incorporated on 2026-10-10:
+- Data-confidence statuses (D-023): `Haftalık Kaşe Adedi`, `Risk` and `Kredi` are stale historical
+  fields; CRM coverage is incomplete; the 2020–2026 sales report and its activity/source (fair) field are
+  trusted after verification.
+- The new hires are office sales support, not field salespeople (D-024).
+- Fair attribution starts from existing data (D-025).
+
+Questions are resolved or reduced to M6-0 technical verification. M5-1 includes the extensibility seams
+so M6/M7 actions plug in without redesign.
+
 ## Immediate next task
-Merge the Q-1 pull request. Then TASKS M5-P1: the design note for "✨ AI Aksiyon Merkezi" (docs only, no UI code).
+Owner merges PR #3. Then M5-1 (backend prerequisites, no UI).

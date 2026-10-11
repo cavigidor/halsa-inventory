@@ -27,7 +27,8 @@ GitHub (`cavigidor/halsa-inventory`) is the source of truth. Do not rely on chat
 - Never commit: `data/`, `*.xlsx/*.xls/*.csv`, `dashboard.html`, `agent_context.json`,
   `*.db`, `.env`, keys or tokens, logs, generated reports. See `.gitignore`.
 - Tests use only the synthetic fixtures in `tests/fixtures/`, which contain invented names and codes.
-  Never copy real customer, rep or product names into tests or docs.
+  Never copy real customer or salesperson names, or real product records, into tests or docs.
+  Business-line and source names (for example the Trodat division or "hedef raporu") are fine.
 - Before every commit, run `git diff --cached --stat` and
   `git diff --cached | grep -nE "sk-|ghp_|github_pat_|sk-ant-"`. Both must be clean.
 
