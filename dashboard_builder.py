@@ -347,7 +347,19 @@ _AI_CSS=r"""
 #ai .aic-ev-l{color:var(--muted);font-weight:700}
 #ai .aic-chip{background:#fff;border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-variant-numeric:tabular-nums}
 #ai .aic-err{font-size:12px;color:#b42318;margin:7px 0 0}
-#ai .aic-acts{margin-top:8px}
+#ai [hidden]{display:none!important}
+#ai .aic-acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:9px}
+#ai .aic-acts .ai-one{margin-left:auto}
+#ai .ai-sbtn{border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-size:12px;font-weight:600;padding:4px 10px;border-radius:8px;cursor:pointer}
+#ai .ai-sbtn:hover{border-color:#c3c8cf}#ai .ai-sbtn:disabled{opacity:.5;cursor:wait}
+#ai .aic-done{color:#1a7f4b}
+#ai .aic-deferf{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:7px;font-size:12px;color:var(--muted)}
+#ai .aic-deferf input{border:1px solid var(--line);border-radius:6px;padding:3px 6px;font:inherit;color:var(--ink)}
+#ai .aic-serr{font-size:12px;color:#b42318;font-weight:600;margin:7px 0 0}
+#ai .ai-undo{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:20;display:flex;gap:14px;align-items:center;
+background:var(--ink);color:#fff;border-radius:10px;padding:9px 10px 9px 16px;font-size:13px;box-shadow:0 6px 24px rgba(0,0,0,.18);max-width:calc(100% - 32px)}
+#ai .ai-undo-b{background:transparent;border:1px solid rgba(255,255,255,.55);color:#fff;font:inherit;font-weight:700;padding:4px 11px;border-radius:7px;cursor:pointer}
+#ai .ai-undo-t.err{color:#fecaca}
 #ai .ai-more{text-align:center;margin:4px 0 8px}
 #ai .ai-none{color:var(--muted);font-style:italic}
 @media(max-width:600px){#ai .ai-date{margin-left:0;width:100%}#ai .aic-conf{margin-left:0}}
@@ -364,6 +376,7 @@ _AI_BODY="""
 <div class="ai-filters" hidden></div>
 <div class="ai-list"></div>
 <div class="ai-more"><button class="ai-btn ai-next" type="button" hidden>Sonraki 5 için AI yorumu oluştur</button></div>
+<div class="ai-undo" role="status" aria-live="polite" hidden></div>
 <p class="note">Sıralama ve sayılar Python'dandır; AI metinleri öneridir ve rakam üretmez.</p>
 """
 
@@ -376,6 +389,7 @@ const ASOF=root.getAttribute('data-asof')||'';
 const MAX_IDS=5;                                   // server contract: at most 5 ids and one provider call per request
 const POLL_MS=window.__AI_POLL_MS||3000, POLL_MAX_MS=120000;
 const POST_HEADERS={'Content-Type':'application/json','X-StockAgent':'1'};   // local CSRF guard (D-020)
+const UNDO_MS=window.__AI_UNDO_MS||5000, DEFER_DAYS=7;   // design §7: 5-second "Geri al", "Ertele" defaults to +7 days
 const MSG={
   offline:'Sunucu çalışmıyor. Terminalde uvicorn app:app --host 127.0.0.1 çalıştırıp http://127.0.0.1:8000 adresini açın. Diğer sekmeler normal çalışır.',
   warming:'Veriler hazırlanıyor…',
@@ -386,7 +400,11 @@ const MSG={
   empty:'Bugün için açık aksiyon yok.',
   noneInFilter:'Bu kategoride açık aksiyon yok.',
   mismatch:'Pano ve sunucu farklı veri tarihleri kullanıyor; veriyi yenileyin.',
-  other:'AI yorumu üretilemedi'
+  other:'AI yorumu üretilemedi',
+  stateFail:'Aksiyon durumu kaydedilemedi.',
+  badDate:'Geçerli bir ileri tarih seçin.',
+  complete:'Aksiyon tamamlandı.',
+  dismiss:'Aksiyon gizlendi.'
 };
 const GUARD='AI metni güvenlik kontrolünden geçmedi, gösterilmiyor', NET="OpenAI'ye ulaşılamadı";
 const ERR={quota:'OpenAI kredisi yetersiz',rate_limit:'Çok fazla istek, biraz sonra deneyin',timeout:NET,connection:NET,
@@ -395,7 +413,8 @@ const PRI={critical:'KRİTİK',high:'YÜKSEK',medium:'ORTA',low:'DÜŞÜK'};
 const CONF={high:'yüksek',medium:'orta',low:'düşük'};
 const AY=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 const st={started:false,aiOn:false,model:null,cats:[],catByKey:{},order:[],byId:{},filter:'',busy:false,
-          tried:new Set(),errors:{},cardEl:{}};
+          tried:new Set(),errors:{},cardEl:{},
+          gone:new Set(),mut:new Set(),stateErr:{},undo:null};   // gone: left the open queue after a server-confirmed change
 
 const $=s=>root.querySelector(s);
 function el(tag,cls,text){const e=document.createElement(tag); if(cls) e.className=cls;
@@ -452,21 +471,23 @@ async function loadAll(h){
   aiChip(); renderFilters(); renderList();
 }
 
-function visible(){return st.order.filter(id=>!st.filter||st.byId[id].category===st.filter);}
+function openIds(){return st.order.filter(id=>!st.gone.has(id));}   // Python order, minus server-confirmed state changes
+function visible(){return openIds().filter(id=>!st.filter||st.byId[id].category===st.filter);}
 function renderFilters(){
   const box=$('.ai-filters'); box.replaceChildren();
-  const counts={}; st.order.forEach(id=>{const k=st.byId[id].category; counts[k]=(counts[k]||0)+1;});
+  const open=openIds(), counts={}; open.forEach(id=>{const k=st.byId[id].category; counts[k]=(counts[k]||0)+1;});
   const chip=(key,label,color,n)=>{const b=el('button','ai-f'+(st.filter===key?' on':''),label+' ('+n+')');
     b.type='button'; b.dataset.k=key; if(color) b.style.setProperty('--c',color);
     b.addEventListener('click',()=>{st.filter=key; renderFilters(); renderList();}); return b;};
-  box.append(chip('','Tümü',null,st.order.length));
+  box.append(chip('','Tümü',null,open.length));
   st.cats.forEach(c=>box.append(chip(c.key,c.label_tr,safeColor(c.color),counts[c.key]||0)));   // server-described (D-022)
   Object.keys(counts).filter(k=>!st.catByKey[k]).forEach(k=>box.append(chip(k,k,null,counts[k])));
-  show(box,st.order.length>0);
+  show(box,open.length>0);
 }
 function renderList(){
   const list=$('.ai-list'); list.replaceChildren(); st.cardEl={};
-  if(!st.order.length){setState(MSG.empty,'empty'); updateButtons(); return;}
+  if(!openIds().length){setState(MSG.empty,'empty'); updateButtons(); return;}
+  if($('.ai-state').classList.contains('empty')) setState('');
   const ids=visible();
   if(!ids.length) list.append(el('p','ai-none',MSG.noneInFilter));
   ids.forEach(id=>{const c=card(st.byId[id]); st.cardEl[id]=c; list.append(c);});
@@ -487,8 +508,15 @@ function card(a){
     a.facts.forEach(x=>f.append(el('li',null,x))); c.append(f);}
   if(hasAI(a)) c.append(aiBlock(a));
   else if(st.errors[a.action_id]) c.append(el('p','aic-err',st.errors[a.action_id]));
-  if(st.aiOn&&!hasAI(a)){const row=el('div','aic-acts'), b=el('button','ai-btn ai-one','✨ Bu aksiyon için AI yorumu');
-    b.type='button'; b.disabled=st.busy; b.addEventListener('click',()=>enrich([a.action_id])); row.append(b); c.append(row);}
+  const id=a.action_id, row=el('div','aic-acts');
+  const sb=(cls,label,fn)=>{const b=el('button','ai-sbtn '+cls,label); b.type='button'; b.disabled=st.mut.has(id);
+    b.addEventListener('click',fn); return b;};
+  row.append(sb('aic-done','✓ Yapıldı',()=>mutate(id,'complete')), sb('aic-defer','⏸ Ertele',()=>toggleDefer(c,id)),
+             sb('aic-hide','✕ Gizle',()=>mutate(id,'dismiss')));
+  if(st.aiOn&&!hasAI(a)){const b=el('button','ai-btn ai-one','✨ Bu aksiyon için AI yorumu');
+    b.type='button'; b.disabled=st.busy; b.addEventListener('click',()=>enrich([id])); row.append(b);}
+  c.append(row);
+  if(st.stateErr[id]) c.append(el('p','aic-serr',st.stateErr[id]));
   return c;
 }
 function aiBlock(a){   // advisory area, visually separate from the Python facts above
@@ -512,6 +540,55 @@ function updateButtons(){
 }
 function replaceCard(id){const old=st.cardEl[id]; if(!old||!old.parentNode) return;
   const n=card(st.byId[id]); old.replaceWith(n); st.cardEl[id]=n;}
+
+// ---- action state (M5-3): done / defer / dismiss, server-confirmed, with a 5-second undo ----
+function isoLocal(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function inDays(n){const d=new Date(); d.setDate(d.getDate()+n); return isoLocal(d);}
+function toggleDefer(c,id){
+  const open=c.querySelector('.aic-deferf'); if(open){open.remove(); return;}
+  const f=el('div','aic-deferf'), inp=el('input');
+  inp.type='date'; inp.min=inDays(1); inp.value=inDays(DEFER_DAYS); inp.setAttribute('aria-label','Erteleme tarihi');
+  const ok=el('button','ai-sbtn aic-defer-ok','Ertele'), no=el('button','ai-sbtn aic-defer-no','Vazgeç'), msg=el('span','aic-serr');
+  ok.type=no.type='button'; show(msg,false);
+  ok.addEventListener('click',()=>{const v=inp.value;
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||v<inp.min){msg.textContent=MSG.badDate; show(msg,true); return;}
+    mutate(id,'defer',v);});
+  no.addEventListener('click',()=>f.remove());
+  f.append(el('span',null,'Ne zamana?'),inp,ok,no,msg);
+  c.querySelector('.aic-acts').after(f);
+}
+function cardBusy(id,on){const c=st.cardEl[id]; if(c) c.querySelectorAll('.ai-sbtn').forEach(b=>{b.disabled=on;});}
+async function post(path,body){
+  try{const r=await fetch(path,{method:'POST',headers:POST_HEADERS,body:JSON.stringify(body||{})}); return r.ok?await r.json():null;}
+  catch(e){return null;}
+}
+async function mutate(id,kind,until){
+  if(st.mut.has(id)||st.gone.has(id)) return;
+  st.mut.add(id); delete st.stateErr[id]; cardBusy(id,true);
+  const res=await post('/api/actions/'+encodeURIComponent(id)+'/'+kind,kind==='defer'?{until:until}:{});
+  st.mut.delete(id);
+  if(!res){st.stateErr[id]=MSG.stateFail; replaceCard(id); return;}   // not confirmed: the card stays, with the error
+  st.gone.add(id);
+  const n=st.cardEl[id]; if(n) n.remove(); delete st.cardEl[id];
+  renderFilters();
+  if(!visible().length) renderList(); else updateButtons();
+  offerUndo(id,kind==='defer'?'Aksiyon '+fmtDate(res.defer_until||until)+' tarihine ertelendi.':MSG[kind]);
+}
+function clearUndo(){if(st.undo) clearTimeout(st.undo.timer); st.undo=null; const t=$('.ai-undo'); t.replaceChildren(); show(t,false);}
+function offerUndo(id,text){
+  clearUndo();   // one undo at a time; an earlier change simply stays saved
+  const t=$('.ai-undo'), b=el('button','ai-undo-b','Geri al');
+  b.type='button'; b.addEventListener('click',()=>undo(id));
+  t.append(el('span','ai-undo-t',text),b); show(t,true);
+  st.undo={id:id,timer:setTimeout(clearUndo,UNDO_MS)};   // when it expires nothing happens: the saved state stays
+}
+async function undo(id){
+  const t=$('.ai-undo'), b=t.querySelector('.ai-undo-b'); if(b) b.disabled=true;
+  if(st.undo) clearTimeout(st.undo.timer);
+  const res=await post('/api/actions/'+encodeURIComponent(id)+'/reopen',{});
+  if(!res){t.replaceChildren(el('span','ai-undo-t err',MSG.stateFail)); st.undo={id:null,timer:setTimeout(clearUndo,UNDO_MS)}; return;}
+  st.gone.delete(id); clearUndo(); renderFilters(); renderList();   // back in its Python position, with any AI text it had
+}
 
 // Top 5 / next 5: the next actions without AI text, in Python order within the current filter.
 function enrichNext(){const ids=pending().slice(0,MAX_IDS); if(ids.length) enrich(ids);}

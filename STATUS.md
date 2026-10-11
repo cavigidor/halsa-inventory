@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-11 (M5-1 merged to `main` @ `df4ba28`; M5-2 read-only AI tab done on `claude/m5-2-ai-tab`, PR pending)._
+_Updated 2026-10-11 (M5-2 merged to `main` @ `0061a43`; M5-3 action state done on `claude/m5-3-action-state`, PR pending)._
 
 ## Git
 - **Branch:** `claude/milestone-3-live-ai`, based on `main`.
@@ -77,7 +77,7 @@ OpenAI model. The OpenAI default model `gpt-5-mini` lives in
 `config.DEFAULT_MODELS`. It has not been verified live; override it with `AI_MODEL`.
 
 ## Not implemented / known issues
-- Milestone 4 (live macro data) is not started. Milestone 5: M5-1 and M5-2 done; M5-3 to M5-6 not started.
+- Milestone 4 (live macro data) is not started. Milestone 5: M5-1 to M5-3 done; M5-4 to M5-6 not started.
 - DQ-3: tie order in "Büyüme / Küçülme" depends on the Python hash seed (rows, not values; TASKS *Next*).
 - DQ-1: dashboard margin uses `fillna(0)` for missing cost (owner decision needed).
 - DQ-2: the dashboard "Stok Eritme" list still includes KAPALI customers (owner decision needed).
@@ -174,7 +174,7 @@ Tests:
 | Cloud, no data | `python -m pytest -q` | **166 passed, 7 skipped, 1 xfailed** (29 new M5-1 tests) |
 | Mac VM, real 5 Oct 2026 data (temp copy) | `python -m pytest -q` | **173 passed, 1 xfailed** |
 
-## M5-2 (done; PR pending)
+## M5-2 (done; merged in PR #5 @ `0061a43`)
 Branch `claude/m5-2-ai-tab` from `main` @ `df4ba28`. Notes in D-028.
 - **Tab:** one tab button "✨ AI Aksiyon Merkezi" (appended after the existing tabs) and one panel built by
   `dashboard_builder._ai_panel()`, wrapped in `<!--AI-TAB-START/END-->` markers. `build(..., ai_panel=False)`
@@ -212,5 +212,38 @@ Real-data regression (Mac VM, 5 Oct 2026 exports, temp copies of `main` and the 
   between two runs (DQ-3).
 - The dashboard `data-asof` equals the server `as_of_data_date` (2026-10-05).
 
+## M5-3 (done; PR pending)
+Branch `claude/m5-3-action-state` from `main` @ `0061a43`. The existing SQLite action state is reused; notes in D-029.
+- **Card controls:** "✓ Yapıldı" → `POST /api/actions/{id}/complete`; "✕ Gizle" → `.../dismiss`; "⏸ Ertele" opens
+  a date picker (default today + 7, minimum tomorrow) → `.../defer` with `{"until": "YYYY-MM-DD"}`. All send
+  `X-StockAgent: 1` and use the real `action_id`.
+- **Server-confirmed:** the card leaves the queue only after a 2xx. Remaining cards keep Python order and are
+  not rebuilt; category chip counts update; an emptied filter shows "Bu kategoride açık aksiyon yok." and an
+  empty queue "Bugün için açık aksiyon yok.". On failure the card stays with "Aksiyon durumu kaydedilemedi."
+  and its facts; a pending card's buttons are disabled (one request per click).
+- **Undo:** a bottom bar "Aksiyon tamamlandı." / "Aksiyon gizlendi." / "Aksiyon <tarih> tarihine ertelendi." with
+  "Geri al" for 5 seconds → `POST /api/actions/{id}/reopen`; the card returns at its Python position with any
+  cached AI text. When the bar expires nothing else happens. A failed undo says so and the card stays hidden.
+- **Backend:** new `reopen` endpoint (`set_status(id, "open")`, which clears `completed_at`, `defer_until` and notes
+  and appends a `status:open` history event); all four state endpoints return 404 for an unknown `action_id`
+  instead of a silent no-op; `defer` validates the date (future ISO date, default +7 days) and the response
+  carries `defer_until`. No AI call, no AI-cache change, no schema change.
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (with node + jsdom) | `REQUIRE_JS_TESTS=1 python -m pytest -q` | **198 passed, 7 skipped, 1 xfailed** (19 new backend tests; the jsdom run now has 27 tests, 11 new) |
+
+Mutation check: dropping the header from state POSTs, treating a failed mutation as success, undo not restoring
+the card, a +8 default, or undo calling the wrong endpoint each makes the DOM tests fail.
+Browser check (Chromium, real app on synthetic data, temporary DB): complete, dismiss and defer three actions,
+complete and undo a fourth, reload → the three stay hidden, the fourth is open, order kept, zero enrich calls;
+the SQLite rows and history match.
+
+Real-data regression (Mac VM, 5 Oct 2026 exports, temp copies, temporary `AGENT_DB`):
+- Actions: 15 on `main`, 15 on the branch; content identical. M5-3 changes no business calculation.
+- Through the API: 15 open → complete + dismiss + defer → 12 open (the three hidden) → reopen all three → the same
+  15 in the same order; no AI calls recorded. The real `data/agent_state.db` was not created or touched.
+
 ## Immediate next task
-Review and merge the M5-2 PR. Then M5-3 (done / defer / dismiss with undo), per `docs/m5_action_center.md` §11.
+Review and merge the M5-3 PR. Then M5-4 (WhatsApp-first drafts and the customer drawer), per `docs/m5_action_center.md` §11.

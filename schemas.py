@@ -176,6 +176,7 @@ class ActionStatusResponse(BaseModel):
     ok: bool
     action_id: str
     status: str
+    defer_until: Optional[str] = None    # M5-3: the stored date after a defer (ISO)
 
 # ========== AI OUTPUT SCHEMAS (validated strictly) ==========
 # Rules shared by all AI outputs (Milestone 3):

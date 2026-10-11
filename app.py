@@ -294,20 +294,57 @@ def macro():
 
 
 # ---------------- action state ----------------
+# Persisted in the local SQLite store (services/store.py). Never touches the AI provider or the AI cache.
+DEFER_DEFAULT_DAYS = 7   # design §7: "Ertele" defaults to +7 days
+
+
+def _require_action(action_id):
+    """Mutations are server-confirmed (M5-3): an unknown action_id is a 404, not a silent no-op."""
+    if ST.get_action(action_id) is None:
+        raise HTTPException(404, f"Aksiyon bulunamadı: {action_id}")
+
+
+def _defer_until(body):
+    """ISO date strictly after today; default today + 7. A deferred action without a date would never hide."""
+    raw = body.until if body else None
+    today = dt.date.today()
+    if raw is None or not str(raw).strip():
+        return (today + dt.timedelta(days=DEFER_DEFAULT_DAYS)).isoformat()
+    try:
+        d = dt.date.fromisoformat(str(raw).strip()[:10])
+    except ValueError:
+        raise HTTPException(422, "until must be an ISO date (YYYY-MM-DD)")
+    if d <= today:
+        raise HTTPException(422, "until must be a future date")
+    return d.isoformat()
+
+
 @app.post("/api/actions/{action_id}/complete", response_model=S.ActionStatusResponse)
 def complete(action_id: str, body: S.NotesRequest | None = None):
+    _require_action(action_id)
     ST.set_status(action_id, "completed", notes=(body.notes if body else None))
     return S.ActionStatusResponse(ok=True, action_id=action_id, status="completed")
 
 
 @app.post("/api/actions/{action_id}/defer", response_model=S.ActionStatusResponse)
 def defer(action_id: str, body: S.DeferRequest | None = None):
-    ST.set_status(action_id, "deferred", notes=(body.notes if body else None),
-                  until=(body.until if body else None))
-    return S.ActionStatusResponse(ok=True, action_id=action_id, status="deferred")
+    _require_action(action_id)
+    until = _defer_until(body)
+    ST.set_status(action_id, "deferred", notes=(body.notes if body else None), until=until)
+    return S.ActionStatusResponse(ok=True, action_id=action_id, status="deferred", defer_until=until)
 
 
 @app.post("/api/actions/{action_id}/dismiss", response_model=S.ActionStatusResponse)
 def dismiss(action_id: str, body: S.NotesRequest | None = None):
+    _require_action(action_id)
     ST.set_status(action_id, "ignored", notes=(body.notes if body else None))
     return S.ActionStatusResponse(ok=True, action_id=action_id, status="ignored")
+
+
+@app.post("/api/actions/{action_id}/reopen", response_model=S.ActionStatusResponse)
+def reopen(action_id: str):
+    """Undo ("Geri al", M5-3, D-029): back to open. set_status clears completed_at / defer_until / notes and
+    appends a 'status:open' history event. The action row, its history and the AI cache are kept."""
+    _require_action(action_id)
+    ST.set_status(action_id, "open")
+    return S.ActionStatusResponse(ok=True, action_id=action_id, status="open")

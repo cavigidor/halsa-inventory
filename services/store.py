@@ -85,6 +85,13 @@ def set_status(action_key, status, notes=None, until=None):
                   (action_key, now, f"status:{status}", notes or ""))
 
 
+def get_action(action_key):
+    """The stored action row, or None when this action_id was never generated (M5-3: 404 instead of a no-op)."""
+    with _conn() as c:
+        r = c.execute("SELECT * FROM actions WHERE action_key=?", (action_key,)).fetchone()
+        return dict(r) if r else None
+
+
 def get_statuses():
     with _conn() as c:
         return {r["action_key"]: dict(r) for r in c.execute("SELECT * FROM actions")}
