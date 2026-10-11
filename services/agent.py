@@ -11,6 +11,7 @@ Pipeline for every AI task (provider-agnostic):
 The agent never reads Excel, never calculates a number and never decides
 customer identity, tiering, KAPALI status or receivable aging.
 """
+import hashlib
 import logging
 import os
 
@@ -23,6 +24,9 @@ from services.ai.base import AIResult, ERR_PACKET, ERR_UNKNOWN
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 log = logging.getLogger("agent")
+
+# Bump when the grounding / tidy / output contract changes in a way that should invalidate cached AI text.
+AI_PIPELINE_VERSION = "m5-1"
 
 STRICT_RETRY = (
     "\n\nÖNCEKİ CEVAP REDDEDİLDİ ({why}). Sorunlu alanlar ve ifadeler: {details}\n"
@@ -50,6 +54,19 @@ class BusinessActionAgent:
                 self.system_prompt = f.read()
         except FileNotFoundError:
             self.system_prompt = "Türk toptan ticaret için analitik karar-destek asistanı."
+
+    @property
+    def prompt_version(self):
+        """Cache-key component: hash of the system prompt + pipeline version (D-017)."""
+        h = hashlib.sha256((self.system_prompt + "|" + AI_PIPELINE_VERSION).encode("utf-8")).hexdigest()
+        return h[:12]
+
+    @property
+    def model_key(self):
+        """Cache-key component; None when AI is unavailable (no cached text is served then)."""
+        if not self.provider.is_available():
+            return None
+        return f"{getattr(self.provider, 'name', '?')}:{getattr(self.provider, 'model', None) or '-'}"
 
     @property
     def available(self):

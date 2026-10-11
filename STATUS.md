@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-10 (M3 and Q-1 on `main` @ `a34ccac`; M5 design approved and M6/M7 roadmap documented in PR #3, docs only, awaiting merge)._
+_Updated 2026-10-10 (design + roadmap merged to `main` @ `f9c42fb`; M5-1 backend prerequisites done on `claude/m5-1-backend`, PR pending)._
 
 ## Git
 - **Branch:** `claude/milestone-3-live-ai`, based on `main`.
@@ -153,5 +153,25 @@ The owner's answers were incorporated on 2026-10-10:
 Questions are resolved or reduced to M6-0 technical verification. M5-1 includes the extensibility seams
 so M6/M7 actions plug in without redesign.
 
+## M5-1 (done; PR pending)
+Branch `claude/m5-1-backend` from `main` @ `f9c42fb`. Backend only, no UI. Implementation notes are in D-027.
+- **Action queue:** a generic action contract with `source`, an action-source registry
+  (`services/actions.py`, `services/action_sources.py`), `GET /api/agent/categories`, and a deterministic
+  Turkish `reason`. The refactor reproduces the M1 queue exactly: identical on synthetic data and on the
+  real 5 Oct 2026 exports (15/15 actions, with and without inflation).
+- **No AI on GET:** `GET /api/agent/actions` never calls the provider and attaches cached AI text when present.
+- **Explicit enrich:** `POST /api/agent/actions/enrich` takes ≤5 unique open ids and makes one grounded
+  call for the uncached ones, with an `ai_cache` keyed by action_id + prompt_version + provider:model.
+  Changed facts, a changed prompt or a changed model mean a cache miss. Failures are not cached.
+- **Guard:** `X-StockAgent: 1` is required on all mutating requests (403 otherwise).
+- **Serving and warm-up:** `GET /` serves `dashboard.html` (404 with a build hint if missing); a warm-up
+  thread builds the context, and `/api/health` reports `context_ready` / `context_error`.
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data | `python -m pytest -q` | **166 passed, 7 skipped, 1 xfailed** (29 new M5-1 tests) |
+| Mac VM, real 5 Oct 2026 data (temp copy) | `python -m pytest -q` | **173 passed, 1 xfailed** |
+
 ## Immediate next task
-Owner merges PR #3. Then M5-1 (backend prerequisites, no UI).
+Review and merge the M5-1 PR. Then M5-2 (read-only AI tab), per `docs/m5_action_center.md` §11.

@@ -1,11 +1,12 @@
 """FastAPI backend. AI anahtarı olmadan da açılır; AI uçları yapılandırılmış
 'kullanılamıyor' döner (HTTP 500 değil). Determinist uçlar her zaman çalışır."""
-import os, sys, logging, datetime as dt
+import os, sys, logging, threading, datetime as dt
 ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 import config as C
 import schemas as S
 from services import store as ST
@@ -13,14 +14,40 @@ from services.entity import ContextRepository
 from services.agent import BusinessActionAgent
 from services.ai.factory import get_provider
 from services import scenarios as SCN
+from services import actions as A
+from services import action_sources  # noqa: F401  (registers the built-in deterministic sources)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("app")
 
 DATA_FOLDER = os.environ.get("DATA_FOLDER", os.path.join(ROOT, "data"))
+DASHBOARD_PATH = os.environ.get("DASHBOARD_PATH", os.path.join(ROOT, "dashboard.html"))
 INFLATION = C.MANUAL_INFLATION_RATE
+WARMUP_CONTEXT = os.environ.get("WARMUP_CONTEXT", "true").lower() != "false"
+GUARD_HEADER, GUARD_VALUE = "x-stockagent", "1"
+MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
-app = FastAPI(title="AI Aksiyon Merkezi API", version="0.3")
+app = FastAPI(title="AI Aksiyon Merkezi API", version="0.4")
+
+
+# ---- local CSRF guard (D-020): every mutating request needs X-StockAgent: 1 ----
+# Browsers cannot add a custom header cross-origin without a CORS preflight, and no CORS is allowed,
+# so other websites cannot trigger actions or paid AI calls on this local server.
+@app.middleware("http")
+async def _require_guard_header(request: Request, call_next):
+    if request.method in MUTATING_METHODS and request.headers.get(GUARD_HEADER) != GUARD_VALUE:
+        return JSONResponse(status_code=403,
+                            content={"detail": "Missing header 'X-StockAgent: 1' (local CSRF guard)."})
+    return await call_next(request)
+
+
+def _warm_up(repo):
+    """Build the deterministic context in the background so the first request is not a long wait."""
+    try:
+        repo.context()
+        log.info("warm-up: context ready")
+    except Exception as e:  # recorded on repo.last_error; requests still report it
+        log.warning("warm-up failed: %s", type(e).__name__)
 
 
 @app.on_event("startup")
@@ -29,6 +56,8 @@ def _startup():
     app.state.repo = ContextRepository(data_folder=DATA_FOLDER, inflation_rate=INFLATION)
     app.state.provider = get_provider()
     app.state.agent = BusinessActionAgent(app.state.provider)
+    if WARMUP_CONTEXT:
+        threading.Thread(target=_warm_up, args=(app.state.repo,), name="context-warmup", daemon=True).start()
     log.info("startup: provider=%s model=%s available=%s data=%s",
              app.state.provider.name, getattr(app.state.provider, "model", None),
              app.state.provider.is_available(), DATA_FOLDER)
@@ -49,18 +78,59 @@ def _ctx_or_none(repo):
         return None
 
 
-def _action_id(a):
-    return ST.content_key(a["category"], a["entity_id"], ST.hash_facts(a["facts"]))
+def _open_actions(ctx):
+    """All open deterministic actions in Python score order: [(action, status)].
+    Persists new actions; hides completed / dismissed / deferred-until-future ones."""
+    det = [A.normalize(a) for a in ctx["actions"]]
+    ST.upsert_actions(det)
+    statuses = ST.get_statuses()
+    out = []
+    for a in det:
+        row = statuses.get(a["action_id"], {"status": "open"})
+        if ST.is_hidden(row):
+            continue
+        out.append((a, row.get("status", "open")))
+    return out
+
+
+def _action_out(a, status, cached=None):
+    p = (cached or {}).get("payload") or {}
+    return S.ActionOut(
+        action_id=a["action_id"], source=a["source"], category=a["category"],
+        entity_type=a["entity_type"], entity_id=a["entity_id"], title=a["title"], reason=a["reason"],
+        facts=a["facts"], drivers=a.get("drivers", {}), score=a["score"], priority=a["priority"],
+        confidence=a["confidence"], requires_approval=True, status=status,
+        interpretation=p.get("interpretation"), recommendation=p.get("recommendation"),
+        evidence=p.get("evidence", []), ai_cached=bool(cached) and not cached.get("fresh"),
+        ai_generated_at=(cached or {}).get("created_at"))
 
 
 # ---------------- health / context ----------------
+@app.get("/", include_in_schema=False)
+def dashboard():
+    """Same-origin dashboard (D-020): open http://127.0.0.1:8000/ instead of the file."""
+    path = DASHBOARD_PATH
+    if not os.path.isfile(path):
+        return HTMLResponse(status_code=404, content=(
+            "<!doctype html><meta charset='utf-8'><p>dashboard.html bulunamadı. "
+            "Önce panoyu oluşturun: <code>python dashboard_builder.py data</code></p>"))
+    return FileResponse(path, media_type="text/html")
+
+
 @app.get("/api/health", response_model=S.Health)
-def health(agent: BusinessActionAgent = Depends(get_agent)):
+def health(agent: BusinessActionAgent = Depends(get_agent), repo: ContextRepository = Depends(get_repo)):
     p = agent.provider
     return S.Health(ai_available=agent.available, ai_provider=p.name,
                     ai_model=getattr(p, "model", None),
                     ai_reason=(None if agent.available else getattr(p, "reason", None)),
-                    macro_available=False, data_folder=DATA_FOLDER)
+                    macro_available=False, data_folder=DATA_FOLDER,
+                    context_ready=repo.is_ready(), context_error=getattr(repo, "last_error", None))
+
+
+@app.get("/api/agent/categories", response_model=list[S.CategoryOut])
+def agent_categories():
+    """Registered deterministic action categories (D-022). New sources appear here automatically."""
+    return A.categories_payload()
 
 
 @app.get("/api/ai/calls")
@@ -83,34 +153,64 @@ def context(repo: ContextRepository = Depends(get_repo)):
 @app.get("/api/agent/actions", response_model=S.ActionsResponse)
 def agent_actions(repo: ContextRepository = Depends(get_repo),
                   agent: BusinessActionAgent = Depends(get_agent)):
+    """All open deterministic actions, ranked by Python. NEVER calls the AI provider (D-017);
+    cached AI text (same facts, prompt version and model) is attached when present."""
     ctx = repo.context()
-    det = ctx["actions"]
-    # persist + get status; drop completed/dismissed/deferred-not-due
-    ST.upsert_actions([{**a, "entity_id": a["entity_id"]} for a in det])
-    statuses = ST.get_statuses()
-    visible = []
-    for a in det:
-        aid = _action_id(a)
-        row = statuses.get(aid, {"status": "open"})
-        if ST.is_hidden(row):
-            continue
-        visible.append((aid, a, row.get("status", "open")))
-    enrich = agent.enrich_actions([a for _, a, _ in visible], ctx)
-    by_ref = enrich["by_ref"]
-    out = []
-    for (aid, a, status), ref in zip(visible, enrich["refs"]):
-        ai = by_ref.get(ref)
-        out.append(S.ActionOut(
-            action_id=aid, category=a["category"], entity_type=a["entity_type"],
-            entity_id=a["entity_id"], title=a["title"], facts=a["facts"], drivers=a.get("drivers", {}),
-            score=a["score"], priority=a["priority"], confidence=a["confidence"],
-            requires_approval=True, status=status,
-            interpretation=(ai["interpretation"] if ai else None),
-            recommendation=(ai["recommendation"] if ai else None),
-            evidence=(ai["evidence"] if ai else [])))
-    return S.ActionsResponse(ai_available=enrich["ai_available"], ai_reason=enrich["reason"],
-                             ai_error_category=enrich.get("category"), ai_warnings=enrich.get("warnings", []),
+    visible = _open_actions(ctx)
+    cache = ST.cache_get_many([a["action_id"] for a, _ in visible], agent.prompt_version, agent.model_key)
+    out = [_action_out(a, st, cache.get(a["action_id"])) for a, st in visible]
+    return S.ActionsResponse(ai_available=agent.available,
+                             ai_reason=(None if agent.available else getattr(agent.provider, "reason", None)),
+                             ai_error_category=None, ai_warnings=[],
                              generated_at=ctx["generated_at"], count=len(out), actions=out)
+
+
+@app.post("/api/agent/actions/enrich", response_model=S.EnrichResponse)
+def agent_actions_enrich(req: S.EnrichRequest, repo: ContextRepository = Depends(get_repo),
+                         agent: BusinessActionAgent = Depends(get_agent)):
+    """Explicit, paid AI request for ≤5 OPEN actions (D-017). One grounded provider call for the
+    uncached ones (plus at most the M3 numeric-guard retry). Order and ranking stay Python's."""
+    ids = req.action_ids
+    if len(set(ids)) != len(ids):
+        raise HTTPException(422, "action_ids must be unique")
+    ctx = repo.context()
+    visible = _open_actions(ctx)
+    open_ids = {a["action_id"] for a, _ in visible}
+    unknown = [i for i in ids if i not in open_ids]
+    if unknown:
+        raise HTTPException(422, {"message": "Unknown or closed action_ids", "action_ids": unknown})
+    wanted = set(ids)
+    selected = [(a, st) for a, st in visible if a["action_id"] in wanted]      # Python score order
+
+    if not agent.available:
+        return S.EnrichResponse(ai_available=False, ai_reason=getattr(agent.provider, "reason", None),
+                                ai_error_category=getattr(agent.provider, "category", "disabled"),
+                                failed=[a["action_id"] for a, _ in selected],
+                                actions=[_action_out(a, st) for a, st in selected])
+
+    pv, mk = agent.prompt_version, agent.model_key
+    cache = ST.cache_get_many([a["action_id"] for a, _ in selected], pv, mk)
+    cached_ids = [a["action_id"] for a, _ in selected if a["action_id"] in cache]
+    todo = [a for a, _ in selected if a["action_id"] not in cache]
+    enriched, reason, category, warnings, called = [], None, None, [], False
+    if todo:
+        called = True
+        r = agent.enrich_actions(todo, ctx)
+        reason, category, warnings = r.get("reason"), r.get("category"), r.get("warnings", [])
+        for ref, a in zip(r["refs"], todo):
+            it = r["by_ref"].get(ref)
+            if not it:
+                continue
+            payload = {"interpretation": it.get("interpretation"), "recommendation": it.get("recommendation"),
+                       "evidence": it.get("evidence", []), "confidence": it.get("confidence")}
+            ts = ST.cache_put(a["action_id"], pv, mk, payload)
+            cache[a["action_id"]] = {"payload": payload, "created_at": ts, "fresh": True}
+            enriched.append(a["action_id"])
+    failed = [a["action_id"] for a, _ in selected if a["action_id"] not in cache]
+    return S.EnrichResponse(ai_available=True, ai_reason=reason, ai_error_category=category,
+                            ai_warnings=warnings, provider_called=called, enriched=enriched,
+                            cached=cached_ids, failed=failed,
+                            actions=[_action_out(a, st, cache.get(a["action_id"])) for a, st in selected])
 
 
 # ---------------- customer / product ----------------

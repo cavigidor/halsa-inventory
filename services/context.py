@@ -148,74 +148,12 @@ def build_context(data_folder, inflation_rate=None, macro=None, top_n=None):
 
 def build_actions(ctx, coll_scored, over_cand, lap, shrink_real_neg, infl):
     """Deterministik, önceliklendirilmiş aksiyon adayları (AI öncesi).
-    interpretation/recommendation alanları AI tarafından (Milestone 3) doldurulur."""
-    acts = []
-
-    # 1) TAHSİLAT
-    for r in coll_scored:
-        if r["priority_score"] < 50:
-            continue
-        fi = min(1.0, (r["overdue"] or 0)/C.COLLECT_AMOUNT_CAP)
-        urg = min(1.0, (r["drivers"].get("age_months") or 0)/12)
-        rsk = r["drivers"]["ratio"]
-        conf = SC.confidence_label(has_amount=r["overdue"] > 0, has_history=r["revenue_25_26"] > 0,
-                                   has_context=r["drivers"].get("age_months") is not None)
-        score = SC.action_priority(fi, urg, rsk, {"high":1,"medium":0.6,"low":0.3}[conf])
-        facts = [f"Vadesi geçen: {_money(r['overdue'])}",
-                 f"En eski borç: {r['oldest']}",
-                 f"2026 sipariş: {'Aktif' if r['still_active'] else 'Yok'}",
-                 f"2025–2026 ciro: {_money(r['revenue_25_26'])}"]
-        acts.append(_action("collections", "customer", r["code"], f"TAHSİLAT — {r['name']}", facts,
-                            r["drivers"], score, conf))
-
-    # 2) STOK ERİTME
-    for o in over_cand:
-        fi = min(1.0, (o["inv"] or 0)/C.OVERSTOCK_VALUE_CAP)
-        conf = SC.confidence_label(has_amount=o["inv"] > 0, has_history=o["buyers"] > 0,
-                                   has_context=len(o.get("top_buyers", [])) > 0)
-        score = SC.action_priority(fi, 0.4, 0.3, {"high":1,"medium":0.6,"low":0.3}[conf])
-        best = o["top_buyers"][0]["name"] if o.get("top_buyers") else "—"
-        facts = [f"Fazla stok değeri: {_money(o['inv'])}",
-                 f"Stok: {o['stock']}", f"Geçmiş alıcı sayısı: {o['buyers']}",
-                 f"En güçlü aday: {best}"]
-        acts.append(_action("overstock", "product", o["code"], f"STOK ERİTME — {o['name']}", facts,
-                            {"inv": o["inv"], "buyers": o["buyers"]}, score, conf))
-
-    # 3) GERİ KAZANIM
-    for r in lap:
-        fi = min(1.0, (r["spend"] or 0)/C.WINBACK_SPEND_CAP)
-        barrier = (r.get("overdue") or 0) > 0
-        conf = "high" if not barrier else "medium"
-        score = SC.action_priority(fi, 0.3, 0.5, {"high":1,"medium":0.6,"low":0.3}[conf])
-        facts = [f"Toplam geçmiş harcama: {_money(r['spend'])}",
-                 f"Kademe: {r['tier']}", f"Son aktif yıl: {r['last']}",
-                 f"Vadesi geçen borç: {_money(r['overdue']) if barrier else 'Yok'}",
-                 f"Temsilci: {r.get('rep') or '—'}"]
-        acts.append(_action("winback", "customer", r["code"], f"GERİ KAZANIM — {r['name']}", facts,
-                            {"tier": r["tier"], "spend": r["spend"]}, score, conf))
-
-    # 4) REEL SATIŞ DÜŞÜŞÜ (enflasyon varsa)
-    for r in shrink_real_neg:
-        fi = min(1.0, abs(r["delta"] or 0)/C.SHRINK_DELTA_CAP)
-        urg = min(1.0, abs(r["real_pct"])/50)
-        score = SC.action_priority(fi, urg, 0.5, 1.0)
-        facts = [f"Nominal değişim: {r['nominal_pct']:+.0f}%",
-                 f"Reel değişim: {r['real_pct']:+.0f}%",
-                 f"2025 (Oca–bugün): {_money(r['y2025'])}",
-                 f"2026 (Oca–bugün): {_money(r['y2026'])}",
-                 f"Temsilci: {r.get('rep') or '—'}"]
-        acts.append(_action("real_decline", "customer", r["code"], f"REEL SATIŞ DÜŞÜŞÜ — {r['name']}", facts,
-                            {"nominal_pct": r["nominal_pct"], "real_pct": r["real_pct"]}, score, "high"))
-
-    acts.sort(key=lambda a: -a["score"])
-    return acts[:C.MAX_DAILY_ACTIONS]
-
-
-def _action(category, etype, eid, title, facts, drivers, score, confidence):
-    return {"category": category, "entity_type": etype, "entity_id": str(eid), "title": title,
-            "facts": facts, "drivers": drivers, "score": score, "priority": C.band(score),
-            "confidence": confidence, "requires_approval": True,
-            "interpretation": None, "recommendation": None}  # AI doldurur
+    M5-1 (D-022): produced by the registered action sources (services/action_sources.py) through the
+    generic contract in services/actions.py; ranking is the Python score only."""
+    from services import action_sources  # noqa: F401  (registers the built-in sources)
+    from services import actions as A
+    return A.produce_all({"ctx": ctx, "coll_scored": coll_scored, "over_cand": over_cand, "lap": lap,
+                          "shrink_real_neg": shrink_real_neg, "infl": infl})
 
 
 def write_context(data_folder, out_path=None, **kw):

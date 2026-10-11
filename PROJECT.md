@@ -21,8 +21,9 @@ dashboard_builder.py ── m_stock / m_collections / load_sales / m_lapsed / m_
    │                    m_margin / m_ordersize / m_overstock_move / m_risk
    │──► dashboard.html            (Layer 1: deterministic Turkish dashboard, in use)
    ▼
-services/context.py   build_context(): normalized, top-N "agent context" + scored,
-   │                  prioritized deterministic actions (services/scoring.py, growth.py)
+services/context.py   build_context(): normalized, top-N "agent context"; the action queue comes from
+   │                  registered sources (services/actions.py + action_sources.py), ranked by
+   │                  services/scoring.py; AI never ranks (D-015, D-022)
    ▼
 services/entity.py    ContextRepository: per-customer / per-product slices
    ▼
@@ -42,7 +43,9 @@ services/store.py     SQLite: action status, history, memory, ai_calls metadata 
 | Path | Role |
 |---|---|
 | `dashboard_builder.py` | Deterministic engine and HTML dashboard. Source of every number. |
-| `services/context.py` | Agent context and deterministic action candidates |
+| `services/context.py` | Agent context (deterministic analytics inputs for the action queue) |
+| `services/actions.py` | Generic action contract, action-source registry, server-described categories (D-022) |
+| `services/action_sources.py` | Built-in deterministic action sources (collections, overstock, win-back, real decline) |
 | `services/scoring.py`, `growth.py`, `scenarios.py` | Transparent scoring, real vs nominal growth, scenario arithmetic |
 | `services/evidence.py` | Evidence packets, Turkish display formatting, minimization check |
 | `services/ai/grounding.py` | Fact-reference resolution and the numeric guard |

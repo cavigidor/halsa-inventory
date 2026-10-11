@@ -63,7 +63,7 @@ def client(tmp_path, monkeypatch):
     APP.app.state.agent = BusinessActionAgent(APP.app.state.provider)
     # reset store module used by app to the reloaded one
     APP.ST = ST
-    return TestClient(APP.app)
+    return TestClient(APP.app, headers={"X-StockAgent": "1"})   # local CSRF guard (D-020)
 
 
 @pytest.fixture
@@ -75,7 +75,7 @@ def client_no_ai(tmp_path, monkeypatch):
     APP.app.state.provider = NullProvider("AI provider is not configured.")
     APP.app.state.agent = BusinessActionAgent(APP.app.state.provider)
     APP.ST = ST
-    return TestClient(APP.app)
+    return TestClient(APP.app, headers={"X-StockAgent": "1"})   # local CSRF guard (D-020)
 
 
 # ---- launches / health ----
@@ -107,10 +107,15 @@ def test_actions_ai_unavailable(client_no_ai):
     assert j["count"] == 2
 
 def test_actions_with_mock_ai(client):
-    r = client.get("/api/agent/actions"); assert r.status_code == 200
-    j = r.json()
+    # M5-1 (D-017): GET never calls the AI; AI text only after an explicit enrich request.
+    j = client.get("/api/agent/actions").json()
     assert j["ai_available"] is True
-    assert all(a["interpretation"] and a["recommendation"] for a in j["actions"])
+    assert all(a["interpretation"] is None for a in j["actions"])
+    ids = [a["action_id"] for a in j["actions"]]
+    e = client.post("/api/agent/actions/enrich", json={"action_ids": ids}).json()
+    assert e["provider_called"] is True and sorted(e["enriched"]) == sorted(ids)
+    j2 = client.get("/api/agent/actions").json()
+    assert all(a["interpretation"] and a["recommendation"] and a["ai_cached"] for a in j2["actions"])
 
 # ---- customer / product ----
 def test_customer_found(client):
@@ -167,6 +172,9 @@ def test_malformed_ai(client, monkeypatch):
     from services.ai.base import AIResult
     def bad(*a, **k): return AIResult(available=True, error="validation:boom", data=None)
     APP.app.state.agent.provider.generate_structured = bad
-    r = client.get("/api/agent/actions"); assert r.status_code == 200
-    # enrichment failed but actions still returned deterministically
+    ids = [a["action_id"] for a in client.get("/api/agent/actions").json()["actions"]]
+    r = client.post("/api/agent/actions/enrich", json={"action_ids": ids}); assert r.status_code == 200
+    # enrichment failed but actions still returned deterministically, nothing cached
+    assert r.json()["failed"] == ids and r.json()["enriched"] == []
     assert all(a["interpretation"] is None for a in r.json()["actions"])
+    assert all(a["interpretation"] is None for a in client.get("/api/agent/actions").json()["actions"])
