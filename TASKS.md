@@ -4,11 +4,9 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 must not be started until it is moved to *Current*.
 
 ## Current
-- [ ] **Review and merge the M5-4 PR** (`claude/m5-4-drafts-customer-drawer`, drafts + customer drawer). Then M5-5.
+- [ ] **Review and merge the M5-5 PR** (`claude/m5-5-controlled-refresh`, controlled refresh). Then M5-6.
 
 ## Next (M5 slices, design §11; one bounded checkpoint each)
-- [ ] **M5-5 Controlled monthly refresh.** validate → build → verify → swap (D-019), endpoint and CLI,
-  a refresh button and report; tests prove nothing is swapped on failure.
 - [ ] **M5-6 Verification and polish.** A Playwright smoke test in CI (mock provider), the mobile layout,
   and the owner's live check.
 - [ ] **DQ-1: Fix dashboard margin missing-cost handling.**
@@ -70,6 +68,11 @@ Milestone 5 must not be started until it is moved to *Current*.
   2020 should count, change `QUAL_YEARS` and that test together.
 
 ## Completed
+- [x] 2026-10-11 — M5-5 controlled refresh: `services/refresh.py` (validate → build staging → verify → atomic
+  swap → report) shared by `POST /api/context/refresh` and `python -m services.refresh`; frozen single-read source
+  snapshot; cross-process flock; `ContextRepository.replace_context`; `dashboard.prev.html`; refresh button with
+  pending/success-reload/failure states. Notes in D-032.
+- [x] 2026-10-11 — PR #7 (M5-4) merged into `main` (`4868265`).
 - [x] 2026-10-11 — M5-4 drafts and customer drawer: channel × purpose draft contract (legacy `message_type`
   mapped), KAPALI → collection only (Python, before any AI call), draft-only prompt layer (action cache key
   unchanged), customer-facing leak check, copy-only UI; deterministic customer/product GETs, AI analysis moved

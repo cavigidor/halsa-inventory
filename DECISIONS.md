@@ -329,3 +329,25 @@ Don't rewrite earlier entries. If one is superseded, add a new entry that says s
   disk), failures not cached, no AI.
 - **Legacy script:** `weekly_agent.py` (unused, standalone SMTP weekly report to the owner) is not part of the app
   and is not imported by it. The copy-only guarantee covers the app surface (routes, services, dashboard).
+
+### D-032 · 2026-10-11 · Controlled refresh implementation (M5-5)
+- **One pipeline:** `services/refresh.run_refresh` (validate → build staging → verify → atomic swap → report). The API
+  passes the live context and `ContextRepository.replace_context` as the installer; the CLI passes none and only
+  swaps the on-disk dashboard (no IPC into a running server, so the button is preferred while the app runs).
+- **Frozen source snapshot:** sources are selected once (`dashboard_builder.select_sources`, still newest-by-name
+  rule) and each workbook is read once. The validated raw frames are passed to `build_context(..., sources, frames)`
+  and `dashboard_builder.build(..., sources, frames)`, which copy them. Content, not only paths, is frozen. Defaults
+  are unchanged when no snapshot is passed.
+- **Business date from content:** the sales `Tarih` maximum, never file times and never `today()`. It must be ≥ the
+  live date (the newer of the server context and the live dashboard's `data-asof`).
+- **Cross-process lock:** non-blocking `flock` on `<dashboard>.refresh.lock` (released by the kernel if a process
+  dies; the file is removed on clean exit with an inode check against a racing opener). Busy → HTTP 409 / CLI exit 3.
+  POSIX only (the Mac and CI).
+- **Swap order:** copy the live dashboard to a temp prev, `os.replace` the staged file in, install the context, then
+  rename the temp to `dashboard.prev.html`. If installing fails, the temp prev is moved back, so the dashboard and the
+  context never knowingly disagree.
+- **Report:** `RefreshReport` (`ok`, `step` busy|validate|build|verify|swap|done, `step_tr`, `message`, filenames,
+  previous/candidate/current data date, counts, warnings, errors, checks, `previous_data_kept`). Controlled failures
+  are HTTP 200 with `ok: false`; no stack traces or absolute paths. `/api/health` reports the data folder's name only.
+- **Plausibility:** drops above `REFRESH_MAX_DROP` (default 0.5) against the live context are warnings, not errors.
+  The CLI has no live context to compare and says so.

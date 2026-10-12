@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-11 (M5-3 merged to `main` @ `c9e1a4d`; M5-4 drafts + customer drawer done on `claude/m5-4-drafts-customer-drawer`, PR pending)._
+_Updated 2026-10-11 (M5-4 merged to `main` @ `4868265`; M5-5 controlled refresh done on `claude/m5-5-controlled-refresh`, PR pending)._
 
 ## Git
 - **Branch:** `claude/milestone-3-live-ai`, based on `main`.
@@ -77,7 +77,7 @@ OpenAI model. The OpenAI default model `gpt-5-mini` lives in
 `config.DEFAULT_MODELS`. It has not been verified live; override it with `AI_MODEL`.
 
 ## Not implemented / known issues
-- Milestone 4 (live macro data) is not started. Milestone 5: M5-1 to M5-4 done; M5-5 and M5-6 not started.
+- Milestone 4 (live macro data) is not started. Milestone 5: M5-1 to M5-5 done; M5-6 not started.
 - `weekly_agent.py` (older, unused, standalone weekly report e-mail to the owner via SMTP) still exists. The app
   never imports it and it never contacts customers; it is outside the copy-only app surface (D-031).
 - DQ-3: tie order in "Büyüme / Küçülme" depends on the Python hash seed (rows, not values; TASKS *Next*).
@@ -247,7 +247,7 @@ Real-data regression (Mac VM, 5 Oct 2026 exports, temp copies, temporary `AGENT_
 - Through the API: 15 open → complete + dismiss + defer → 12 open (the three hidden) → reopen all three → the same
   15 in the same order; no AI calls recorded. The real `data/agent_state.db` was not created or touched.
 
-## M5-4 (done; PR pending)
+## M5-4 (done; merged in PR #7 @ `4868265`)
 Branch `claude/m5-4-drafts-customer-drawer` from `main` @ `c9e1a4d`. Notes in D-030 (drafts) and D-031 (GETs).
 - **Draft contract:** `POST /api/agent/draft-message` takes `customer_code`, `channel` (`whatsapp`|`email`),
   `purpose` (`collection`|`offer`|`winback`|`sales_followup`|`fair_invite`), optional `product_code` and
@@ -296,5 +296,53 @@ live call, nothing sent):
 - KAPALI offer draft refused with zero provider calls; one explicit mock draft = one provider call.
 - No send routes; the real `data/agent_state.db` was not created or touched.
 
+## M5-5 (done; PR pending)
+Branch `claude/m5-5-controlled-refresh` from `main` @ `4868265`. Notes in D-032.
+- **One pipeline:** `services/refresh.run_refresh` (validate → build staging → verify → atomic swap → report), used by
+  `POST /api/context/refresh` and `python -m services.refresh` (exit 0 ok, 1 failed, 3 busy). Never calls the AI.
+- **Frozen sources:** `dashboard_builder.select_sources` picks stock/sales/aging once; validation reads each workbook
+  once and the same raw frames feed `build_context(..., sources, frames)` and `dashboard_builder.build(..., sources,
+  frames)`. A newer file appearing mid-refresh is ignored. Each read happens once (on the real data the full refresh
+  takes about as long as one context build).
+- **Validation:** stock (header row 4) needs the 8 columns `m_stock` reads and ≥1 product row; sales needs the 12
+  columns the pipeline reads (Tarih, Nettutar, miktar, sip_evrakno_seri/sira, Pro_kodu, ProjeIsmi, Musterikod,
+  Musteri_ismi, sto_kod, StokIsmi, anagrup), rows, and parseable dates (the data date is their maximum; no
+  `today()` fallback). Optional columns (cost, Temsilci, Sektör, Açık / Kapalı) stay optional with a warning. Aging is
+  optional; when selected it needs Hesap kodu / Hesap adı / Temsilci kodu, month buckets or a "Vadesi geçen" column,
+  and ≥1 account row. Unreadable workbooks fail. The new date must not be older than the live date (the newer of
+  the server context and the live dashboard's `data-asof`); first builds skip that check.
+- **Verify:** same date in context, dashboard and validation; context ↔ dashboard reconciliation (overdue total,
+  overstock value, lapsed, low stock, products) from the same build results; staged HTML structure (tabs, data,
+  AI tab, `data-asof`). Plausibility: a count/total that drops by more than 50 % (`REFRESH_MAX_DROP`) vs the live
+  context is a warning.
+- **Swap:** copy live → `.prev.html.tmp`, `os.replace(dashboard.html.new → dashboard.html)`, install the context
+  (`ContextRepository.replace_context`: lock, replace, drop indices, clear error), then keep `dashboard.prev.html`.
+  If installing fails the previous dashboard is put back. Staging files and the lock file are always removed.
+- **Lock:** non-blocking `flock` on `dashboard.html.refresh.lock`, shared by the server and the CLI; released by the
+  kernel if a process dies; API → 409, CLI → exit 3.
+- **UI:** "↻ Verileri yenile" in the AI tab toolbar (only when the server answers). Pending: disabled +
+  "Veriler yenileniyor…", dashboard unchanged. Success: "Veriler yenilendi. Yeni veri tarihi: …" (+ warnings), then
+  a page reload. Failure: "Yenileme başarısız (<adım>): <mesaj>. Önceki veriler kullanılmaya devam ediyor.", no reload,
+  button usable again. The data-date mismatch warning stays.
+- **Small fix:** `/api/health` `data_folder` now reports the folder name, not the absolute local path.
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (with node + jsdom) | `REQUIRE_JS_TESTS=1 python -m pytest -q` | **295 passed, 7 skipped, 1 xfailed** (49 new refresh tests; the jsdom run has 44 tests, 5 new) |
+
+Mutation check: skipping the older-date check, no flock, ignoring verify errors, no previous copy, or not dropping
+the repository indices each fails the refresh tests; reloading after failure, not disabling the button, no header,
+refreshing on load, or not re-enabling after failure each fails the DOM tests.
+Browser check (Chromium, real app, synthetic data): newer exports → pending → success → reload, the data date moves
+on and the mismatch warning is gone; an older replacement → "Yenileme başarısız (doğrulama) …", no reload, cards stay.
+
+Real-data regression (Mac VM, 5 Oct 2026 exports via read-only links in a temp folder, temp dashboard/state DB, no AI):
+- The real exports validate; staged actions 15 = `main` 15, identical; verify passes; the swap works (prev kept).
+- An older synthetic sales file selected as newest → rejected at validation; an unreadable one → rejected; the temp
+  dashboard and context unchanged in both. No staging leftovers, zero AI calls.
+- The original exports are byte-identical afterwards; the real `data/agent_state.db` was not touched.
+
 ## Immediate next task
-Review and merge the M5-4 PR. Then M5-5 (controlled monthly refresh), per `docs/m5_action_center.md` §11.
+Review and merge the M5-5 PR. Then M5-6 (Playwright smoke test, mobile polish, owner's live check), per
+`docs/m5_action_center.md` §11.

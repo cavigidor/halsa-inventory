@@ -16,6 +16,11 @@ reports/
 # --- generated outputs that may contain real company data ------------
 dashboard.html
 *_dashboard.html
+# controlled refresh (M5-5): staging, previous version and lock file
+dashboard.html.new
+*.prev.html
+*.prev.html.tmp
+*.refresh.lock
 agent_context.json
 
 # --- databases (action state, history, memory) -----------------------

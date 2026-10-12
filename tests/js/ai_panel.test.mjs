@@ -53,7 +53,10 @@ function setup(opts = {}) {
   const customers = opts.customers || clone(FIX.customers);
   const customerFn = opts.customerFn || ((code) => (customers[code] ? { json: customers[code] } : { status: 404, json: { detail: 'yok' } }));
   const draftFn = opts.draftFn || ((b) => ({ json: { ...clone(FIX.draft_sample), channel: b.channel, purpose: b.purpose } }));
-  const copied = [];
+  const copied = [], reloads = [];
+  const refreshFn = opts.refreshFn || (() => ({ json: { ok: true, step: 'done', step_tr: 'tamam', message: 'Veriler yenilendi.',
+    as_of_data_date: '2026-07-15', previous_as_of_data_date: FIX.health.as_of_data_date, warnings: [], errors: [],
+    sources: { stock: 'STOK Sentetik.xlsx', sales: 'Sentetik satislar.xlsx', aging: 'Cari Sentetik.xlsx' }, counts: {} } }));
   const routes = {
     '/api/health': opts.healthFn || (() => ({ json: health })),
     '/api/agent/categories': () => ({ json: cats }),
@@ -72,6 +75,12 @@ function setup(opts = {}) {
     const cm = /^\/api\/agent\/customer\/([^/]+)$/.exec(path);
     if (cm && method === 'GET') {
       const r = await customerFn(decodeURIComponent(cm[1]));
+      if (r instanceof Error) throw r;
+      const status = r.status || 200;
+      return { ok: status >= 200 && status < 300, status, json: async () => r.json };
+    }
+    if (path === '/api/context/refresh' && method === 'POST') {
+      const r = await refreshFn(body);
       if (r instanceof Error) throw r;
       const status = r.status || 200;
       return { ok: status >= 200 && status < 300, status, json: async () => r.json };
@@ -99,13 +108,15 @@ function setup(opts = {}) {
     url: opts.url || 'http://127.0.0.1:8000/', runScripts: 'dangerously', pretendToBeVisual: true,
     beforeParse(w) {
       w.fetch = fakeFetch; w.__AI_POLL_MS = 5; if (opts.undoMs) w.__AI_UNDO_MS = opts.undoMs;
+      w.__aiReload = () => reloads.push(Date.now()); w.__AI_RELOAD_MS = 30; w.__AI_RELOAD_WARN_MS = 60;
       const writeText = opts.clipboardFail ? async () => { throw new Error('denied'); } : async (t) => { copied.push(t); };
       if (!opts.noClipboard) Object.defineProperty(w.navigator, 'clipboard', { value: { writeText }, configurable: true });
     },
   });
   const doc = dom.window.document;
   const q = (s) => doc.querySelector('#ai ' + s), qa = (s) => [...doc.querySelectorAll('#ai ' + s)];
-  return { dom, win: dom.window, doc, calls, q, qa, actions, server, copied,
+  return { dom, win: dom.window, doc, calls, q, qa, actions, server, copied, reloads,
+    refreshPosts: () => calls.filter((c) => c.path === '/api/context/refresh'),
     gets: (prefix) => calls.filter((c) => c.method === 'GET' && c.path.startsWith(prefix)),
     draftPosts: () => calls.filter((c) => c.path === '/api/agent/draft-message'),
     open: () => doc.querySelector('.tab[data-t="ai"]').click(),
@@ -846,5 +857,92 @@ test('drawer failure shows a compact message, keeps the tab working, and is not 
   t2.open(); await until(cardsReady(t2));
   firstCust(t2).querySelector('.aic-cust').click();
   await until(() => t2.q('.ai-dr-msg.err'));
+});
+
+// ---------------- M5-5: controlled refresh ----------------
+const REFRESH_KEPT = 'Önceki veriler kullanılmaya devam ediyor.';
+
+test('↻ Verileri yenile: one guarded POST, pending state keeps the dashboard, success reloads the page', async () => {
+  let release;
+  const t = setup({ refreshFn: () => new Promise((r) => { release = () => r({ json: { ok: true, step: 'done', step_tr: 'tamam',
+    message: 'Veriler yenilendi.', as_of_data_date: '2026-07-15', warnings: [], errors: [], sources: {}, counts: {} } }); }) });
+  t.open(); await until(cardsReady(t));
+  const b = t.q('.ai-refresh');
+  assert.ok(visible(b));
+  assert.equal(b.textContent, '↻ Verileri yenile');
+  const cards = t.qa('.aic').length, tableRows = t.doc.querySelectorAll('#reorder tbody tr').length;
+  b.click(); b.click();
+  await until(() => t.refreshPosts().length === 1);
+  assert.equal(t.refreshPosts()[0].headers['X-StockAgent'], '1');
+  assert.ok(b.disabled);
+  assert.equal(t.q('.ai-rstat').textContent, 'Veriler yenileniyor…');
+  assert.equal(t.qa('.aic').length, cards, 'cards stay visible while pending');
+  assert.equal(t.doc.querySelectorAll('#reorder tbody tr').length, tableRows, 'static tables untouched');
+  release();
+  await until(() => t.q('.ai-rstat').classList.contains('ok'));
+  assert.match(t.q('.ai-rstat').textContent, /^Veriler yenilendi\. Yeni veri tarihi: 15 Temmuz 2026\./);
+  assert.equal(t.reloads.length, 0, 'short pause so the message is seen');
+  await until(() => t.reloads.length === 1, 1000);
+  assert.ok(b.disabled, 'stays disabled until the new page loads');
+  assert.equal(t.refreshPosts().length, 1);
+  assert.equal(t.enrichPosts().length + t.draftPosts().length + t.statePosts().length, 0);
+});
+
+test('refresh success with warnings shows them and still reloads', async () => {
+  const t = setup({ refreshFn: () => ({ json: { ok: true, step: 'done', step_tr: 'tamam', message: 'ok', as_of_data_date: '2026-07-15',
+    warnings: ['Aksiyon belirgin düştü: 15 → 3.'], errors: [], sources: {}, counts: {} } }) });
+  t.open(); await until(cardsReady(t));
+  t.q('.ai-refresh').click();
+  await until(() => t.q('.ai-rstat').classList.contains('ok'));
+  assert.match(t.q('.ai-rstat').textContent, /Uyarılar: Aksiyon belirgin düştü/);
+  await until(() => t.reloads.length === 1, 1000);
+});
+
+test('refresh failure: no reload, failing step and "old data in use" shown, button usable again', async () => {
+  const cases = [
+    [{ json: { ok: false, step: 'validate', step_tr: 'doğrulama', message: 'Yeni veri tarihi (2026-09-30) mevcut veri tarihinden (2026-10-05) eski.', warnings: [], errors: [] } },
+     'Yenileme başarısız (doğrulama): Yeni veri tarihi (2026-09-30) mevcut veri tarihinden (2026-10-05) eski. ' + REFRESH_KEPT],
+    [{ json: { ok: false, step: 'verify', step_tr: 'kontrol', message: 'Bağlam ve pano tutmuyor: vadesi geçen toplam.' } },
+     'Yenileme başarısız (kontrol): Bağlam ve pano tutmuyor: vadesi geçen toplam. ' + REFRESH_KEPT],
+    [{ status: 409, json: { ok: false, step: 'busy', step_tr: 'kilit', message: 'Başka bir yenileme sürüyor; bitmesini bekleyin.' } },
+     'Yenileme başarısız (kilit): Başka bir yenileme sürüyor; bitmesini bekleyin. ' + REFRESH_KEPT],
+    [{ status: 500, json: null }, 'Yenileme başarısız (bağlantı): Sunucuya ulaşılamadı. ' + REFRESH_KEPT],
+    [new TypeError('Failed to fetch'), 'Yenileme başarısız (bağlantı): Sunucuya ulaşılamadı. ' + REFRESH_KEPT],
+  ];
+  for (const [resp, text] of cases) {
+    const t = setup({ refreshFn: () => resp });
+    t.open(); await until(cardsReady(t));
+    const ids0 = t.qa('.aic').map((c) => c.dataset.id);
+    t.q('.ai-refresh').click();
+    await until(() => t.q('.ai-rstat').classList.contains('err'));
+    assert.equal(t.q('.ai-rstat').textContent, text);
+    assert.ok(!t.q('.ai-refresh').disabled);
+    await sleep(90);
+    assert.equal(t.reloads.length, 0, 'never reloads after a failure');
+    assert.deepEqual(t.qa('.aic').map((c) => c.dataset.id), ids0, 'cards unchanged');
+    assert.equal(t.statePosts().length + t.enrichPosts().length, 0);
+    t.dom.window.close();
+  }
+});
+
+test('refresh button is never offered offline or from file://, and the mismatch warning still works', async () => {
+  const off = setup({ offline: true });
+  off.open(); await until(() => off.q('.ai-state').textContent.startsWith('Sunucu çalışmıyor'));
+  assert.ok(!visible(off.q('.ai-refresh')));
+  const file = setup({ url: 'file:///Users/someone/dashboard.html' });
+  file.open(); await until(() => file.q('.ai-state').textContent.startsWith('Sunucu çalışmıyor'));
+  assert.ok(!visible(file.q('.ai-refresh')));
+  assert.equal(file.calls.length + off.refreshPosts().length, 0);
+  const mm = setup({ health: { ...clone(FIX.health), as_of_data_date: '2026-07-31' } });
+  mm.open(); await until(cardsReady(mm));
+  assert.ok(visible(mm.q('.ai-warn')) && visible(mm.q('.ai-refresh')), 'mismatch warning with the refresh action next to it');
+  assert.equal(mm.refreshPosts().length, 0, 'never refreshes automatically');
+});
+
+test('refresh is available while the server reports a warm-up error', async () => {
+  const t = setup({ health: { ...clone(FIX.health), context_ready: false, context_error: 'FileNotFoundError: Stok ve satış dosyaları gerekli.' } });
+  t.open();
+  await until(() => t.q('.ai-state').textContent.startsWith('Veriler yüklenemedi'));
+  assert.ok(visible(t.q('.ai-refresh')));
 });
 }

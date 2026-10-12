@@ -107,7 +107,9 @@ def test_ai_script_has_no_html_injection_sinks(built):
 
 def test_ai_script_post_contract(built):
     js = _ai_script(built["ai"])
-    assert "'X-StockAgent':'1'" in js and js.count("headers:POST_HEADERS") == js.count("method:'POST'") == 2
+    # every POST (enrich/state/draft via post(), and the M5-5 refresh) carries the guard header
+    assert "'X-StockAgent':'1'" in js and js.count("headers:POST_HEADERS") == js.count("method:'POST'") == 3
+    assert "fetch('/api/context/refresh',{method:'POST',headers:POST_HEADERS" in js
     assert "MAX_IDS=5" in js and ".slice(0,MAX_IDS)" in js
     assert "/api/agent/actions/enrich" in js
     # M5-3 state endpoints, keyed by the real action_id
@@ -134,14 +136,15 @@ def test_approved_turkish_state_copy_is_present(built):
     assert "</script" not in js.lower()
 
 
-def test_m5_3_m5_4_controls_present_and_m5_5_not_built(built):
+def test_m5_3_to_m5_5_controls_present(built):
     block = _ai_block(built["ai"])
     for label in ("✓ Yapıldı", "⏸ Ertele", "✕ Gizle", "Geri al", "Aksiyon durumu kaydedilemedi.",
                   "✉ Taslak", "🔍 Müşteri", "Taslak oluştur", "Kopyala", "Taslak hazırlanıyor…",
                   "Müşteri bilgileri yüklenemedi."):
         assert label in block, label
-    for label in ("Yenile", "/api/refresh", "Yenileme"):    # M5-5 controlled refresh is not built
-        assert label not in block, label
+    for label in ("↻ Verileri yenile", "Veriler yenileniyor…", "Önceki veriler kullanılmaya devam ediyor.",
+                  "'/api/context/refresh'"):                      # M5-5 controlled refresh
+        assert label in block, label
 
 
 def test_ai_script_has_no_send_capability(built):

@@ -174,6 +174,32 @@ class DraftResponse(BaseModel):
     evidence: List[EvidenceFact] = []
     note: str = "Yalnızca taslak. Otomatik gönderim yapılmaz."
 
+# ---------- controlled refresh (M5-5) ----------
+class RefreshCheck(BaseModel):
+    name: str
+    ok: bool
+    detail: str = ""
+
+
+class RefreshReport(BaseModel):
+    """Result of validate → build → verify → swap. step: busy|validate|build|verify|swap|done.
+    Filenames only (never absolute paths), no workbook rows."""
+    ok: bool
+    step: Literal["busy", "validate", "build", "verify", "swap", "done"]
+    step_tr: str
+    message: str
+    sources: Dict[str, Optional[str]]
+    previous_as_of_data_date: Optional[str] = None
+    candidate_as_of_data_date: Optional[str] = None    # date found in the selected sales file
+    as_of_data_date: Optional[str] = None              # date in service after this call
+    counts: Dict[str, Optional[int]] = {}
+    warnings: List[str] = []
+    errors: List[str] = []
+    checks: List[RefreshCheck] = []
+    previous_data_kept: bool = True
+    duration_ms: int = 0
+
+
 # ---------- scenario ----------
 class ScenarioRequest(BaseModel):
     usdtry_change_pct: float = 0

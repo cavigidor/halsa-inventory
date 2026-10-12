@@ -15,6 +15,7 @@ from services.agent import BusinessActionAgent
 from services.ai.factory import get_provider
 from services import scenarios as SCN
 from services import actions as A
+from services import refresh as RF
 from services import evidence as EV
 from services import action_sources  # noqa: F401  (registers the built-in deterministic sources)
 
@@ -126,7 +127,7 @@ def health(agent: BusinessActionAgent = Depends(get_agent), repo: ContextReposit
     return S.Health(ai_available=agent.available, ai_provider=p.name,
                     ai_model=getattr(p, "model", None),
                     ai_reason=(None if agent.available else getattr(p, "reason", None)),
-                    macro_available=False, data_folder=DATA_FOLDER,
+                    macro_available=False, data_folder=os.path.basename(os.path.normpath(DATA_FOLDER)),   # name only (M5-5: no local paths)
                     context_ready=ready, context_error=getattr(repo, "last_error", None),
                     as_of_data_date=asof)
 
@@ -151,6 +152,18 @@ def context(repo: ContextRepository = Depends(get_repo)):
     return S.ContextResponse(generated_at=ctx["generated_at"], as_of_data_date=ctx["as_of_data_date"],
                              source_files=ctx["source_files"], company=ctx["company"],
                              counts=counts, data=ctx)
+
+
+@app.post("/api/context/refresh", response_model=S.RefreshReport,
+          responses={409: {"model": S.RefreshReport, "description": "another refresh is running"}})
+def context_refresh(repo: ContextRepository = Depends(get_repo)):
+    """Controlled refresh (M5-5, D-019): validate → build staging → verify → swap, shared with
+    `python -m services.refresh`. Deterministic: never calls the AI provider; action state and AI cache stay.
+    On success the verified context is installed in this server and dashboard.html is replaced atomically."""
+    rep = RF.run_refresh(DATA_FOLDER, DASHBOARD_PATH, previous_context=repo.current(),
+                         install=repo.replace_context, inflation_rate=INFLATION)
+    body = S.RefreshReport(**rep).model_dump()
+    return JSONResponse(status_code=409 if rep["step"] == "busy" else 200, content=body)
 
 
 # ---------------- daily actions ----------------
