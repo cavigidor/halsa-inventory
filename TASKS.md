@@ -1,14 +1,18 @@
 # TASKS.md — active backlog
 
 Rules: one *Current* task at a time. Each task must be executable in one bounded session.
-Milestone 5 must not be started until it is moved to *Current*.
+Milestone 5 is complete. M6 must not be started until M6-0 is moved to *Current*.
 
 ## Current
-- [ ] **Review and merge the M5-5 PR** (`claude/m5-5-controlled-refresh`, controlled refresh). Then M5-6.
+- [ ] **Review and merge the M5-6 PR** (`claude/m5-6-verification-polish`). Milestone 5 is then complete.
 
-## Next (M5 slices, design §11; one bounded checkpoint each)
-- [ ] **M5-6 Verification and polish.** A Playwright smoke test in CI (mock provider), the mobile layout,
-  and the owner's live check.
+## Next
+- [ ] **Owner: M5 check on the Mac** (`git pull`, refresh, open http://127.0.0.1:8000/, desktop + phone width).
+  Steps in STATUS.md "Owner follow-ups".
+- [ ] **Owner: one live WhatsApp draft tone check** (at most one paid call, never sent). If the tone needs work,
+  record it under Q-2.
+- [ ] **M6-0 Source inventory and technical verification** (docs only; see *Later* → M6). Start only when moved
+  to *Current*, after the owner decisions below.
 - [ ] **DQ-1: Fix dashboard margin missing-cost handling.**
   `m_margin` uses `fillna(0)` on `Net_Tutar_Maliyet_Dusulmus`, so a missing cost counts as zero
   profit and margin is understated. Exclude rows without cost from both revenue and profit in
@@ -68,6 +72,11 @@ Milestone 5 must not be started until it is moved to *Current*.
   2020 should count, change `QUAL_YEARS` and that test together.
 
 ## Completed
+- [x] 2026-10-13 — **Milestone 5 — AI Aksiyon Merkezi: COMPLETE.** M5-6: Playwright smoke tests in CI (real
+  FastAPI + Chromium, synthetic data, disabled/mock AI), hostile-text escaping at the browser boundary, action-state
+  round trip across reloads, refresh smoke, `file://` mode, phone/desktop layout; small AI-tab responsive and focus
+  polish. Harness decision in D-033.
+- [x] 2026-10-13 — PR #9 (M5-5) merged into `main` (`1f018c4`).
 - [x] 2026-10-11 — M5-5 controlled refresh: `services/refresh.py` (validate → build staging → verify → atomic
   swap → report) shared by `POST /api/context/refresh` and `python -m services.refresh`; frozen single-read source
   snapshot; cross-process flock; `ContextRepository.replace_context`; `dashboard.prev.html`; refresh button with
