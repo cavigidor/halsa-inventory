@@ -19,6 +19,12 @@ def is_sales(n):
     x=n.lower()
     if is_stock(n) or is_aging(n): return False
     return 'sat' in x or 'bazl' in x
+def select_sources(folder):
+    """The current M5 source set, picked once (M5-5): {'stock','sales','aging'} paths (aging may be None)."""
+    return {'stock':_latest(folder,is_stock),'sales':_latest(folder,is_sales),'aging':_latest(folder,is_aging)}
+def read_stock(path): return pd.read_excel(path,header=STOCK_HEADER_ROW)
+def read_sales_raw(path): return pd.read_excel(path)
+def read_aging_raw(path): return pd.read_excel(path)
 def num(s): return pd.to_numeric(s,errors='coerce')
 def _n(x,d=0):
     try:
@@ -29,8 +35,8 @@ def _money(x):
     except: return '—'
 
 # ---------- sayfalar ----------
-def m_stock(path):
-    df=pd.read_excel(path,header=STOCK_HEADER_ROW)
+def m_stock(path,df=None):
+    df=read_stock(path) if df is None else df.copy()
     for k in ['stock','cov','min','max','inv']: df[SC[k]]=num(df[SC[k]])
     band=df[SC['max']]>0; hc=df[SC['cov']].notna(); ins=df[SC['stock']].fillna(0)!=0
     disc=df[SC['status']].astype(str).str.contains(DISCONTINUED,na=False)
@@ -44,8 +50,8 @@ def m_stock(path):
                 'cov':_n(r[SC['cov']],2),'inv':_n(r[SC['inv']]),'disc':bool(r['_d'])} for _,r in over.iterrows()]
     return low_rows,over_rows,int(len(df))
 
-def load_sales(path):
-    df=pd.read_excel(path)
+def load_sales(path,df=None):
+    df=read_sales_raw(path) if df is None else df.copy()
     df['_date']=pd.to_datetime(df['Tarih'],errors='coerce'); df['_yr']=df['_date'].dt.year
     df['Nettutar']=num(df['Nettutar']).fillna(0); df['miktar']=num(df['miktar']).fillna(0)
     df['_prof']=num(df['Net_Tutar_Maliyet_Dusulmus']).fillna(0) if 'Net_Tutar_Maliyet_Dusulmus' in df.columns else 0.0
@@ -192,8 +198,9 @@ def m_risk(df,owed_map,closed_inv,attr):
     rows.sort(key=lambda r:-r['overdue']); return rows
 
 
-def m_collections(path):
-    df=pd.read_excel(path); df.columns=[str(c).strip() for c in df.columns]
+def m_collections(path,df=None):
+    df=read_aging_raw(path) if df is None else df.copy()
+    df.columns=[str(c).strip() for c in df.columns]
     key,name,rep='Hesap kodu','Hesap adı','Temsilci kodu'
     months=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık']
     bkts=[c for c in df.columns if 'öncesi' in c or any(m in c for m in months)]  # aging columns, oldest→newest
@@ -214,13 +221,16 @@ def m_collections(path):
     return rows, owed_map
 
 # ---------- oluştur ----------
-def build(data_folder,out_path,today=None,ai_panel=True):
+def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None):
+    """sources/frames (M5-5): a frozen source selection and the already-read raw frames, so a controlled
+    refresh builds from exactly what it validated. stats_out (dict): filled with build totals for verification."""
     today=today or dt.date.today()
-    sp=_latest(data_folder,is_stock); ep=_latest(data_folder,is_sales); ap=_latest(data_folder,is_aging)
-    low,over,total=m_stock(sp)
+    src=sources or select_sources(data_folder); fr=frames or {}
+    sp,ep,ap=src.get('stock'),src.get('sales'),src.get('aging')
+    low,over,total=m_stock(sp,fr.get('stock'))
     coll,owed=([],{})
-    if ap: coll,owed=m_collections(ap)
-    sdf=load_sales(ep) if ep else None
+    if ap: coll,owed=m_collections(ap,fr.get('aging'))
+    sdf=load_sales(ep,fr.get('sales')) if ep else None
     attr=cust_attrs(sdf) if sdf is not None else {}
     cinv=inv_closed(sdf) if sdf is not None else set()
     lap=m_lapsed(sdf,owed,attr) if sdf is not None else []
@@ -292,6 +302,10 @@ def build(data_folder,out_path,today=None,ai_panel=True):
           'aging':os.path.basename(ap) if ap else '','tiers':tier_counts,'total':total,'has_aging':has_aging,
           'asof':_asof_iso(sdf)}
     with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel))
+    if stats_out is not None:
+        stats_out.update({'asof':meta['asof'],'overdue_total':overdue_total,'overstock_value':over_val,
+                          'tabs':list(modules.keys()),'products':total,'lapsed':len(lap),'low':len(low),
+                          'over':len(over),'coll':len(coll),'sources':{k:(os.path.basename(v) if v else None) for k,v in src.items()}})
     return out_path,{'low':len(low),'over':len(over),'lapsed':len(lap),'coll':len(coll),
                      'momentum':len(momentum),'margin':len(margin),'ordersize':len(ordersize),
                      'osmove':len(osmove),'risk':len(risk)}
@@ -318,6 +332,10 @@ _AI_CSS=r"""
 #ai .ai-btn{border:1px solid var(--lap);background:var(--lap);color:#fff;font:inherit;font-weight:600;font-size:13px;padding:7px 12px;border-radius:8px;cursor:pointer}
 #ai .ai-btn:disabled{opacity:.55;cursor:wait}
 #ai .ai-one{background:var(--card);color:var(--lap);padding:4px 10px;font-size:12px}
+#ai .ai-refresh{background:var(--card);color:var(--ink);border-color:var(--line)}#ai .ai-refresh:hover{border-color:#c3c8cf}
+#ai .ai-rstat{font-size:12.5px;margin:0 0 10px;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card)}
+#ai .ai-rstat.run{color:var(--muted)}#ai .ai-rstat.ok{color:#1a7f4b;border-color:#bfe3cf;background:#f0faf4}
+#ai .ai-rstat.err{color:#b42318;border-color:#f3c4c4;background:#fdf3f3;font-weight:600}
 #ai .ai-state{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:8px 0 12px}
 #ai .ai-state.off,#ai .ai-state.err{border-color:#f3c4c4;background:#fdf3f3}
 #ai .ai-state.wait,#ai .ai-state.empty{color:var(--muted)}
@@ -392,8 +410,10 @@ _AI_BODY="""
 <h2 class="sec">✨ AI Aksiyon Merkezi</h2>
 <p class="note">Bugün ne yapmalı, neden ve hangi rakamlara dayanıyor. Sıralama, sayılar ve gerekçeler Python'dandır; AI yorumu yalnızca siz istediğinizde oluşturulur ve öneridir.</p>
 <div class="ai-bar"><span class="ai-chip ai-srv" hidden></span><span class="ai-chip ai-aist" hidden></span>
-<button class="ai-btn ai-gen" type="button" hidden>✨ AI yorumlarını oluştur</button><span class="ai-date"></span></div>
+<button class="ai-btn ai-gen" type="button" hidden>✨ AI yorumlarını oluştur</button>
+<button class="ai-btn ai-refresh" type="button" hidden title="data klasöründeki güncel dosyalardan doğrula → oluştur → kontrol et → değiştir">↻ Verileri yenile</button><span class="ai-date"></span></div>
 <div class="ai-warn" hidden></div>
+<div class="ai-rstat" role="status" aria-live="polite" hidden></div>
 <div class="ai-state" role="status" hidden></div>
 <div class="ai-status" role="status" aria-live="polite" hidden></div>
 <div class="ai-filters" hidden></div>
@@ -439,8 +459,13 @@ const MSG={
   draftNote:'Yalnızca taslak: inceleyin, kopyalayın ve kendiniz gönderin.',
   custLoading:'Yükleniyor…',
   custFail:'Müşteri bilgileri yüklenemedi.',
-  custEmpty:'Gösterilecek bilgi yok.'
+  custEmpty:'Gösterilecek bilgi yok.',
+  refreshing:'Veriler yenileniyor…',
+  refreshKept:'Önceki veriler kullanılmaya devam ediyor.',
+  refreshNoServer:'Sunucuya ulaşılamadı'
 };
+// Controlled refresh (M5-5, D-019): after success the page reloads to get the new static dashboard.
+const RELOAD_MS=window.__AI_RELOAD_MS||1500, RELOAD_WARN_MS=window.__AI_RELOAD_WARN_MS||6000;
 // Draft contract (D-030): mirrors schemas.Channel / schemas.Purpose. Not categories: those come from the server.
 const CHANNELS=[['whatsapp','WhatsApp'],['email','E-posta']];
 const PURPOSES=[['collection','Tahsilat'],['offer','Teklif'],['winback','Geri kazanım'],['sales_followup','Satış takibi'],['fair_invite','Fuar daveti']];
@@ -473,7 +498,7 @@ function srvChip(ok){const c=$('.ai-srv'); c.textContent=ok?'● Sunucu bağlı'
 function aiChip(){const c=$('.ai-aist'); show(c,true);
   if(st.aiOn){c.textContent='AI: açık'+(st.model?' · '+st.model:''); c.className='ai-chip ai-aist on';}
   else{c.textContent=MSG.disabled; c.className='ai-chip ai-aist';}}
-function offline(){srvChip(false); setState(MSG.offline,'off');}
+function offline(){srvChip(false); setState(MSG.offline,'off'); show($('.ai-refresh'),false);}
 
 function start(){
   if(st.started) return; st.started=true;
@@ -483,7 +508,7 @@ function start(){
 async function pollHealth(elapsed){
   let h;
   try{h=await getJSON('/api/health');}catch(e){offline(); return;}
-  srvChip(true);
+  srvChip(true); show($('.ai-refresh'),true);   // refresh needs the server (never offered offline or from file://)
   if(!h.context_ready){
     if(h.context_error){setState(MSG.ctxError+h.context_error,'err'); return;}
     setState(MSG.warming,'wait');
@@ -585,6 +610,28 @@ function updateButtons(){
 }
 function replaceCard(id){const old=st.cardEl[id]; if(!old||!old.parentNode) return;
   const n=card(st.byId[id]); old.replaceWith(n); st.cardEl[id]=n;}
+
+// ---- controlled refresh (M5-5): one guarded POST; the server validates, builds, verifies, swaps ----
+function reloadPage(){(window.__aiReload||(()=>window.location.reload()))();}
+async function refreshData(){
+  const b=$('.ai-refresh'); if(b.disabled) return;
+  b.disabled=true; line('.ai-rstat',MSG.refreshing,'run');   // the current dashboard stays as it is meanwhile
+  let rep=null;
+  try{const r=await fetch('/api/context/refresh',{method:'POST',headers:POST_HEADERS,body:'{}'});
+      try{rep=await r.json();}catch(e){rep=null;}}
+  catch(e){rep=null;}
+  if(rep&&rep.ok===true){
+    const w=Array.isArray(rep.warnings)?rep.warnings:[];
+    line('.ai-rstat','Veriler yenilendi. Yeni veri tarihi: '+(fmtDate(rep.as_of_data_date)||'—')+'.'
+         +(w.length?' Uyarılar: '+w.join(' · '):'')+' Sayfa yeniden yükleniyor…','ok');
+    setTimeout(reloadPage,w.length?RELOAD_WARN_MS:RELOAD_MS);   // the button stays disabled until the new page loads
+    return;
+  }
+  const step=(rep&&(rep.step_tr||rep.step))||'bağlantı';
+  const msg=String((rep&&rep.message)||MSG.refreshNoServer).replace(/[.\s]+$/,'');
+  line('.ai-rstat','Yenileme başarısız ('+step+'): '+msg+'. '+MSG.refreshKept,'err');
+  b.disabled=false;
+}
 
 // ---- drafts (M5-4, D-018/D-030): channel × purpose, explicit click only, copy-only (no send anywhere) ----
 function defaultPurpose(a){const c=st.catByKey[a.category], p=c&&c.draft_purpose;
@@ -767,6 +814,7 @@ async function enrich(ids){
 tabBtn.addEventListener('click',start);   // lazy: nothing is fetched until the tab is opened
 $('.ai-gen').addEventListener('click',enrichNext);
 $('.ai-dr-x').addEventListener('click',closeDrawer);
+$('.ai-refresh').addEventListener('click',refreshData);
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&st.drawer) closeDrawer();});
 $('.ai-next').addEventListener('click',enrichNext);
 })();

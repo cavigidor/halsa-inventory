@@ -43,6 +43,21 @@ class ContextRepository:
     def refresh(self):
         return self.context(refresh=True)
 
+    def current(self):
+        """The live context or None. Never builds (M5-5: the refresh compares against it)."""
+        return self._ctx
+
+    def replace_context(self, staged_ctx):
+        """Install an already-built, verified context (M5-5 swap). Under the lock: replace it, drop the
+        customer/product indices and the last error. No Excel read, no AI, no SQLite access."""
+        if not isinstance(staged_ctx, dict) or "actions" not in staged_ctx:
+            raise ValueError("not a built context")
+        with self._lock:
+            self._ctx = staged_ctx
+            self._cust_idx = self._prod_idx = None
+            self.last_error = None
+        return self._ctx
+
     # ---- indices built from the assembled context (no Excel re-read) ----
     def _build_indices(self):
         ctx = self.context()

@@ -30,17 +30,19 @@ def resolve_inflation(explicit=None, macro=None):
     return None, "unavailable"
 
 
-def build_context(data_folder, inflation_rate=None, macro=None, top_n=None):
+def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sources=None, frames=None):
+    """sources/frames (M5-5): a frozen source selection and its already-read raw frames (controlled refresh);
+    by default the newest files in data_folder are selected and read, as before."""
     top_n = top_n or C.MAX_CONTEXT_ITEMS_PER_CATEGORY
-    sp = db._latest(data_folder, db.is_stock)
-    ep = db._latest(data_folder, db.is_sales)
-    ap = db._latest(data_folder, db.is_aging)
+    src = sources or db.select_sources(data_folder)
+    fr = frames or {}
+    sp, ep, ap = src.get("stock"), src.get("sales"), src.get("aging")
     if not (sp and ep):
         raise FileNotFoundError("Stok ve satış dosyaları gerekli.")
 
-    low, over, total = db.m_stock(sp)
-    coll, owed = (db.m_collections(ap) if ap else ([], {}))
-    sdf = db.load_sales(ep)
+    low, over, total = db.m_stock(sp, fr.get("stock"))
+    coll, owed = (db.m_collections(ap, fr.get("aging")) if ap else ([], {}))
+    sdf = db.load_sales(ep, fr.get("sales"))
     attr = db.cust_attrs(sdf); cinv = db.inv_closed(sdf)
     lap = db.m_lapsed(sdf, owed, attr)
     mom = db.m_momentum(sdf, attr)

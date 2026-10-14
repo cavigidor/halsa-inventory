@@ -44,6 +44,20 @@ When there are several files of one kind, the newest is used.
 python dashboard_builder.py data          # -> dashboard.html (gitignored)
 uvicorn app:app --host 127.0.0.1          # local only; dashboard at http://127.0.0.1:8000/ , API docs at /docs
 ```
+
+## Monthly refresh
+Replace the exports in `./data/` (stock, sales, optional cari/aging), then press **"↻ Verileri yenile"** in the
+AI Aksiyon Merkezi tab (or `POST /api/context/refresh`). The refresh validates the files (required columns, rows,
+readable sales dates, and a data date that is not older than the current one), builds the new context and
+dashboard in staging, verifies them (context ↔ dashboard totals, dashboard structure, data date; large drops
+are reported as warnings), then swaps them in atomically and reloads the page. On any failure nothing changes:
+the message names the failing step and the previous data stays in service. `dashboard.prev.html` keeps the
+previous version. The refresh never calls the AI and keeps action state and the AI cache.
+
+Offline equivalent (no server needed; while the app runs, prefer the button so the server is updated too):
+```bash
+python -m services.refresh                # exit 0 = refreshed, 1 = failed (nothing changed), 3 = another refresh running
+```
 Main endpoints:
 - **Deterministic (never call the AI):** `/` (the generated dashboard), `/api/health` (including
   `context_ready`), `/api/context`, `/api/agent/categories`, `/api/agent/actions` (all open actions ranked
@@ -55,6 +69,7 @@ Main endpoints:
   `{"customer_code", "channel": "whatsapp"|"email", "purpose": "collection"|"offer"|"winback"|"sales_followup"|"fair_invite"}`
   (optional `product_code`, `additional_instruction`). The old `message_type` field is still accepted and
   mapped. KAPALI customers get collection drafts only. Drafts are copy-only: nothing is ever sent.
+- **Refresh:** `POST /api/context/refresh` (409 while another refresh runs), returns a structured report.
 - **Action state:** `POST /api/actions/{id}/complete|defer|dismiss|reopen` (`reopen` is the undo; `defer` takes
   `{"until": "YYYY-MM-DD"}`, a future date, default +7 days; unknown ids give 404).
 - **Other:** `POST /api/scenario`, and `/api/ai/calls` (call metadata only).
