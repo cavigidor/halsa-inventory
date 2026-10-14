@@ -1,19 +1,19 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-11 (M5-4 merged to `main` @ `4868265`; M5-5 controlled refresh done on `claude/m5-5-controlled-refresh`, PR pending)._
+_Updated 2026-10-13 (M5-5 merged to `main` @ `1f018c4`; M5-6 verification + polish done on `claude/m5-6-verification-polish`, PR pending)._
 
 ## Git
-- **Branch:** `claude/milestone-3-live-ai`, based on `main`.
-- **`main`:** `71f5f2f` (original dashboard) → `d37db1f` (bootstrap: M1+M2 import, hardened `.gitignore`).
-- **This checkpoint:** the commit that last touched this file (`git log -1 -- STATUS.md`).
-- **GitHub sync:** VERIFIED 2026-10-09. `git ls-remote origin` shows `main` = `d37db1f` and
-  `claude/milestone-3-live-ai` = `dfa57de`, matching local (the user pushed from the Mac). Remote
-  default branch (HEAD) = `main`.
+- **`main`:** `1f018c4` (M5-5 merged). **This checkpoint:** branch `claude/m5-6-verification-polish` (PR pending);
+  the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
+- **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
+  there to get M5 (see "Owner follow-ups" below).
 
 ## Milestone
-Milestone 3 (real LLM behind the abstraction, with numeric safety) is implemented and tested.
-Push and CI are done. Remaining close-out: one live smoke call (must run in the Mac's own Terminal,
-see below), then merge to `main`.
+**Milestone 5 — AI Aksiyon Merkezi: COMPLETE** (M5-1 to M5-6; final acceptance in the M5-6 section below).
+Two owner follow-ups remain that the sandboxes cannot do (they cannot reach `api.openai.com` or open a browser on
+the Mac): the visual check in the owner's own browser and one live WhatsApp draft tone check. Neither blocks M5.
+Next major milestone: **M6 — Additional data sources / sales intelligence foundation**, starting with M6-0
+(not started).
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -77,7 +77,8 @@ OpenAI model. The OpenAI default model `gpt-5-mini` lives in
 `config.DEFAULT_MODELS`. It has not been verified live; override it with `AI_MODEL`.
 
 ## Not implemented / known issues
-- Milestone 4 (live macro data) is not started. Milestone 5: M5-1 to M5-5 done; M5-6 not started.
+- Milestone 4 (live macro data) is not started. Milestone 5 is complete (M5-1 to M5-6).
+- The controlled refresh lock uses `flock`: supported on macOS and Linux (the Mac and CI), not on Windows (D-032).
 - `weekly_agent.py` (older, unused, standalone weekly report e-mail to the owner via SMTP) still exists. The app
   never imports it and it never contacts customers; it is outside the copy-only app surface (D-031).
 - DQ-3: tie order in "Büyüme / Küçülme" depends on the Python hash seed (rows, not values; TASKS *Next*).
@@ -296,7 +297,7 @@ live call, nothing sent):
 - KAPALI offer draft refused with zero provider calls; one explicit mock draft = one provider call.
 - No send routes; the real `data/agent_state.db` was not created or touched.
 
-## M5-5 (done; PR pending)
+## M5-5 (done; merged in PR #9 @ `1f018c4`)
 Branch `claude/m5-5-controlled-refresh` from `main` @ `4868265`. Notes in D-032.
 - **One pipeline:** `services/refresh.run_refresh` (validate → build staging → verify → atomic swap → report), used by
   `POST /api/context/refresh` and `python -m services.refresh` (exit 0 ok, 1 failed, 3 busy). Never calls the AI.
@@ -343,6 +344,65 @@ Real-data regression (Mac VM, 5 Oct 2026 exports via read-only links in a temp f
   dashboard and context unchanged in both. No staging leftovers, zero AI calls.
 - The original exports are byte-identical afterwards; the real `data/agent_state.db` was not touched.
 
+## M5-6 (done; PR pending) — verification, browser smoke tests, polish
+Branch `claude/m5-6-verification-polish` from `main` @ `1f018c4`. Harness decision in D-033. No business logic changed.
+- **Playwright (Python, `tests/test_m5_browser.py`, pinned in `requirements-dev.txt`):** each test starts the real
+  FastAPI app (free port, synthetic workbooks, temporary dashboard + SQLite, `AI_PROVIDER=disabled|mock`, no `.env`),
+  polls `/api/health` for readiness and stops the process afterwards. CI installs Chromium
+  (`python -m playwright install --with-deps chromium`) and sets `REQUIRE_BROWSER_TESTS=1`; locally the tests skip
+  without Playwright/Chromium. The jsdom suite stays.
+- **Scenarios:** (A) AI disabled: every existing tab renders, cards/filters/facts/reason/score, AI-off note, no AI
+  controls, drawer, Ertele/Gizle/Geri al, no page errors; (B) mock AI: zero provider calls on load, tab, filters and
+  drawer; explicit "AI yorumlarını oluştur" → separate "AI yorumu (öneridir)" block with evidence chips, facts
+  unchanged; opening a draft → no call, "Taslak oluştur" → one call, "Kopyala" fills the clipboard, no send control,
+  no `wa.me`/`mailto:`; hostile `<script>`/`onerror` text in intercepted AI and draft responses is shown as text,
+  never executed (`window.__M5_XSS` unset, no new script); action state: Yapıldı → reload → hidden → reopen → reload
+  → open, and Gizle → Geri al → reload → open; refresh: guarded POST, pending text, success, page reload,
+  `dashboard.prev.html`; `file://`: static tabs work, offline message, no refresh button, zero requests; layout at
+  390×844, 375×812 and 1280×900 with long unbroken AI text; accessible names, live regions, drawer dialog role.
+- **Polish (AI tab CSS/JS only):** long unbroken text wraps (it widened the phone page to ~2900 px); 36 px tap targets,
+  full-width undo bar ("Geri al" no longer wraps) and drawer on phones; the drawer moves focus to its close button and
+  back to the opener. Desktop: checked, no change needed.
+- **Mutation check:** removing the wrapping rule fails the layout tests; rendering AI text via `innerHTML` executes the
+  injected handler in Chromium and fails the escaping test.
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (node + jsdom + Chromium) | `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 python -m pytest -q` | **305 passed, 7 skipped, 1 xfailed** (10 new browser tests; jsdom 44) |
+| GitHub Actions | `tests.yml` with Chromium | **success** (first M5-6 commit `9aab2d9`) |
+
+Real-data check (Mac VM, 5 Oct 2026 exports via read-only links, temp dashboard + state DB, mock provider so any
+AI call would be counted; no browser exists or can be downloaded in the VM, so this is the server/API path):
+- Actions 15 = 15 before M5-6, identical content. `python -m services.refresh` exit 0; the server starts and becomes
+  ready, health shows 2026-10-05 and the folder name only; `/` serves the dashboard with the AI tab, refresh button
+  and `data-asof` 2026-10-05.
+- All 15 customer drawer GETs 200; complete → hidden → reopen → restored in order; API refresh ok (same date,
+  previous kept, no warnings); zero AI calls from browsing, state changes and refresh; no send routes.
+- The original exports are byte-identical; the real `data/agent_state.db` was not touched.
+
+### Final M5 acceptance
+| Area | Evidence |
+|---|---|
+| Deterministic core | Python computes and ranks every action (M5-1); 15/15 real actions unchanged through M5-6 |
+| AI Aksiyon Merkezi | cards, reason, facts, server filters, top-5 / next-5 / per-card AI, cache, explicit calls only (M5-2; browser B) |
+| Workflow | Yapıldı / Ertele / Gizle / Geri al with reload persistence (M5-3; browser round trip) |
+| Customer | deterministic drawer, lazy + session cache (M5-4; browser A/B) |
+| Messaging | WhatsApp/e-posta, channel × purpose, KAPALI → collection only, copy-only, no send (M5-4; browser B) |
+| Refresh | validate → staging → verify → atomic swap, prev kept, failures keep old data, no AI (M5-5; browser refresh) |
+| Safety | escaped AI text (browser XSS test), POST guard, local-only, real data out of Git, no automatic AI or messaging |
+| Browser quality | Chromium smoke tests in CI; phone and desktop layouts verified |
+
+### Owner follow-ups (do not block M5)
+1. **Get M5 on the Mac and look at it:** in the project folder `git pull`, `pip install -r requirements.txt`,
+   `python -m services.refresh`, `uvicorn app:app --host 127.0.0.1`, open http://127.0.0.1:8000/ → "✨ AI Aksiyon
+   Merkezi". Check the date (5 Ekim 2026), 15 cards, a "🔍 Müşteri" drawer, one Yapıldı + Geri al, the "↻ Verileri
+   yenile" button; then narrow the window (or the browser's phone view) and check the same.
+2. **One live WhatsApp draft tone check (at most one paid call):** with `AI_PROVIDER=openai` in `.env`, open a
+   Geri Kazanım or Reel Satış Düşüşü card → "✉ Taslak" → WhatsApp, "Satış takibi" (or "Geri kazanım") →
+   "Taslak oluştur" once. Do not send it. Judge: natural Turkish, concise, professional, human, no internal analysis,
+   no unsupported number, sendable after a light edit. If the tone needs work, add it to Q-2 (no prompt campaign).
+
 ## Immediate next task
-Review and merge the M5-5 PR. Then M5-6 (Playwright smoke test, mobile polish, owner's live check), per
-`docs/m5_action_center.md` §11.
+Review and merge the M5-6 PR, then the two owner follow-ups above. Then decide on DQ-1 / DQ-2 / DQ-3 and the lapsed
+window, and start **M6-0** (source inventory and technical verification) only when it is moved to *Current*.

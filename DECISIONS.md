@@ -351,3 +351,15 @@ Don't rewrite earlier entries. If one is superseded, add a new entry that says s
   are HTTP 200 with `ok: false`; no stack traces or absolute paths. `/api/health` reports the data folder's name only.
 - **Plausibility:** drops above `REFRESH_MAX_DROP` (default 0.5) against the live context are warnings, not errors.
   The CLI has no live context to compare and says so.
+
+### D-033 · 2026-10-13 · Browser smoke tests: Python Playwright against the real app (M5-6)
+- **Decision:** the real-browser layer uses Python Playwright (`playwright==1.56.0` in `requirements-dev.txt`) inside
+  pytest (`tests/test_m5_browser.py`), not Node `@playwright/test`. The server, fixtures and the rest of the suite are
+  Python, so a test can write synthetic workbooks, build the dashboard with the refresh pipeline, start `uvicorn` with
+  an isolated environment and assert on API state in one place. One Playwright framework only. The jsdom suite stays
+  for fast, fine-grained DOM tests.
+- **Isolation:** one server process per test (free port, temp data folder, dashboard and SQLite DB, disabled or mock
+  provider, no `.env`), readiness by polling `/api/health`, process always stopped. Hostile AI text is tested by
+  intercepting responses at the browser boundary; the grounding pipeline is not weakened for tests.
+- **CI:** `python -m playwright install --with-deps chromium` and `REQUIRE_BROWSER_TESTS=1` (the tests fail instead
+  of skipping). Locally they skip without Playwright/Chromium, like the jsdom tests without Node.

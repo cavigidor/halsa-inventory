@@ -403,7 +403,17 @@ background:var(--ink);color:#fff;border-radius:10px;padding:9px 10px 9px 16px;fo
 #ai .ai-dr-msg{color:var(--muted);font-size:13px}#ai .ai-dr-msg.err{color:#b42318;font-weight:600}
 #ai .ai-dr-note{font-size:11px;color:var(--muted);padding:10px 18px;margin:0;border-top:1px solid var(--line)}
 #ai .ai-none{color:var(--muted);font-style:italic}
-@media(max-width:600px){#ai .ai-date{margin-left:0;width:100%}#ai .aic-conf{margin-left:0}}
+/* M5-6 polish: long unbroken text never widens the page; comfortable tap targets and a full-width
+   undo bar / drawer on phones */
+#ai .aic,#ai .ai-state,#ai .ai-status,#ai .ai-rstat,#ai .ai-warn,#ai .ai-dr-body,#ai .ai-dr-name,#ai .ai-undo-t{overflow-wrap:anywhere}
+#ai .aic-chip{max-width:100%}
+#ai .ai-undo-b{white-space:nowrap;flex-shrink:0}
+@media(max-width:600px){#ai .ai-date{margin-left:0;width:100%}#ai .aic-conf{margin-left:0}
+#ai .ai-btn,#ai .ai-sbtn,#ai .ai-f,#ai .ai-dr-x{min-height:36px}
+#ai .aic-acts .ai-one{margin-left:0}
+#ai .aic-drow .ai-din{flex-basis:100%;min-width:0}
+#ai .ai-undo{left:12px;right:12px;transform:none;max-width:none;justify-content:space-between}
+#ai .ai-drawer{width:100%;border-left:0}}
 """
 
 _AI_BODY="""
@@ -724,7 +734,8 @@ function renderDrawer(code,data){
   rows.forEach(r=>{const d=el('div','ai-dr-row'); d.append(el('span','l',r.label),el('span','v',r.display_value)); body.append(d);});
 }
 async function openCustomer(code){
-  st.drawer=code; show($('.ai-drawer'),true);
+  if(!st.drawer) st.drawerOpener=document.activeElement;   // keyboard focus returns here on close
+  st.drawer=code; show($('.ai-drawer'),true); $('.ai-dr-x').focus();
   if(st.cust.has(code)){renderDrawer(code,st.cust.get(code)); return;}   // same customer again: no request
   drawerMsg(code,MSG.custLoading);
   let p=st.custPending.get(code);
@@ -734,7 +745,8 @@ async function openCustomer(code){
   if(st.drawer!==code) return;         // another customer was opened meanwhile
   if(data) renderDrawer(code,data); else drawerMsg(code,MSG.custFail,'err');
 }
-function closeDrawer(){st.drawer=null; show($('.ai-drawer'),false);}
+function closeDrawer(){st.drawer=null; show($('.ai-drawer'),false);
+  const o=st.drawerOpener; st.drawerOpener=null; if(o&&o.isConnected&&o.focus) o.focus();}
 
 // ---- action state (M5-3): done / defer / dismiss, server-confirmed, with a 5-second undo ----
 function isoLocal(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}

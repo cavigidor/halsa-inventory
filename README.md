@@ -58,6 +58,7 @@ Offline equivalent (no server needed; while the app runs, prefer the button so t
 ```bash
 python -m services.refresh                # exit 0 = refreshed, 1 = failed (nothing changed), 3 = another refresh running
 ```
+The refresh lock uses `flock`, so refresh is supported on macOS and Linux (not Windows).
 Main endpoints:
 - **Deterministic (never call the AI):** `/` (the generated dashboard), `/api/health` (including
   `context_ready`), `/api/context`, `/api/agent/categories`, `/api/agent/actions` (all open actions ranked
@@ -116,10 +117,13 @@ AI_PROVIDER=openai python scripts/live_smoke_test.py
 python -m pytest -q                 # standard suite: synthetic data, no key, no network
 python -m pytest -m local_data -q   # on the Mac only: real exports in ./data
 npm ci --prefix tests/js            # optional: enables the AI-tab DOM tests (Node 20+); skipped otherwise
+pip install -r requirements-dev.txt && python -m playwright install chromium   # optional: browser smoke tests
 ```
 The standard suite uses `tests/fixtures/synthetic_erp.py`, which contains invented customers,
 codes and amounts only. CI (`.github/workflows/tests.yml`) runs it on Python 3.12, with Node 22 and
-`REQUIRE_JS_TESTS=1` so the AI-tab DOM tests (`tests/js/`, jsdom) must run there.
+`REQUIRE_JS_TESTS=1` so the AI-tab DOM tests (`tests/js/`, jsdom) must run there, and with Chromium and
+`REQUIRE_BROWSER_TESTS=1` so the Playwright smoke tests (`tests/test_m5_browser.py`: the real app in a real
+browser, synthetic data, mock/disabled AI) must run too.
 
 ## Never commit
 Real Excel/CSV exports, `data/`, `dashboard.html` and other generated reports,
