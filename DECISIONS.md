@@ -363,3 +363,23 @@ Don't rewrite earlier entries. If one is superseded, add a new entry that says s
   intercepting responses at the browser boundary; the grounding pipeline is not weakened for tests.
 - **CI:** `python -m playwright install --with-deps chromium` and `REQUIRE_BROWSER_TESTS=1` (the tests fail instead
   of skipping). Locally they skip without Playwright/Chromium, like the jsdom tests without Node.
+
+### D-034 · 2026-10-13 · M6-0 technical facts that shape the M6 architecture
+Verified locally on the real exports (details and evidence in `docs/m6_source_inventory.md`):
+- **Sales grain:** the 2020–2026 sales report is at **sales-order line** grain (order document `sip_evrakno_seri` +
+  `sip_evrakno_sira` × `sto_kod`). Ordered = delivered + remaining + cancelled on 100 % of rows. There is no invoice
+  number and no native line number, so M6 uses a synthetic line key.
+- **Activity/source field:** `Srmmerk` (one label per order document, 100 % filled). Fair and order-source
+  attribution (D-025) is order-level and normalized by rule (edition year, event stem, type FUAR / ETKİNLİK /
+  SAHA, optional sequence; `GENEL` = no event).
+- **Identity:** D-003 is confirmed (Hedef revenue aggregates by `Pro_kodu`). `Pro_kodu` (order source) and
+  `Musterikod` (invoice account) are distinct concepts that share one code space, the customer master sheet
+  `liste` (`KODU`). Entity resolution keys on `KODU` with exact matching and match reports; customer attributes
+  (KAPALI, rep, sector) come from the master with a documented key, not from the sales file's cached lookups
+  (DQ-5).
+- **Workbook realism:** importers must handle formula cells with cached values, per-cell Excel errors, external
+  links, matrix/merged layouts and wrong header years explicitly. Each is a validation outcome, never a silent
+  coercion (DQ-4 shows the cost of silent coercion).
+- **Actual source files:** "kredi takip" = the ERP export `kredi sözleşmeleri.xlsx` (installment grain);
+  "bütçe" = `BUTCE_2026 <revision>.xlsx` (`invalid` until cell-level validation). The detailed collections report,
+  a CRM export and historical fair invitation/attendance lists were not located.

@@ -154,6 +154,9 @@ and 30/60/90-day financing commitments. It may later combine with receivables, s
 available), expected sales, inventory purchases and fair expenses into an owner cash-planning module.
 It is not put into salesperson workflows without a specific business need.
 
+> **M6-0 done (2026-10-13):** the verified technical inventory is `docs/m6_source_inventory.md` (D-034). The
+> sections below are the planning view; where they differ, the inventory's technical facts win.
+
 ### Proposed M6 sequence (each a bounded checkpoint; refined after M6-0)
 - **M6-0 Source inventory and technical verification** (docs only; real files read **locally**, never
   committed). For each source: headers, types, fill rates and value *shapes* (never values). In

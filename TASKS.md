@@ -1,18 +1,30 @@
 # TASKS.md — active backlog
 
 Rules: one *Current* task at a time. Each task must be executable in one bounded session.
-Milestone 5 is complete. M6 must not be started until M6-0 is moved to *Current*.
+Milestone 5 is complete. M6-0 is done; M6-1 must not be started until it is moved to *Current*.
 
 ## Current
-- [ ] **Review and merge the M5-6 PR** (`claude/m5-6-verification-polish`). Milestone 5 is then complete.
+- [ ] **Review and merge the M6-0 PR** (`claude/m6-0-source-inventory`, docs only).
 
 ## Next
 - [ ] **Owner: M5 check on the Mac** (`git pull`, refresh, open http://127.0.0.1:8000/, desktop + phone width).
   Steps in STATUS.md "Owner follow-ups".
 - [ ] **Owner: one live WhatsApp draft tone check** (at most one paid call, never sent). If the tone needs work,
   record it under Q-2.
-- [ ] **M6-0 Source inventory and technical verification** (docs only; see *Later* → M6). Start only when moved
-  to *Current*, after the owner decisions below.
+- [ ] **Owner: decisions and missing sources from M6-0** (`docs/m6_source_inventory.md` §16): provide the
+  `Evrak Detaylı Tahsilat Raporu` export, a CRM export if one exists, and the historical fair invitation/attendance
+  lists; decide the fair taxonomy (ETKİNLİK / SAHA), business-line mapping, revenue basis, salesperson of record,
+  Trodat mapping, Hedef/Bütçe file of record.
+- [ ] **M6-1 Importer framework** (requirements in `docs/m6_source_inventory.md` §17). Start only when moved to
+  *Current*.
+- [ ] **DQ-4: Stock coverage `#DIV/0!` rows are silently excluded.** In the stock export, `STOK Kontrol %` is
+  `#DIV/0!` for 1,178 of 3,314 products (5 Oct 2026 data); `m_stock` coerces errors to NaN and requires coverage,
+  so these products never appear in Azalan / Fazla Stok. Decide the rule (for example a separate "no coverage"
+  list); **needs owner approval** (changes dashboard lists).
+- [ ] **DQ-5: Sales `Temsilci` / `Açık / Kapalı` / `Sektör` are invoice-account lookups.** They are Excel XLOOKUPs
+  on `Musterikod` against the current `liste` sheet (cached values). `cust_attrs` applies them to the order-source
+  customer (`Pro_kodu`), and 10.6 % of order-source customers have several invoice accounts. M6-1 should source
+  these attributes from the master explicitly with a documented key; changing M5 behavior **needs owner approval**.
 - [ ] **DQ-1: Fix dashboard margin missing-cost handling.**
   `m_margin` uses `fillna(0)` on `Net_Tutar_Maliyet_Dusulmus`, so a missing cost counts as zero
   profit and margin is understated. Exclude rows without cost from both revenue and profit in
@@ -72,6 +84,10 @@ Milestone 5 is complete. M6 must not be started until M6-0 is moved to *Current*
   2020 should count, change `QUAL_YEARS` and that test together.
 
 ## Completed
+- [x] 2026-10-13 — M6-0 source inventory and technical verification (docs only): `docs/m6_source_inventory.md`,
+  D-034. Sales grain, identifiers, `Srmmerk` activity/source field, fair-attribution feasibility, Hedef, Trodat,
+  gider/gelir, kredi, Bütçe, fair files, CRM gap; DQ-4 and DQ-5 logged.
+- [x] 2026-10-13 — PR #10 (M5-6) merged into `main` (`b3e4e4a`); **Milestone 5 complete**.
 - [x] 2026-10-13 — **Milestone 5 — AI Aksiyon Merkezi: COMPLETE.** M5-6: Playwright smoke tests in CI (real
   FastAPI + Chromium, synthetic data, disabled/mock AI), hostile-text escaping at the browser boundary, action-state
   round trip across reloads, refresh smoke, `file://` mode, phone/desktop layout; small AI-tab responsive and focus
