@@ -221,7 +221,7 @@ def m_collections(path,df=None):
     return rows, owed_map
 
 # ---------- oluştur ----------
-def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None):
+def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True):
     """sources/frames (M5-5): a frozen source selection and the already-read raw frames, so a controlled
     refresh builds from exactly what it validated. stats_out (dict): filled with build totals for verification."""
     today=today or dt.date.today()
@@ -301,7 +301,7 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     meta={'date':d_tr,'stock':os.path.basename(sp) if sp else '','sales':os.path.basename(ep) if ep else '',
           'aging':os.path.basename(ap) if ap else '','tiers':tier_counts,'total':total,'has_aging':has_aging,
           'asof':_asof_iso(sdf)}
-    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel))
+    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel))
     if stats_out is not None:
         stats_out.update({'asof':meta['asof'],'overdue_total':overdue_total,'overstock_value':over_val,
                           'tabs':list(modules.keys()),'products':total,'lapsed':len(lap),'low':len(low),
@@ -843,7 +843,314 @@ def _ai_panel(meta):
     return btn,block
 
 
-def _html(modules,stats,meta,later,ai_panel=True):
+# ---------------- M7-1: Müşteri 360 tab (deterministic, read-only, server-driven) ----------------
+# One tab button + one panel, wrapped in markers like the AI tab so tests can prove the rest of the dashboard is
+# byte-identical without it. Everything comes from the local FastAPI app (GET /api/customer360/status|search|<code>);
+# nothing is fetched until the tab is opened, no AI endpoint is ever called, and all workbook text is set with
+# textContent / safe DOM APIs only (never innerHTML).
+_C360_CSS=r"""
+#c360 .c3-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 10px}
+#c360 .c3-chip{font-size:12px;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:3px 10px;color:var(--muted)}
+#c360 .c3-date{font-size:12px;color:var(--muted);margin-left:auto}
+#c360 .c3-q{flex:1;min-width:0;width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font:inherit;font-size:15px}
+#c360 .c3-state{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:8px 0 12px}
+#c360 .c3-state.off,#c360 .c3-state.err{border-color:#f3c4c4;background:#fdf3f3;color:#b42318;font-weight:600}
+#c360 .c3-state.wait{color:var(--muted)}
+#c360 .c3-warnbar{background:var(--warn-bg);border:1px solid #f5d9a8;color:var(--warn);border-radius:8px;padding:9px 12px;margin:0 0 10px;font-size:13px;font-weight:600}
+#c360 .c3-hint{font-size:12px;color:var(--muted);margin:6px 0}
+#c360 .c3-hits{display:flex;flex-direction:column;gap:6px;margin:6px 0 14px}
+#c360 .c3-hit{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;text-align:left;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:9px 12px;font:inherit;cursor:pointer;color:var(--ink);width:100%}
+#c360 .c3-hit:hover,#c360 .c3-hit.on{border-color:var(--ink)}
+#c360 .c3-hit-n{font-weight:700;flex:1 1 220px;min-width:0}
+#c360 .c3-hit-c,#c360 .c3-code{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:12px;color:var(--muted)}
+#c360 .c3-hit-d{font-size:12px;color:var(--muted)}
+#c360 .c3-kapali{font-size:10px;font-weight:800;letter-spacing:.04em;color:#fff;background:var(--crit);border-radius:4px;padding:1px 6px;margin-left:6px;vertical-align:2px}
+#c360 .c3-head{margin:4px 0 8px}
+#c360 .c3-name{font-size:20px;font-weight:800;letter-spacing:-.01em;margin:0}
+#c360 .c3-sub{font-size:12px;color:var(--muted)}
+#c360 .c3-warns{list-style:none;padding:0;margin:0 0 12px;display:flex;flex-direction:column;gap:6px}
+#c360 .c3-warns li{background:var(--warn-bg);border:1px solid #f5d9a8;color:var(--warn);border-radius:8px;padding:7px 11px;font-size:13px}
+#c360 .c3-srcs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+#c360 .c3-src{font-size:12px;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:5px 9px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+#c360 .c3-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr));gap:12px}
+#c360 .c3-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;min-width:0}
+#c360 .c3-card h4{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;margin:0 0 8px}
+#c360 .c3-kv{display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}
+#c360 .c3-kv .l{color:var(--muted);flex:0 1 auto;overflow-wrap:normal}#c360 .c3-kv .v{text-align:right;font-variant-numeric:tabular-nums;min-width:0}
+#c360 .c3-note{font-size:12px;color:var(--muted);margin:6px 0}
+#c360 .c3-scroll{overflow-x:auto;max-width:100%;margin:6px 0}
+#c360 table.c3-t{width:100%;border-collapse:collapse;font-size:12.5px;border:0;border-radius:0}
+#c360 table.c3-t th{cursor:default;padding:6px 8px;font-size:10.5px}
+#c360 table.c3-t td{padding:6px 8px;font-variant-numeric:tabular-nums}
+#c360 table.c3-t td.r,#c360 table.c3-t th.r{text-align:right;white-space:nowrap}
+#c360 table.c3-t td.nw{white-space:nowrap}
+#c360 .c3-badge{display:inline-block;font-size:10px;font-weight:700;border-radius:4px;padding:1px 6px;letter-spacing:.02em;white-space:nowrap;border:1px solid transparent}
+#c360 .c3-trusted{color:#1a7f4b;background:#f0faf4;border-color:#bfe3cf}
+#c360 .c3-unverified{color:#475467;background:#f2f4f7;border-color:#d0d5dd}
+#c360 .c3-incomplete{color:#92660a;background:#fef6e7;border-color:#f5d9a8}
+#c360 .c3-stale{color:#b45309;background:#fff4ed;border-color:#f9cfb0}
+#c360 .c3-invalid,#c360 .c3-unavailable{color:#b42318;background:#fdf3f3;border-color:#f3c4c4}
+#c360 .c3-shared{background:var(--warn-bg);border:1px solid #f5d9a8;color:var(--warn);border-radius:6px;padding:5px 8px;font-size:12px;margin-top:4px}
+#c360 .c3-types{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px}
+#c360 .c3-type{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+#c360 .c3-list{list-style:none;padding:0;margin:0}
+#c360 .c3-list li{padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}
+#c360 [hidden]{display:none!important}
+#c360 .c3-hit,#c360 .c3-name,#c360 .c3-warns li,#c360 .c3-state,#c360 .c3-kv .v,#c360 .c3-note{overflow-wrap:anywhere}
+#c360 table.c3-t td:not(.r):not(.nw){overflow-wrap:break-word;min-width:5.5em}
+@media(max-width:600px){#c360 .c3-date{margin-left:0;width:100%}#c360 .c3-grid{grid-template-columns:1fr}
+#c360 .c3-hit{min-height:44px}#c360 .c3-name{font-size:18px}}
+"""
+
+_C360_BODY="""
+<h2 class="sec">Müşteri 360</h2>
+<p class="note">Bir müşteriyi kod veya adla arayın: satış geçmişi, ana kayıt, fatura hesapları ve cari, Hedef, fuar/etkinlik geçmişi ve aksiyonlar tek görünümde. Tüm bilgiler Python ile hesaplanır; yapay zekâ kullanılmaz.</p>
+<div class="c3-bar"><span class="c3-chip c3-srv" hidden></span><span class="c3-date"></span></div>
+<div class="c3-warnbar" hidden></div>
+<div class="c3-state" role="status" hidden></div>
+<input class="c3-q" type="search" placeholder="Müşteri kodu veya adı (en az 2 karakter)" aria-label="Müşteri ara" autocomplete="off" disabled>
+<p class="c3-hint" role="status" aria-live="polite" hidden></p>
+<div class="c3-hits"></div>
+<div class="c3-detail" aria-live="polite"></div>
+"""
+
+_C360_JS=r"""
+(function(){
+'use strict';
+const root=document.getElementById('c360'), tabBtn=document.querySelector('.tab[data-t="c360"]');
+if(!root||!tabBtn) return;
+const ASOF=root.getAttribute('data-asof')||'';
+const POLL_MS=window.__C360_POLL_MS||2000, POLL_MAX=window.__C360_POLL_MAX||450;
+const DEBOUNCE_MS=window.__C360_DEBOUNCE_MS||250, LIMIT=20;
+const MSG={
+  file:'Müşteri 360 için panoyu http://127.0.0.1:8000/ üzerinden açın.',
+  offline:'Sunucu çalışmıyor. Terminalde uvicorn app:app --host 127.0.0.1 çalıştırıp http://127.0.0.1:8000 adresini açın. Diğer sekmeler normal çalışır.',
+  building:'Müşteri 360 hazırlanıyor… (ilk açılışta birkaç dakika sürebilir)',
+  slow:'Müşteri 360 hâlâ hazırlanıyor; biraz sonra sekmeyi yeniden açın.',
+  min:'En az 2 karakter yazın.',
+  none:'Eşleşen müşteri yok.',
+  more:'Daha fazla sonuç var; aramayı daraltın.',
+  loading:'Yükleniyor…',
+  fail:'Müşteri bilgileri yüklenemedi.',
+  searchFail:'Arama yapılamadı.',
+  notFound:'Müşteri bulunamadı.',
+  mismatch:'Pano ve Müşteri 360 farklı veri tarihleri kullanıyor; verileri yenileyin.'
+};
+const CONF={trusted:'Güvenilir',unverified:'Doğrulanmadı',incomplete:'Eksik kayıt olabilir',stale:'Eski veri',invalid:'Geçersiz',unavailable:'Yok'};
+const TYPES=[['general','Genel'],['fuar','Fuar'],['etkinlik','Etkinlik'],['saha','Saha']];
+const STATUS={open:'açık',completed:'tamamlandı',deferred:'ertelendi',ignored:'gizlendi'};
+const MASTER={matched:'eşleşti',unmatched:'eşleşmedi',duplicate:'çift kayıt',unavailable:'okunamadı'};
+const SRC={available:'var',ok:'var',matched:'eşleşti',unmatched:'eşleşmedi',duplicate:'çift kayıt',unavailable:'yok',
+  not_supplied:'sağlanmadı',not_configured:'yapılandırılmadı',failed:'okunamadı'};
+const AY=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+const st={started:false,ready:false,seq:0,dseq:0,timer:null,code:null};
+const $=s=>root.querySelector(s);
+function el(tag,cls,text){const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=String(text); return e;}
+function show(n,on){n.hidden=!on;}
+function state(t,k){const n=$('.c3-state'); n.textContent=t||''; n.className='c3-state'+(k?' '+k:''); show(n,!!t);}
+function hint(t){const n=$('.c3-hint'); n.textContent=t||''; show(n,!!t);}
+function fmtDate(iso){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||'')); return m?(+m[3])+' '+AY[+m[2]-1]+' '+m[1]:'—';}
+function fmtMoney(v){return (v==null||!Number.isFinite(Number(v)))?'—':'₺'+Math.round(Number(v)).toLocaleString('tr-TR');}
+function fmtNum(v){return (v==null||!Number.isFinite(Number(v)))?'—':Number(v).toLocaleString('tr-TR',{maximumFractionDigits:2});}
+function fmtPct(v){return (v==null||!Number.isFinite(Number(v)))?'—':'%'+(Number(v)*100).toLocaleString('tr-TR',{maximumFractionDigits:1});}
+function badge(conf){const c=CONF[conf]?conf:'unavailable'; const b=el('span','c3-badge c3-'+c,CONF[c]); b.dataset.conf=c; return b;}
+async function getJSON(url){
+  const r=await fetch(url,{headers:{'Accept':'application/json'}}); let body=null;
+  try{body=await r.json();}catch(e){body=null;}
+  if(!r.ok){const e=new Error('HTTP '+r.status); e.status=r.status; e.body=body; throw e;} return body;}
+function kv(label,value,conf){const d=el('div','c3-kv'), v=el('span','v'); v.append(document.createTextNode(value==null||value===''?'—':String(value)));
+  if(conf){v.append(document.createTextNode(' ')); v.append(badge(conf));} d.append(el('span','l',label),v); return d;}
+function table(cols,rows){   // cols: [[label, right-aligned?]], rows: arrays of strings or Nodes
+  const w=el('div','c3-scroll'), t=el('table','c3-t'), th=el('thead'), tr=el('tr');
+  cols.forEach(([l,r])=>tr.append(el('th',r?'r':null,l))); th.append(tr); t.append(th);
+  const tb=el('tbody');
+  rows.forEach(row=>{const x=el('tr'); row.forEach((c,i)=>{const td=el('td',cols[i][1]?'r':null);
+    if(cols[i][2]) td.classList.add('nw');
+    if(c instanceof Node) td.append(c); else td.textContent=c==null?'—':String(c); x.append(td);}); tb.append(x);});
+  if(!rows.length){const x=el('tr'), td=el('td',null,'Kayıt yok.'); td.colSpan=cols.length; x.append(td); tb.append(x);}
+  t.append(tb); w.append(t); return w;}
+function card(title){const c=el('section','c3-card'); c.append(el('h4',null,title)); return c;}
+
+function start(){
+  if(st.started) return; st.started=true;
+  if(location.protocol==='file:'){state(MSG.file,'off'); return;}   // the API is same-origin only
+  pollStatus(0);
+}
+async function pollStatus(n){
+  let s;
+  try{s=await getJSON('/api/customer360/status');}catch(e){state(MSG.offline,'off'); return;}
+  const srv=$('.c3-srv'); srv.textContent='● Sunucu bağlı'; show(srv,true);
+  if(s.state==='ready'){ready(s); return;}
+  if(s.state==='error'){state(s.message||MSG.fail,'err'); return;}
+  state(n<POLL_MAX?MSG.building:MSG.slow,'wait');
+  if(n<POLL_MAX) setTimeout(()=>pollStatus(n+1),POLL_MS);
+}
+function ready(s){
+  st.ready=true; state('');
+  $('.c3-date').textContent=s.as_of_data_date?'Veri: '+fmtDate(s.as_of_data_date):'';
+  const w=$('.c3-warnbar');
+  if(ASOF&&s.as_of_data_date&&ASOF!==s.as_of_data_date){w.textContent=MSG.mismatch+' (pano: '+fmtDate(ASOF)+' · sunucu: '+fmtDate(s.as_of_data_date)+')'; show(w,true);}
+  else show(w,false);
+  const q=$('.c3-q'); q.disabled=false; q.focus();
+}
+function onInput(){clearTimeout(st.timer); st.timer=setTimeout(()=>search($('.c3-q').value),DEBOUNCE_MS);}
+async function search(q){
+  const box=$('.c3-hits'); const my=++st.seq;
+  if(String(q).trim().length<2){box.replaceChildren(); hint(String(q).trim()?MSG.min:''); return;}
+  let res;
+  try{res=await getJSON('/api/customer360/search?q='+encodeURIComponent(q)+'&limit='+LIMIT);}
+  catch(e){if(my===st.seq){box.replaceChildren(); hint(MSG.searchFail);} return;}
+  if(my!==st.seq) return;   // an older response arriving late is ignored
+  box.replaceChildren();
+  const hits=Array.isArray(res.results)?res.results:[];
+  hint(!hits.length?MSG.none:(res.truncated?MSG.more:''));
+  hits.forEach(h=>{const b=el('button','c3-hit'+(h.customer_code===st.code?' on':'')); b.type='button'; b.dataset.code=h.customer_code;
+    const n=el('span','c3-hit-n',h.display_name); if(h.closed===true) n.append(el('span','c3-kapali','KAPALI'));
+    b.append(n,el('span','c3-hit-c',h.customer_code),el('span','c3-hit-d','son sipariş: '+fmtDate(h.last_order_date)));
+    b.addEventListener('click',()=>openCustomer(h.customer_code)); box.append(b);});
+}
+async function openCustomer(code){
+  st.code=code; const my=++st.dseq;
+  root.querySelectorAll('.c3-hit').forEach(b=>b.classList.toggle('on',b.dataset.code===code));
+  const d=$('.c3-detail'); d.replaceChildren(el('p','c3-note',MSG.loading));
+  let data;
+  try{data=await getJSON('/api/customer360/'+encodeURIComponent(code));}
+  catch(e){if(my===st.dseq) d.replaceChildren(el('p','c3-state err',e.status===404?MSG.notFound:MSG.fail)); return;}
+  if(my!==st.dseq) return;   // another customer was selected meanwhile
+  renderDetail(data);
+}
+
+function renderDetail(x){
+  const d=$('.c3-detail'); d.replaceChildren();
+  const id=x.identity||{}, m=x.master||{};
+  const head=el('div','c3-head'), nm=el('h3','c3-name',id.display_name||x.customer_code);
+  if(m.closed===true) nm.append(el('span','c3-kapali','KAPALI'));
+  head.append(nm, el('div','c3-sub c3-code',x.customer_code));
+  d.append(head);
+  const ws=Array.isArray(x.warnings)?x.warnings:[];
+  if(ws.length){const ul=el('ul','c3-warns'); ws.forEach(w=>{const li=el('li',null,w.message); li.dataset.code=w.code; ul.append(li);}); d.append(ul);}
+  const srcs=el('div','c3-srcs');
+  (x.sources||[]).forEach(s=>{const c=el('span','c3-src'); c.dataset.key=s.key; c.append(el('b',null,s.label),el('span',null,SRC[s.status]||s.status),badge(s.confidence));
+    if(s.as_of) c.append(el('span',null,fmtDate(s.as_of))); srcs.append(c);});
+  d.append(srcs);
+  const g=el('div','c3-grid'); d.append(g);
+  g.append(identityCard(x), salesCard(x.sales||{}), productsCard(x.products||{}), receivablesCard(x.receivables||{}),
+           hedefCard(x.hedef||{}), eventsCard(x.events||{}), activityCard(x.activity||{}));
+}
+function identityCard(x){
+  const c=card('Kimlik'), id=x.identity||{}, m=x.master||{};
+  c.dataset.sec='identity';
+  c.append(kv('Müşteri kodu',x.customer_code,'trusted'));
+  const src={master:'ana kayıt adı',sales_project:'satış raporu (ProjeIsmi)',invoice_account:'fatura hesabı adı (D-003 yedeği)',code:'kod'};
+  c.append(kv('Görünen ad kaynağı',src[id.display_name_source]||id.display_name_source));
+  c.append(kv('Ana kayıt',MASTER[m.status]||m.status));
+  c.append(kv('Ana kayıt adı',m.name&&m.name.value,m.name&&m.name.confidence));
+  c.append(kv('Cari firma (açık/kapalı)',m.status_raw&&m.status_raw.value,m.status_raw&&m.status_raw.confidence));
+  c.append(kv('Sektör',m.sector&&m.sector.value,m.sector&&m.sector.confidence));
+  c.append(el('p','c3-note','Satış temsilcisi kavramları ayrı gösterilir; hiçbiri "kayıtlı satıcı" olarak seçilmez.'));
+  (x.salespeople||[]).forEach(p=>c.append(kv(p.label,(p.values||[]).join(', '),p.confidence)));
+  return c;
+}
+function salesCard(s){
+  const c=card('Satış geçmişi'); c.dataset.sec='sales';
+  c.append(kv('İlk sipariş',fmtDate(s.first_order_date),s.confidence), kv('Son sipariş',fmtDate(s.last_order_date),s.confidence),
+           kv('Sipariş sayısı (belge)',fmtNum(s.orders)), kv('Aktif yıllar',(s.active_years||[]).join(', ')),
+           kv(s.current_year+' siparişi',s.has_current_year_orders?'var':'yok'),
+           kv('Son '+s.recent_window_days+' günde sipariş',fmtNum(s.recent_orders)),
+           kv('Toplam '+(s.amount_label||''),fmtMoney(s.total_net_order_amount)));
+  const rows=(s.years||[]).map(y=>[String(y.year),fmtMoney(y.net_order_amount),fmtNum(y.quantity),fmtNum(y.orders)]);
+  c.append(table([['Yıl',0,1],['Nettutar',1],['Miktar',1],['Sipariş',1]],rows));
+  c.append(el('p','c3-note',s.amount_note||''));
+  if(s.zero_amount_lines) c.append(el('p','c3-note',s.zero_amount_lines+' satırda tutar kayıtlı olarak 0.'));
+  if(s.missing_amount_lines) c.append(el('p','c3-note',s.missing_amount_lines+' satırda tutar boş (sıfır sayılmadı).'));
+  return c;
+}
+function productsCard(p){
+  const c=card('Ürünler / kategoriler'); c.dataset.sec='products';
+  const rows=(p.top||[]).map(r=>{const n=el('span'); n.append(el('div',null,r.name||r.sku),el('div','c3-code',r.sku)); 
+    return [n,fmtMoney(r.net_order_amount),fmtNum(r.quantity),fmtNum(r.orders),fmtDate(r.last_order_date)];});
+  c.append(el('p','c3-note','İlk '+p.limit+' ürün, '+(p.amount_label||'tutar')+' sırasıyla.'));
+  c.append(table([['Ürün'],['Tutar',1],['Miktar',1],['Sipariş',1],['Son',1]],rows));
+  const mix=(title,list)=>{c.append(el('p','c3-note',title));
+    c.append(table([['Etiket'],['Tutar',1],['Pay',1],['Satır',1]],(list||[]).map(r=>[r.label,fmtMoney(r.net_order_amount),fmtPct(r.share),fmtNum(r.lines)])));};
+  mix('Kategori (kategori)',p.categories); mix('Ana grup (anagrup)',p.groups);
+  return c;
+}
+function receivablesCard(r){
+  const c=card('Cari / alacak'); c.dataset.sec='receivables';
+  c.append(el('p','c3-note','Sipariş müşterisi (Pro_kodu) ile fatura hesabı (Musterikod) ayrı kavramlardır. Alacak fatura hesabı düzeyindedir.'));
+  (r.accounts||[]).forEach(a=>{
+    const box=el('div','c3-acc'); box.dataset.account=a.account_code;
+    box.append(kv('Fatura hesabı',a.account_code+(a.account_name?' · '+a.account_name:'')));
+    box.append(kv('Bu hesaptan sipariş',fmtNum(a.orders)+' · '+fmtMoney(a.net_order_amount)));
+    if(!a.aging||!a.aging.available) box.append(kv('Vadesi geçen bakiye','cari dosyası yok','unavailable'));
+    else if(!a.aging.present_in_file) box.append(kv('Vadesi geçen bakiye','cari dosyasında hesap yok',a.aging.confidence));
+    else{box.append(kv('Vadesi geçen bakiye (hesap)',fmtMoney(a.aging.overdue),a.aging.confidence));
+      box.append(kv('En eski dolu yaş dilimi',a.aging.oldest_bucket||'—'));}
+    if(a.shared){const s=el('div','c3-shared',a.warning); s.dataset.shared='1'; box.append(s);}
+    c.append(box);
+  });
+  (r.limitations||[]).forEach(t=>c.append(el('p','c3-note',t)));
+  return c;
+}
+function hedefCard(h){
+  const c=card('Hedef bilgileri'); c.dataset.sec='hedef'; c.dataset.status=h.status||'';
+  const text={not_configured:'Hedef dosyası yapılandırılmadı (HEDEF_PATH). Diğer bölümler normal çalışır.',
+    failed:'Hedef dosyası yapılandırılmış ama okunamadı; diğer bölümler etkilenmedi.',
+    unmatched:'Bu müşteri yapılandırılan Hedef dosyasında birebir kodla bulunamadı.'};
+  if(h.status!=='matched'){c.append(el('p','c3-note c3-hedef-state',text[h.status]||h.status)); return c;}
+  c.append(kv('Dosya',(h.file||'—')+(h.snapshot_date?' · '+fmtDate(h.snapshot_date):' · anlık görüntü tarihi bilinmiyor')));
+  (h.fields||[]).forEach(f=>{const row=kv(f.label,(typeof f.value==='number')?fmtNum(f.value):f.value,f.confidence); row.dataset.key=f.key; c.append(row);
+    if(f.note&&(f.confidence==='stale'||f.confidence==='incomplete')) c.append(el('p','c3-note',f.note));});
+  c.append(table([['Yıl',0,1],['Kaşe adedi',1],['Kaynakta net ciro',1]],(h.years||[]).map(y=>{
+    const a=el('span'); a.append(document.createTextNode(fmtNum(y.stamp_qty.value)+' '),badge(y.stamp_qty.confidence));
+    const b=el('span'); b.append(document.createTextNode(fmtMoney(y.reported_net_revenue.value)+' '),badge(y.reported_net_revenue.confidence));
+    return [String(y.year),a,b];})));
+  (h.notes||[]).forEach(t=>c.append(el('p','c3-note',t)));
+  return c;
+}
+function eventsCard(e){
+  const c=card('Fuar / etkinlik geçmişi'); c.dataset.sec='events';
+  if(e.status!=='ok'){c.append(el('p','c3-note','Sipariş kaynağı verisi okunamadı.')); return c;}
+  const ty=el('div','c3-types'); const ob=e.orders_by_type||{}, de=e.distinct_events_by_type||{};
+  TYPES.forEach(([k,l])=>{const t=el('span','c3-type',l+': '+fmtNum(ob[k]||0)+' sipariş'+(k!=='general'?' · '+fmtNum(de[k]||0)+' etkinlik':'')); t.dataset.type=k; ty.append(t);});
+  c.append(ty, badge(e.confidence));
+  c.append(table([['Tarih',0,1],['Tür'],['Dönem yılı',1],['Etkinlik']],(e.recent||[]).map(r=>[fmtDate(r.order_date),
+    (TYPES.find(t=>t[0]===r.source_type)||[0,r.source_type])[1],r.edition_year==null?'—':String(r.edition_year),r.event_name||'—'])));
+  c.append(el('p','c3-note',e.note||''));
+  return c;
+}
+function activityCard(a){
+  const c=card('Aksiyonlar ve geçmiş'); c.dataset.sec='activity';
+  const row=x=>[x.title||x.action_id,x.category_label||x.category||'—',STATUS[x.status]||x.status||'—',
+    x.defer_until?fmtDate(x.defer_until):(x.completed_at?fmtDate(x.completed_at):'')];
+  c.append(el('p','c3-note','Güncel aksiyonlar (Python kuyruğu)'));
+  c.append(table([['Aksiyon'],['Kategori'],['Durum'],['Tarih']],(a.current_actions||[]).map(row)));
+  c.append(el('p','c3-note','Kayıtlı geçmiş aksiyonlar'));
+  c.append(table([['Aksiyon'],['Kategori'],['Durum'],['Tarih']],(a.stored_actions||[]).map(row)));
+  c.append(el('p','c3-note','Takip notları (salt okunur)'));
+  const ul=el('ul','c3-list'); (a.memory||[]).forEach(m=>ul.append(el('li',null,fmtDate(m.ts)+' · '+(m.kind||'')+' · '+(m.detail||''))));
+  if(!(a.memory||[]).length) ul.append(el('li','c3-note','Kayıt yok.'));
+  c.append(ul);
+  return c;
+}
+
+tabBtn.addEventListener('click',start);   // lazy: nothing is fetched until the tab is opened
+$('.c3-q').addEventListener('input',onInput);
+})();
+"""
+
+def _c360_panel(meta):
+    """(tab button, panel block) for Müşteri 360, wrapped in markers like the AI tab."""
+    asof=html.escape(str(meta.get('asof') or ''),quote=True)
+    btn='<button class="tab" data-t="c360">Müşteri 360</button>'
+    block=('\n<!--C360-TAB-START-->\n<style>'+_C360_CSS+'</style>\n'
+           f'<div id="c360" class="panel" data-asof="{asof}">'+_C360_BODY+'</div>\n'
+           '<script>'+_C360_JS+'</script>\n<!--C360-TAB-END-->')
+    return btn,block
+
+
+def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True):
     blob=json.dumps(modules,ensure_ascii=False).replace('</','<\\/')
     tabs=['overview']+list(modules.keys())
     tabbtns=''.join(f'<button class="tab" data-t="{t}">{("Genel Bakış" if t=="overview" else modules[t]["title"])}'
@@ -852,6 +1159,7 @@ def _html(modules,stats,meta,later,ai_panel=True):
     laterlist=''.join(f'<li>{html.escape(x)}</li>' for x in later)
     src=f"Stok: {meta['stock']} · Satış: {meta['sales']}"+(f" · Alacaklar: {meta['aging']}" if meta['has_aging'] else '')
     ai_btn,ai_block=_ai_panel(meta) if ai_panel else ('','')
+    c3_btn,c3_block=_c360_panel(meta) if c360_panel else ('','')
     return f"""<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Şirket Panosu — {meta['date']}</title>
 <style>
@@ -913,7 +1221,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <header><div class="eyebrow">Şirket Panosu</div>
 <h1>Şirket Panosu — {meta['date']}</h1>
 <div class="sub">{src} · {meta['total']:,} ürün</div></header>
-<div class="tabs">{tabbtns}{ai_btn}</div>
+<div class="tabs">{tabbtns}{c3_btn}{ai_btn}</div>
 <div id="overview" class="panel on">
 <h2 class="sec">Aktif Analizler</h2>
 <p class="note">İlk istediğiniz ikisi — <b>stok uyarıları</b> (azalan + fazla) ve <b>kayıp müşteriler</b> (geri kazanım) — çalışıyor. Gezinmek, aramak ve sıralamak için yukarıdaki sekmelere tıklayın. Her şey doğrudan tablolarınızdan hesaplanır: filtreleme, müşteri ve stok kodu üzerinden birleştirme ve aritmetik — hiçbir şey tahmin değil.</p>
@@ -923,7 +1231,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <p class="note">Hazır olduğunuzda açabileceğimiz, tamamen gerçeğe dayalı diğer analizler — her biri yalnızca ilgili sayfanın <code>data</code> klasöründe olmasını ister, sonra kendi sekmesi olur. Yapay zekâ yok, bunlarla aynı.</p>
 <ul class="later">{laterlist}</ul>
 </div>
-<div id="panels"></div>{ai_block}
+<div id="panels"></div>{c3_block}{ai_block}
 <script>
 const DATA={blob};
 const fmtMoney=v=>'₺'+Math.round(v).toLocaleString('tr-TR');
