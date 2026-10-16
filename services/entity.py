@@ -108,6 +108,8 @@ class ContextRepository:
                   overdue=r.get("overdue"), oldest_overdue=r.get("oldest"),
                   collections_score=r.get("priority_score"),
                   revenue_25_26=r.get("revenue_25_26"), still_active=r.get("still_active"))
+        for r in extra.get("customers", []):   # M7-3: code + sales name of cross-sell-only queue customers
+            merge(r["code"], name=r["name"])
         for r in risk:
             merge(r["code"], name=r["name"], rep=r.get("rep"), overdue=r.get("overdue"),
                   revenue_25_26=r.get("rev"), still_ordering_2026=(r.get("active") == "Evet"),

@@ -67,9 +67,10 @@ def card(q, code):
 
 
 def _old_produce_all(inputs, limit=None):
-    """The pre-M7-2 implementation of actions.produce_all, copied verbatim (regression reference)."""
+    """The pre-M7-2 implementation of actions.produce_all, copied verbatim (regression reference), over the four
+    pre-M7-3 sources (M7-3 registers the sales-queue-only cross-sell source after them)."""
     acts = []
-    for s in A._SOURCES:
+    for s in [x for x in A._SOURCES if x.name != "cross_sell_anagrup"]:
         for a in s.produce(inputs) or []:
             a.setdefault("source", s.name)
             acts.append(A.validate(a))
@@ -81,10 +82,10 @@ def _capture_inputs(monkeypatch, folder):
     seen = {}
     real = CTX.build_action_candidates
 
-    def spy(ctx, coll_scored, over_cand, lap, shrink_real_neg, infl):
+    def spy(ctx, coll_scored, over_cand, lap, shrink_real_neg, infl, cross_sell=None):
         seen["inputs"] = {"ctx": ctx, "coll_scored": coll_scored, "over_cand": over_cand, "lap": lap,
-                          "shrink_real_neg": shrink_real_neg, "infl": infl}
-        return real(ctx, coll_scored, over_cand, lap, shrink_real_neg, infl)
+                          "shrink_real_neg": shrink_real_neg, "infl": infl, "cross_sell": cross_sell}
+        return real(ctx, coll_scored, over_cand, lap, shrink_real_neg, infl, cross_sell=cross_sell)
     monkeypatch.setattr(CTX, "build_action_candidates", spy)
     built = CTX.build_context(folder, inflation_rate=0.40)
     return built, seen["inputs"]
@@ -125,11 +126,16 @@ def test_03_m5_top15_unchanged(which, monkeypatch, data_dir, synthetic_dir):
 
 
 def test_04_candidate_pool_bounded(monkeypatch, data_dir):
-    monkeypatch.setattr(C, "MAX_SALES_QUEUE_CANDIDATES", 3)
+    monkeypatch.setattr(C, "MAX_SALES_QUEUE_CANDIDATES_PER_CATEGORY", 1)    # M7-3: the bound is per category
     small = CTX.build_context(data_dir, inflation_rate=0.40)
-    assert len(small.sales_queue_candidates) == 3
-    full = [a for a in CTX.build_context(data_dir, inflation_rate=0.40).sales_queue_candidates]
-    assert [a["action_id"] for a in small.sales_queue_candidates] == [a["action_id"] for a in full[:3]]
+    full = CTX.build_context(data_dir, inflation_rate=0.40).sales_queue_candidates
+    cats = [a["category"] for a in small.sales_queue_candidates]
+    assert sorted(cats) == sorted({a["category"] for a in full}) and len(cats) == len(set(cats))
+    best = {}
+    for a in full:
+        best.setdefault(a["category"], a["action_id"])
+    assert [a["action_id"] for a in small.sales_queue_candidates] == [a["action_id"] for a in full
+                                                                       if best[a["category"]] == a["action_id"]]
     assert isinstance(small.sales_queue_candidates, tuple)              # immutable once built
 
 
@@ -516,7 +522,8 @@ def test_32_typed_response(client):
     for k in ("customer_code", "display_name", "last_order_date", "closed", "queue_score", "priority",
               "collection_first", "primary_action_id", "reasons", "warnings", "draft"):
         assert k in it
-    assert [f["key"] for f in b["filters"]] == ["all", "collection_first", "collections", "winback", "real_decline"]
+    assert [f["key"] for f in b["filters"]] == ["all", "collection_first", "collections", "winback", "real_decline",
+                                                "cross_sell"]
     assert [f["label"] for f in b["filters"]][:2] == ["Tümü", "Tahsilat önce"]
     S = APP.S
     S.SalesQueueResponse(**b)
@@ -547,7 +554,7 @@ def test_34_bounded_limit_and_filters(client):
     assert {k["customer_code"] for k in rd["items"]} == {Q1, Q9}
     assert cl.get("/api/sales-queue", params={"filter": "bogus"}).json()["filter"] == "all"
     assert cf["filter_counts"] == {"all": 6, "collection_first": 2, "collections": 2, "winback": 3,
-                                   "real_decline": 2}
+                                   "real_decline": 2, "cross_sell": 0}
 
 
 def test_35_building_state(client, data_dir, ctx):
@@ -743,11 +750,11 @@ def test_no_excel_read_on_queue_or_state(client, ctx, monkeypatch):
 
 def test_no_new_rules_or_categories():
     src = open(os.path.join(ROOT, "services", "sales_queue.py"), encoding="utf-8").read()
-    for banned in ("cross_sell", "cross-sell", "penetration", "potential", "territory", "fair_invite_due",
+    for banned in ("penetration", "potential", "territory", "fair_invite_due",
                    "new_buyer", "growth", "salesperson", "Hedef", "hedef", "read_excel", "openpyxl", "THRESHOLD"):
         assert banned not in src
-    assert set(SQ.QUEUE_CATEGORIES) == {"collections", "winback", "real_decline"}
-    assert {c.key for c in A.categories()} >= set(SQ.QUEUE_CATEGORIES)
+    assert set(SQ.QUEUE_CATEGORIES) == {"collections", "winback", "real_decline", "cross_sell"}   # M7-3 adds one
+    assert set(SQ.QUEUE_CATEGORIES) == {c.key for c in A.categories(A.SURFACE_SALES_QUEUE)}
 
 
 @pytest.fixture(scope="module")
@@ -772,7 +779,7 @@ def test_tab_before_c360_rest_byte_identical(built):
     assert with_sq.count(SQ_BUTTON) == 1 and with_sq.count('<div id="sq" class="panel"') == 1
     assert with_sq.replace(SQ_BUTTON, "", 1).replace(_sq_block(with_sq), "", 1) == without
     tabs = re.findall(r'<button class="tab" data-t="([a-z0-9]+)"', with_sq)
-    assert tabs[-3:] == ["sq", "c360", "ai"]
+    assert tabs[-4:] == ["sq", "c360", "opp", "ai"]
     assert "Bugün kimi aramalıyım?" in _sq_block(with_sq)
 
 

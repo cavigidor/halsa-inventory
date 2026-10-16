@@ -221,7 +221,7 @@ def m_collections(path,df=None):
     return rows, owed_map
 
 # ---------- oluştur ----------
-def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True):
+def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True,opp_panel=True):
     """sources/frames (M5-5): a frozen source selection and the already-read raw frames, so a controlled
     refresh builds from exactly what it validated. stats_out (dict): filled with build totals for verification."""
     today=today or dt.date.today()
@@ -301,7 +301,7 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     meta={'date':d_tr,'stock':os.path.basename(sp) if sp else '','sales':os.path.basename(ep) if ep else '',
           'aging':os.path.basename(ap) if ap else '','tiers':tier_counts,'total':total,'has_aging':has_aging,
           'asof':_asof_iso(sdf)}
-    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel))
+    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel,opp_panel=opp_panel))
     if stats_out is not None:
         stats_out.update({'asof':meta['asof'],'overdue_total':overdue_total,'overstock_value':over_val,
                           'tabs':list(modules.keys()),'products':total,'lapsed':len(lap),'low':len(low),
@@ -872,6 +872,10 @@ _C360_CSS=r"""
 #c360 .c3-warns li{background:var(--warn-bg);border:1px solid #f5d9a8;color:var(--warn);border-radius:8px;padding:7px 11px;font-size:13px}
 #c360 .c3-srcs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
 #c360 .c3-src{font-size:12px;border:1px solid var(--line);background:var(--card);border-radius:8px;padding:5px 9px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+#c360 .c3-opp{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:0 0 8px}
+#c360 .c3-opp-h{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 4px}
+#c360 .c3-opp-tag{font-size:10px;font-weight:800;letter-spacing:.04em;color:#047857;border:1px solid #a7d7c5;background:#ecfdf5;border-radius:4px;padding:1px 6px}
+#c360 .c3-opp-t{overflow-wrap:anywhere;min-width:0}
 #c360 .c3-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr));gap:12px}
 #c360 .c3-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;min-width:0}
 #c360 .c3-card h4{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;margin:0 0 8px}
@@ -1034,7 +1038,8 @@ function renderDetail(x){
     if(s.as_of) c.append(el('span',null,fmtDate(s.as_of))); srcs.append(c);});
   d.append(srcs);
   const g=el('div','c3-grid'); d.append(g);
-  g.append(identityCard(x), salesCard(x.sales||{}), productsCard(x.products||{}), receivablesCard(x.receivables||{}),
+  g.append(identityCard(x), salesCard(x.sales||{}), productsCard(x.products||{}), opportunitiesCard(x.opportunities||{}),
+           receivablesCard(x.receivables||{}),
            hedefCard(x.hedef||{}), eventsCard(x.events||{}), activityCard(x.activity||{}));
 }
 function identityCard(x){
@@ -1074,6 +1079,25 @@ function productsCard(p){
   const mix=(title,list)=>{c.append(el('p','c3-note',title));
     c.append(table([['Etiket'],['Tutar',1],['Pay',1],['Satır',1]],(list||[]).map(r=>[r.label,fmtMoney(r.net_order_amount),fmtPct(r.share),fmtNum(r.lines)])));};
   mix('Kategori (kategori)',p.categories); mix('Ana grup (anagrup)',p.groups);
+  return c;
+}
+function opportunitiesCard(o){   // M7-3: deterministic cross-sell at the anagrup (group) level; never a SKU or money
+  const c=card('Fırsatlar'); c.dataset.sec='opportunities'; c.dataset.status=o.status||'';
+  c.append(el('p','c3-note',(o.label||'Ürün kapsam fırsatı')+' · '+(o.dimension_label||'Ana grup')+' · son '+(o.recent_window_days||365)+' gün'));
+  if(o.status==='unavailable'){c.append(el('p','c3-note c3-opp-state','Fırsat modeli şu anda kullanılamıyor.')); return c;}
+  if(o.status!=='available'){c.append(el('p','c3-note c3-opp-state','Bu müşteri için çapraz satış adayı yok.'));}
+  (o.items||[]).forEach(it=>{
+    const box=el('div','c3-opp'); box.dataset.target=it.target_group;
+    const h=el('div','c3-opp-h'); h.append(el('span','c3-opp-tag','Çapraz satış adayı'), el('b','c3-opp-t',it.target_group));
+    box.append(h);
+    box.append(kv('En güçlü kaynak grup',it.source_group));
+    box.append(kv('Birlikte görülme oranı',fmtPct(it.confidence)+' ('+fmtNum(it.pair_buyers)+' / '+fmtNum(it.source_buyers)+' aktif müşteri)'));
+    box.append(kv('Lift',fmtNum(it.lift)));
+    if((it.supporting_sources||[]).length) box.append(kv('Diğer kaynak gruplar',it.supporting_sources.join(', ')));
+    const nv=el('p','c3-note c3-opp-never','Bu müşteri bu gruptan satış geçmişinde hiç alım yapmadı.'); nv.dataset.never='1'; box.append(nv);
+    c.append(box);
+  });
+  (o.notes||[]).forEach(t=>c.append(el('p','c3-note',t)));
   return c;
 }
 function receivablesCard(r){
@@ -1395,6 +1419,8 @@ async function copy(code){const d=st.draft[code]; let ok=false;
   d.copy=ok?'ok':'fail'; replace(code);}
 
 tabBtn.addEventListener('click',start);   // lazy: nothing is fetched until the tab is opened
+// M7-3 deep link: Fırsatlar opens this tab on one server-side filter (e.g. cross_sell). Deterministic GET, no AI.
+window.StockAgentSQ={show:function(f){const was=st.started; st.filter=String(f||'all'); tabBtn.click(); if(was&&location.protocol!=='file:') load(0);}};
 })();
 """
 
@@ -1408,7 +1434,144 @@ def _sq_panel(meta):
     return btn,block
 
 
-def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True):
+# ---------------- M7-3: Fırsatlar tab (read-only opportunity intelligence, server-driven) ----------------
+# Cross-sell model summary, strongest group relationships and descriptive (unverified) Hedef territory counts, all from
+# GET /api/opportunities/*. No customer list here (that is Günlük Satış); no AI; all text via textContent.
+_OPP_CSS=r"""
+#opp .op-state{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:8px 0 12px}
+#opp .op-state.off,#opp .op-state.err{border-color:#f3c4c4;background:#fdf3f3;color:#b42318;font-weight:600}
+#opp .op-sec{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:0 0 12px;min-width:0}
+#opp .op-sec h3{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;margin:0 0 8px}
+#opp .op-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:8px;margin:0 0 10px}
+#opp .op-tile{border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-width:0}
+#opp .op-tile .n{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+#opp .op-tile .l{font-size:12px;color:var(--muted)}
+#opp .op-th,#opp .op-note,#opp .op-cov{font-size:12px;color:var(--muted);margin:6px 0}
+#opp .op-btn{border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-size:12px;font-weight:600;padding:6px 11px;border-radius:8px;cursor:pointer}
+#opp .op-btn.pri{background:var(--ink);border-color:var(--ink);color:#fff}
+#opp .op-btn.on{background:var(--ink);border-color:var(--ink);color:#fff}
+#opp .op-dims{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 8px}
+#opp .op-badge{font-size:10px;font-weight:700;border-radius:4px;padding:1px 6px;color:#92660a;background:#fef6e7;border:1px solid #f5d9a8}
+#opp .op-warn{background:var(--warn-bg);border:1px solid #f5d9a8;color:var(--warn);border-radius:8px;padding:7px 10px;font-size:13px;margin:0 0 8px}
+#opp .op-scroll{overflow-x:auto;max-width:100%;-webkit-overflow-scrolling:touch}
+#opp table.op-t{border-collapse:collapse;width:100%;font-size:13px}
+#opp table.op-t th,#opp table.op-t td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+#opp table.op-t td.r,#opp table.op-t th.r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+#opp table.op-t td.t{min-width:140px;overflow-wrap:break-word}
+#opp [hidden]{display:none!important}
+@media(max-width:600px){#opp .op-btn{min-height:36px}}
+"""
+
+_OPP_BODY="""
+<h2 class="sec">Fırsatlar</h2>
+<p class="note">Salt okunur fırsat görünümü. Çapraz satış, satış raporundaki ana grup (anagrup) düzeyinde ve yalnızca güvenilir satış geçmişinden hesaplanır; belirli ürün, stok veya ciro tahmini içermez. Yapay zekâ kullanılmaz.</p>
+<div class="op-state" role="status" hidden></div>
+<section class="op-sec" data-sec="model" hidden><h3>Çapraz Satış Modeli</h3><div class="op-tiles"></div><p class="op-th"></p>
+<button type="button" class="op-btn pri op-go">Günlük Satış'ta Çapraz Satış adaylarını göster</button><div class="op-notes"></div></section>
+<section class="op-sec" data-sec="pairs" hidden><h3>En güçlü ürün-grubu ilişkileri</h3><p class="op-note op-pnote"></p><div class="op-scroll op-pairs"></div></section>
+<section class="op-sec" data-sec="territory" hidden><h3>Bölge / sektör görünümü <span class="op-badge">Doğrulanmadı</span></h3>
+<div class="op-dims"></div><p class="op-warn op-tnote"></p><p class="op-note op-tstate" hidden></p><div class="op-scroll op-terr"></div><p class="op-cov"></p></section>
+"""
+
+_OPP_JS=r"""
+(function(){
+'use strict';
+const root=document.getElementById('opp'), tabBtn=document.querySelector('.tab[data-t="opp"]');
+if(!root||!tabBtn) return;
+const POLL_MS=window.__OPP_POLL_MS||2000, POLL_MAX=window.__OPP_POLL_MAX||450;
+const MSG={file:'Fırsatlar için panoyu http://127.0.0.1:8000/ üzerinden açın.',
+  offline:'Sunucu çalışmıyor. Terminalde uvicorn app:app --host 127.0.0.1 çalıştırıp http://127.0.0.1:8000 adresini açın. Diğer sekmeler normal çalışır.',
+  fail:'Fırsatlar yüklenemedi', building:'Müşteri verisi hazırlanıyor…', slow:'Müşteri verisi hâlâ hazırlanıyor; biraz sonra sekmeyi yeniden açın.',
+  model_off:'Çapraz satış modeli bu veriyle kurulamadı.'};
+const DIMS=[['city','İl'],['district','İlçe'],['sector','Sektör kodu']];
+const st={started:false,dim:'city',seq:0};
+const $=s=>root.querySelector(s);
+function el(tag,cls,text){const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=String(text); return e;}
+function show(n,on){n.hidden=!on;}
+function state(t,k){const n=$('.op-state'); n.textContent=t||''; n.className='op-state'+(k?' '+k:''); show(n,!!t);}
+function num(v){return (v==null||!Number.isFinite(Number(v)))?'—':Number(v).toLocaleString('tr-TR',{maximumFractionDigits:2});}
+function pct(v){return (v==null||!Number.isFinite(Number(v)))?'—':'%'+(Number(v)*100).toLocaleString('tr-TR',{maximumFractionDigits:1});}
+async function getJSON(url){const r=await fetch(url,{headers:{'Accept':'application/json'}}); let b=null; try{b=await r.json();}catch(e){b=null;}
+  if(!r.ok){const e=new Error('HTTP '+r.status); e.status=r.status; e.body=b; throw e;} return b;}
+function table(cols,rows){   // cols: [label, cls]
+  const t=el('table','op-t'), h=el('tr'); cols.forEach(([l,c])=>h.append(el('th',c||null,l)));
+  const th=el('thead'); th.append(h); t.append(th); const tb=el('tbody');
+  rows.forEach(r=>{const tr=el('tr'); r.forEach((v,i)=>tr.append(el('td',cols[i][1]||null,v))); tb.append(tr);}); t.append(tb); return t;}
+function start(){
+  if(st.started) return; st.started=true;
+  if(location.protocol==='file:'){state(MSG.file,'off'); return;}   // same-origin API only; no request
+  loadSummary(); loadTerritory(0);
+}
+async function loadSummary(){
+  let s;
+  try{s=await getJSON('/api/opportunities/summary?limit=20');}
+  catch(e){state(e.status?((e.body&&e.body.detail&&e.body.detail.message)||(MSG.fail+' (HTTP '+e.status+').')):MSG.offline, e.status?'err':'off'); return;}
+  renderSummary(s);
+}
+function renderSummary(s){
+  const sec=$('[data-sec="model"]'), tiles=$('.op-tiles'); tiles.replaceChildren(); show(sec,true);
+  if(s.status!=='ok'){tiles.append(el('p','op-note',MSG.model_off)); return;}
+  const tile=(n,l,k)=>{const d=el('div','op-tile'); d.dataset.k=k; d.append(el('div','n',num(n)),el('div','l',l)); tiles.append(d);};
+  const th=s.thresholds||{};
+  tile(s.active_customers,'Aktif müşteri (son '+th.recent_days+' gün)','active'); tile(s.groups_in_model,'Modeldeki ana grup','groups');
+  tile(s.eligible_pairs,'Uygun grup ilişkisi','pairs'); tile(s.customers_with_opportunities,'Fırsatı olan müşteri','customers');
+  tile(s.opportunity_targets,'Toplam fırsat (hedef grup)','targets'); tile(s.queue_reservoir,'Günlük Satış havuzundaki çapraz satış gerekçesi','reservoir');
+  const bp=s.targets_by_priority||{};
+  $('.op-th').textContent='Eşikler (model kalitesi, finansal hedef değil): kaynak alıcı ≥ '+th.min_source_buyers+' · hedef alıcı ≥ '+th.min_target_buyers+
+    ' · birlikte alan ≥ '+th.min_pair_buyers+' · oran ≥ '+pct(th.min_confidence)+' · lift ≥ '+num(th.min_lift)+' · müşteri başına en fazla '+th.max_targets_per_customer+
+    ' hedef grup · skor = oran × 100, en fazla '+th.score_cap+' (orta: '+num(bp.medium)+', düşük: '+num(bp.low)+'). Sayılar KAPALI ve aksiyon durumu uygulanmadan öncedir.';
+  const notes=$('.op-notes'); notes.replaceChildren(); (s.notes||[]).forEach(t=>notes.append(el('p','op-note',t)));
+  const ps=$('[data-sec="pairs"]'); show(ps,true);
+  $('.op-pnote').textContent='İlk '+s.pair_limit+' ilişki, oran ve lift sırasıyla'+(s.pairs_truncated?' (toplam '+s.eligible_pairs+').':'.')+' Müşteri bilgisi içermez.';
+  const box=$('.op-pairs'); box.replaceChildren();
+  box.append(table([['Kaynak grup','t'],['Hedef grup','t'],['Kaynak alıcı','r'],['Birlikte alan','r'],['Oran','r'],['Lift','r']],
+    (s.pairs||[]).map(p=>[p.source_group,p.target_group,num(p.source_buyers),num(p.pair_buyers),pct(p.confidence),num(p.lift)])));
+}
+function dims(){
+  const d=$('.op-dims'); d.replaceChildren();
+  DIMS.forEach(([k,l])=>{const b=el('button','op-btn op-dim'+(st.dim===k?' on':''),l); b.type='button'; b.dataset.k=k;
+    b.addEventListener('click',()=>{if(st.dim===k) return; st.dim=k; dims(); loadTerritory(0);}); d.append(b);});
+}
+async function loadTerritory(n){
+  const sec=$('[data-sec="territory"]'); show(sec,true); dims(); const my=++st.seq, ts=$('.op-tstate');
+  let t;
+  try{t=await getJSON('/api/opportunities/territories?dimension='+encodeURIComponent(st.dim)+'&limit=50');}
+  catch(e){if(my!==st.seq) return;
+    const d=(e.body&&e.body.detail)||{};
+    if(e.status===503&&d.state==='building'){ts.textContent=n<POLL_MAX?MSG.building:MSG.slow; show(ts,true);
+      if(n<POLL_MAX) setTimeout(()=>{if(my===st.seq) loadTerritory(n+1);},POLL_MS); return;}
+    ts.textContent=e.status?(d.message||MSG.fail):MSG.offline; show(ts,true); return;}
+  if(my!==st.seq) return;
+  renderTerritory(t);
+}
+function renderTerritory(t){
+  const ts=$('.op-tstate'), box=$('.op-terr'), cov=$('.op-cov'); box.replaceChildren(); cov.textContent='';
+  $('.op-tnote').textContent=t.note||''; const sec=$('[data-sec="territory"]'); sec.dataset.status=t.status;
+  if(t.status!=='ok'){ts.textContent=t.message||''; show(ts,true); return;}
+  show(ts,false);
+  box.append(table([[t.dimension_label+' (Hedef)','t'],['Eşleşen müşteri','r'],['Son 365 günde aktif','r'],['Bu yıl sipariş veren','r'],
+    ['Çapraz satış adayı müşteri','r'],['Fırsat (hedef grup)','r']],
+    (t.rows||[]).map(r=>[r.label,num(r.matched_customers),num(r.active_customers),num(r.current_year_customers),num(r.cross_sell_customers),num(r.cross_sell_targets)])));
+  const c=t.coverage||{};
+  cov.textContent='Hedef dosyası: '+(t.hedef_file||'—')+' · Hedef hesabı: '+num(c.hedef_accounts)+' · satış müşterisiyle eşleşen: '+num(c.matched_customers)+
+    ' · bu alanı boş: '+num(c.missing_value_customers)+(t.truncated?' · ilk '+t.limit+' satır gösteriliyor (toplam '+t.total_rows+').':'');
+}
+$('.op-go').addEventListener('click',()=>{if(window.StockAgentSQ&&typeof window.StockAgentSQ.show==='function') window.StockAgentSQ.show('cross_sell');});
+tabBtn.addEventListener('click',start);   // lazy: nothing is fetched until the tab is opened
+})();
+"""
+
+def _opp_panel(meta):
+    """(tab button, panel block) for Fırsatlar, wrapped in markers like the other server-driven tabs."""
+    asof=html.escape(str(meta.get('asof') or ''),quote=True)
+    btn='<button class="tab" data-t="opp">Fırsatlar</button>'
+    block=('\n<!--OPP-TAB-START-->\n<style>'+_OPP_CSS+'</style>\n'
+           f'<div id="opp" class="panel" data-asof="{asof}">'+_OPP_BODY+'</div>\n'
+           '<script>'+_OPP_JS+'</script>\n<!--OPP-TAB-END-->')
+    return btn,block
+
+
+def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,opp_panel=True):
     blob=json.dumps(modules,ensure_ascii=False).replace('</','<\\/')
     tabs=['overview']+list(modules.keys())
     tabbtns=''.join(f'<button class="tab" data-t="{t}">{("Genel Bakış" if t=="overview" else modules[t]["title"])}'
@@ -1419,6 +1582,7 @@ def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True):
     ai_btn,ai_block=_ai_panel(meta) if ai_panel else ('','')
     c3_btn,c3_block=_c360_panel(meta) if c360_panel else ('','')
     sq_btn,sq_block=_sq_panel(meta) if sq_panel else ('','')
+    op_btn,op_block=_opp_panel(meta) if opp_panel else ('','')
     return f"""<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Şirket Panosu — {meta['date']}</title>
 <style>
@@ -1480,7 +1644,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <header><div class="eyebrow">Şirket Panosu</div>
 <h1>Şirket Panosu — {meta['date']}</h1>
 <div class="sub">{src} · {meta['total']:,} ürün</div></header>
-<div class="tabs">{tabbtns}{sq_btn}{c3_btn}{ai_btn}</div>
+<div class="tabs">{tabbtns}{sq_btn}{c3_btn}{op_btn}{ai_btn}</div>
 <div id="overview" class="panel on">
 <h2 class="sec">Aktif Analizler</h2>
 <p class="note">İlk istediğiniz ikisi — <b>stok uyarıları</b> (azalan + fazla) ve <b>kayıp müşteriler</b> (geri kazanım) — çalışıyor. Gezinmek, aramak ve sıralamak için yukarıdaki sekmelere tıklayın. Her şey doğrudan tablolarınızdan hesaplanır: filtreleme, müşteri ve stok kodu üzerinden birleştirme ve aritmetik — hiçbir şey tahmin değil.</p>
@@ -1490,7 +1654,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <p class="note">Hazır olduğunuzda açabileceğimiz, tamamen gerçeğe dayalı diğer analizler — her biri yalnızca ilgili sayfanın <code>data</code> klasöründe olmasını ister, sonra kendi sekmesi olur. Yapay zekâ yok, bunlarla aynı.</p>
 <ul class="later">{laterlist}</ul>
 </div>
-<div id="panels"></div>{sq_block}{c3_block}{ai_block}
+<div id="panels"></div>{sq_block}{c3_block}{op_block}{ai_block}
 <script>
 const DATA={blob};
 const fmtMoney=v=>'₺'+Math.round(v).toLocaleString('tr-TR');

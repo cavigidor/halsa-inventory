@@ -154,7 +154,7 @@ def test_tab_cards_grouping_collection_first_filters(browser, tmp_path):
         page.goto(srv["base"] + "/")
         # (1) tab exists, before Müşteri 360; nothing fetched before it is opened
         tabs = page.eval_on_selector_all(".tab", "els => els.map(e => e.dataset.t)")
-        assert tabs[-3:] == ["sq", "c360", "ai"] and page.inner_text('.tab[data-t="sq"]') == "Günlük Satış"
+        assert tabs[-4:] == ["sq", "c360", "opp", "ai"] and page.inner_text('.tab[data-t="sq"]') == "Günlük Satış"
         assert not any("/api/sales-queue" in u for _, u in page.requests)
         page.click('.tab[data-t="sq"]')
         page.wait_for_selector("#sq .sq-card")
@@ -182,7 +182,7 @@ def test_tab_cards_grouping_collection_first_filters(browser, tmp_path):
         # (5) filters (server-side)
         labels = page.eval_on_selector_all("#sq .sq-f", "els => els.map(e => e.textContent)")
         assert labels == ["Tümü (6)", "Tahsilat önce (2)", "Tahsilat (2)", "Geri Kazanım (3)",
-                          "Reel Satış Düşüşü (2)"]
+                          "Reel Satış Düşüşü (2)", "Çapraz Satış (0)"]           # M7-3 filter
         page.click('#sq .sq-f[data-k="collection_first"]')
         assert wait_codes(page, lambda c: c == [Q3, Q1]) == [Q3, Q1]
         page.click('#sq .sq-f[data-k="winback"]')

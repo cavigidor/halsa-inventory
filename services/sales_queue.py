@@ -12,6 +12,8 @@ Rules (no new business thresholds; no second scoring model):
 - reasons keep their M5 action ids, scores and categories; one customer = one card;
 - queue score = the maximum score of the customer's visible reasons (secondary reasons add nothing);
 - a visible collections reason makes the card `collection_first` and its primary step (sequence, not score);
+- M7-3 (D-044): conversation sequence = collections, then winback, then the other reasons by score (real decline and
+  cross-sell compete by score); sequence never changes a score;
 - collections come from the invoice-account world: attached only when the account maps to exactly one canonical
   customer; shared or unlinked accounts are never assigned (counted, still in M5);
 - a customer the unique master marks KAPALI keeps only collections reasons;
@@ -24,9 +26,12 @@ from services import actions as A
 from services import store as ST
 
 #: Customer action categories that feed the queue, and their kind. `collection` is the barrier kind (sequence
-#: precedence, invoice-account mapping); `sales` reasons resolve directly to the canonical customer. A later,
-#: separately approved M7 source plugs in by adding its existing action category here.
-QUEUE_CATEGORIES: dict[str, str] = {"collections": "collection", "winback": "sales", "real_decline": "sales"}
+#: precedence, invoice-account mapping); `sales` reasons resolve directly to the canonical customer. The keys equal the
+#: categories registered with the `sales_queue` surface (services/actions.py, tested). M7-3 adds `cross_sell`.
+QUEUE_CATEGORIES: dict[str, str] = {"collections": "collection", "winback": "sales", "real_decline": "sales",
+                                    "cross_sell": "sales"}
+#: Conversation sequence (D-043, extended by D-044): collections first, then reactivation (winback), then the rest.
+SEQUENCE_RANK = {"collections": 0, "winback": 1}
 FILTERS = ("all", "collection_first", *QUEUE_CATEGORIES)
 LEGACY_REP_PREFIX = "Temsilci:"   # M5 action fact from the sales file's cached lookup (DQ-5): never shown in M7
 DRAFT_PURPOSES = ("collection", "offer", "winback", "sales_followup", "fair_invite")
@@ -100,14 +105,14 @@ def build_queue(ctx, snap, *, statuses: dict | None = None, limit: int | None = 
             "_action": a})
     diag["visible_reasons"] = sum(len(v) for v in grouped.values())
 
-    def reason_key(r):   # score ↓, category registration order, action id
-        return (-r["score"], order.get(r["category"], 99), r["action_id"])
+    def reason_key(r):   # sequence (collections, winback, rest), then score ↓, category order, action id
+        return (SEQUENCE_RANK.get(r["category"], 2), -r["score"], order.get(r["category"], 99), r["action_id"])
 
     cards = []
     for code, reasons in grouped.items():
         reasons.sort(key=reason_key)
         collections = [r for r in reasons if r["kind"] == "collection"]
-        primary = collections[0] if collections else reasons[0]
+        primary = reasons[0]          # collections → winback → highest score (sequence only)
         queue_score = max(r["score"] for r in reasons)
         c = snap.customers[code]
         e = snap.master_entry(code)
@@ -123,7 +128,7 @@ def build_queue(ctx, snap, *, statuses: dict | None = None, limit: int | None = 
         if collections:
             warnings.append({"code": "collection_account_scope",
                              "message": "Tahsilat fatura hesabı düzeyindedir; Müşteri 360'ta hesap ayrıntısı var."})
-        ordered = [primary] + [r for r in reasons if r is not primary]
+        ordered = reasons
         purposes = ["collection"] if closed is True else list(DRAFT_PURPOSES)
         default_purpose = "collection" if (collections or closed is True) else (primary["draft_purpose"]
                                                                                or "sales_followup")

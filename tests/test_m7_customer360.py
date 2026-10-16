@@ -541,7 +541,8 @@ def test_api_status_search_detail(client):
     body = d.json()
     assert body["ai_used"] is False and body["identity"]["customer_code"] == C1
     assert set(body) == {"customer_code", "as_of_data_date", "identity", "sources", "master", "salespeople", "sales",
-                         "products", "receivables", "hedef", "events", "activity", "warnings", "ai_used"}
+                         "products", "opportunities", "receivables", "hedef", "events", "activity", "warnings",
+                         "ai_used"}                                    # M7-3 adds the opportunities section
     assert {s["key"] for s in body["sources"]} == {"sales", "master", "aging", "hedef", "events",
                                                    "detailed_collections"}
 
@@ -665,7 +666,7 @@ def test_tab_present_and_rest_byte_identical(built):
     assert with_c3.count(C3_BUTTON) == 1 and with_c3.count('<div id="c360" class="panel"') == 1
     assert with_c3.replace(C3_BUTTON, "", 1).replace(_c3_block(with_c3), "", 1) == without
     tabs = re.findall(r'<button class="tab" data-t="([a-z0-9]+)"', with_c3)
-    assert tabs[-2:] == ["c360", "ai"]
+    assert tabs[-3:] == ["c360", "opp", "ai"]                     # M7-3 adds Fırsatlar after Müşteri 360
 
 
 def test_tab_script_safe_and_read_only(built):

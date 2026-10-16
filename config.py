@@ -34,12 +34,27 @@ _load_dotenv()
 # --- context / cost control ---
 MAX_CONTEXT_ITEMS_PER_CATEGORY = int(os.environ.get("MAX_CONTEXT_ITEMS_PER_CATEGORY", 20))
 MAX_DAILY_ACTIONS = int(os.environ.get("MAX_DAILY_ACTIONS", 15))
-# M7-2 Günlük Satış: operational caps only (never business thresholds). The private candidate pool holds the
-# best-scored customer actions BEFORE the M5 global cut; the queue shows at most MAX_DAILY_SALES_QUEUE customer
-# cards by default and never more than MAX_SALES_QUEUE_LIMIT per request.
-MAX_SALES_QUEUE_CANDIDATES = int(os.environ.get("MAX_SALES_QUEUE_CANDIDATES", 200))
+# M7-2 Günlük Satış: operational caps only (never business thresholds). The private candidate reservoir holds the
+# best-scored customer actions of EACH sales-queue category BEFORE the M5 global cut (M7-3, D-044: per category, so
+# one category can never starve another); the queue shows at most MAX_DAILY_SALES_QUEUE customer cards by default
+# and never more than MAX_SALES_QUEUE_LIMIT per request. The M7-2 variable MAX_SALES_QUEUE_CANDIDATES is still
+# honoured as the per-category value when the new one is not set.
+MAX_SALES_QUEUE_CANDIDATES_PER_CATEGORY = int(os.environ.get("MAX_SALES_QUEUE_CANDIDATES_PER_CATEGORY")
+                                              or os.environ.get("MAX_SALES_QUEUE_CANDIDATES") or 200)
 MAX_DAILY_SALES_QUEUE = int(os.environ.get("MAX_DAILY_SALES_QUEUE", 20))
 MAX_SALES_QUEUE_LIMIT = 50
+# M7-3 cross-sell (D-044): association model at the native `anagrup` level from the trusted sales file. These are
+# MODEL-QUALITY guards (support, confidence, lift), not financial targets; changing them is an explicit decision.
+CROSS_SELL_RECENT_DAYS = 365            # active cohort window, relative to the sales data date (never today())
+CROSS_SELL_MIN_SOURCE_BUYERS = 20       # active customers who bought the source group
+CROSS_SELL_MIN_TARGET_BUYERS = 20       # active customers who bought the target group
+CROSS_SELL_MIN_PAIR_BUYERS = 10         # active customers who bought both
+CROSS_SELL_MIN_CONFIDENCE = 0.30        # pair_buyers / source_buyers
+CROSS_SELL_MIN_LIFT = 1.20              # confidence / target prevalence
+CROSS_SELL_MAX_TARGETS_PER_CUSTOMER = 3
+CROSS_SELL_SCORE_CAP = 69               # cross-sell score = min(cap, confidence × 100): never "high" or "critical"
+MAX_OPPORTUNITY_PAIRS = 50              # bounded pair table per request
+MAX_TERRITORY_ROWS = 200                # bounded territory rows per request
 ENABLE_AI = os.environ.get("ENABLE_AI", "true").lower() == "true"
 ENABLE_MACRO = os.environ.get("ENABLE_MACRO", "true").lower() == "true"
 

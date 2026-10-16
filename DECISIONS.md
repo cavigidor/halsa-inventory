@@ -589,3 +589,36 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   signature (503 `building` otherwise). It never reads Excel and never calls AI; a message draft is generated only on
   an explicit click through the existing copy-only endpoint.
 - **Bounded pool:** reasons hidden by state are not backfilled from below the 200-candidate pool (documented limit).
+
+### D-044 · 2026-10-16 · Cross-sell at anagrup level; capped confidence score; descriptive territory; per-category queue reservoir (M7-3)
+1. **Group, not SKU:** cross-sell operates on the native Halsa `anagrup` of the trusted sales file. It recommends a
+   product GROUP and never a SKU, so no stock, margin or Trodat mapping is involved.
+   - If the column is missing the model is unavailable. It never switches to another dimension.
+2. **Recent behaviour, full-history gap:**
+   - The association uses customers with an order in the 365 days to the sales data date (never `today()`) and their
+     in-window purchases.
+   - Directed pairs need support, confidence and lift above `config.CROSS_SELL_*`. These are model-quality guards and
+     are not tuned to reach a count.
+   - A target must be a group the customer has never bought in the whole trusted history, reached from an eligible
+     source bought inside the window.
+   - One opportunity per target group (strongest source by confidence, lift, support, label); at most three per
+     customer.
+3. **Score = association confidence, capped at 69:** `min(69, round(confidence × 100, 1))`.
+   - Support and lift only gate eligibility.
+   - Cross-sell is never `high` or `critical`, so it cannot outrank collections or a major decline.
+   - Action confidence is `medium`: trusted facts, inferred recommendation.
+   - "Confidence" is the co-occurrence share among active source buyers, not a purchase probability.
+4. **Hedef stale data produces no score:** no potential, penetration, capacity, Risk or Kredi value is used by
+   cross-sell, territory, the queue or Customer 360 opportunities. Capacity stays visible only as stale history in the
+   Hedef card.
+5. **Territory is descriptive and unverified:**
+   - Counts per Hedef İl / İlçe / Sektör kodu: matched, active, current-year, cross-sell customers, targets.
+   - Labelled unverified, with an explicit "not a performance ranking" statement.
+   - No salesperson field is aggregated, and no action or score comes from a territory.
+6. **Action surfaces and a per-category reservoir:**
+   - Categories declare `action_center` / `sales_queue`. Cross-sell is sales-queue only, so the M5 top 15 and
+     `/api/agent/categories` are unchanged.
+   - The private Günlük Satış reservoir keeps the best N (200) candidates per category, which removes starvation
+     without re-weighting.
+   - The final page has no quotas.
+   - The conversation sequence becomes collections → winback → the rest by score (extends D-043; scores unchanged).

@@ -1,6 +1,7 @@
 """FastAPI backend. AI anahtarı olmadan da açılır; AI uçları yapılandırılmış
 'kullanılamıyor' döner (HTTP 500 değil). Determinist uçlar her zaman çalışır."""
 import os, sys, logging, threading, datetime as dt
+from typing import Literal
 ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -19,6 +20,7 @@ from services import refresh as RF
 from services import evidence as EV
 from services import customer360 as C360
 from services import sales_queue as SQ
+from services import opportunities as OP
 from services import action_sources  # noqa: F401  (registers the built-in deterministic sources)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -352,10 +354,12 @@ def customer360_search(q: str = "", limit: int = C360.SEARCH_DEFAULT,
 def customer360_detail(customer_code: str, c360: C360.Customer360Repository = Depends(get_c360),
                        repo: ContextRepository = Depends(get_repo)):
     snap = _c360_snapshot(c360)
-    det = C360.customer_detail(snap, customer_code, ctx=repo.current(),
+    ctx = repo.current()
+    det = C360.customer_detail(snap, customer_code, ctx=ctx,
                                stored_actions=ST.get_entity_actions("customer", customer_code),
                                memory=ST.get_memory("customer", customer_code),
-                               categories={c.key: c.label_tr for c in A.categories()})
+                               categories={c.key: c.label_tr for c in A.categories()},
+                               opportunities=_same_source_opportunities(c360, snap, ctx))
     if det is None:
         raise HTTPException(404, f"Müşteri bulunamadı: {customer_code}")
     return det
@@ -381,6 +385,45 @@ def sales_queue(limit: int = C.MAX_DAILY_SALES_QUEUE, filter: str = "all",
     except SQ.QueueUnavailable as e:
         raise HTTPException(503, {"state": "error", "error_code": e.code, "message": e.message})
     return S.SalesQueueResponse(**q)
+
+
+def _same_source_opportunities(c360, snap, ctx):
+    """The live cross-sell model only when the live context and the Customer 360 snapshot share their sources."""
+    if ctx is None or c360.signature_for(ctx) != snap.signature:
+        return None
+    return getattr(ctx, "opportunities", None)
+
+
+# ---------------- M7-3 opportunity intelligence (deterministic, read-only; never calls the AI provider) -------------
+# The cross-sell model lives privately on the live context (built from its already-read sales frame); territory
+# counts join it with the Customer 360 snapshot of the same sources and the explicit Hedef file. No Excel read.
+@app.get("/api/opportunities/summary", response_model=S.OpportunitySummary)
+def opportunities_summary(limit: int = 20, repo: ContextRepository = Depends(get_repo)):
+    ctx = repo.current()
+    model = getattr(ctx, "opportunities", None) if ctx is not None else None
+    if model is None:
+        raise HTTPException(503, {"state": "error", "error_code": "opportunities_unavailable",
+                                  "message": "Fırsat modeli bu bağlamda yok; verileri yenileyin."})
+    body = model.summary(limit)
+    body["queue_reservoir"] = sum(1 for a in (getattr(ctx, "sales_queue_candidates", None) or ())
+                                  if a.get("category") == "cross_sell")
+    return S.OpportunitySummary(**body)
+
+
+@app.get("/api/opportunities/territories", response_model=S.TerritoryResponse)
+def opportunities_territories(dimension: Literal["city", "district", "sector"] = "city", limit: int = 50,
+                              repo: ContextRepository = Depends(get_repo),
+                              c360: C360.Customer360Repository = Depends(get_c360)):
+    try:
+        snap = c360.snapshot()
+    except C360.Customer360NotReady as e:
+        raise HTTPException(503, {"state": e.state, "message": "Müşteri verisi hazırlanıyor…"})
+    except C360.Customer360Error as e:
+        raise HTTPException(503, {"state": "error", "error_code": e.code, "message": e.message})
+    ctx = repo.current()
+    if ctx is None or c360.signature_for(ctx) != snap.signature:
+        raise HTTPException(503, {"state": "building", "message": "Müşteri verisi hazırlanıyor…"})
+    return S.TerritoryResponse(**OP.territories(snap, getattr(ctx, "opportunities", None), dimension, limit))
 
 
 # ---------------- draft message (copy-only; nothing is ever sent) ----------------

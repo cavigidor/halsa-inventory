@@ -656,7 +656,9 @@ def _rows(frame: pd.DataFrame, code: str) -> list[dict]:
 
 def customer_detail(snap: Customer360Snapshot, code: str, *, ctx: dict | None = None,
                     stored_actions: list[dict] | None = None, memory: list[dict] | None = None,
-                    categories: dict[str, str] | None = None) -> dict | None:
+                    categories: dict[str, str] | None = None, opportunities=None) -> dict | None:
+    """`opportunities` (M7-3): the live context's cross-sell model, passed only when it belongs to the same sources
+    as this snapshot; otherwise the section reports `unavailable`. Nothing here recomputes it."""
     base = snap.customers.get(code)
     if base is None:
         return None
@@ -823,8 +825,10 @@ def customer_detail(snap: Customer360Snapshot, code: str, *, ctx: dict | None = 
         {"key": "detailed_collections", "label": "Detaylı tahsilat raporu", "status": "not_supplied",
          "confidence": CONF_UNAVAILABLE, "file": None, "as_of": None, "detail": DETAILED_COLLECTIONS_NOTE},
     ]
+    from services import opportunities as OP
+    opp = OP.customer_section(opportunities, code, closed)
     return {"customer_code": code, "as_of_data_date": asof, "identity": identity, "sources": sources,
-            "master": master, "salespeople": people, "sales": sales, "products": products,
+            "master": master, "salespeople": people, "sales": sales, "products": products, "opportunities": opp,
             "receivables": receivables, "hedef": hedef, "events": events, "activity": activity,
             "warnings": warnings, "ai_used": False}
 
