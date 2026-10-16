@@ -28,7 +28,7 @@ from tests.fixtures.xlsx_synth import MISSING, E, F, col_letter, write_xlsx
 ROOT = Path(__file__).resolve().parents[1]
 YEAR = 2026
 NAME = "2026_gider_gelir_Eylül.xlsx"
-SECRET_CC = ("01ZQXFUAR", "02ZQXNAKLIYE", "25ZQXGELIR")
+SECRET_CC = ("01ZQXALFA", "02ZQXBETA", "25ZQXGAMA")
 SECRET_NAMES = ("Gizli Kira Bedeli ZQX", "Kurgu Danışmanlık ZQX", "Hayali Prim ZQX", "Uydurma İade ZQX")
 
 
