@@ -458,3 +458,21 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **Assignment fields:** `Temsilci` and `Müşteri Temsilcisi` stay separate and unranked. The salesperson of record
   stays open.
 - **Snapshot date:** declared or opt-in filename only; otherwise unknown.
+
+### D-038 · 2026-10-16 · Kredi takip pulled forward; installment grain, amortizing-only, fatal arithmetic
+- **Sequence exception:** M6-4 (detailed collections) is blocked by the missing `Evrak Detaylı Tahsilat Raporu`, so the
+  Kredi takip importer (part of M6-6) was implemented first.
+  - It must not be approximated from the account-level Cari aging.
+  - Trodat and gider/gelir wait on owner mappings.
+  - Roadmap numbering is unchanged, and M6-4 stays open and blocked.
+- **Source:** the ERP loan-contract export (`kredi sözleşmeleri.xlsx`) is company financing at **installment grain**
+  (`SÖZLEŞME KODU` × `TAKSİT NO`, unique; a repeat is fatal).
+  - The audience is **owner**. It is never customer credit, Hedef `Risk` / `Kredi`, or collections.
+  - The trailing control-total row is verified against the column sums and excluded. It was the source of M6-0's
+    "repeated pair".
+- **Loan types:** only amortizing loans are supported. **Revolving (`Rotatif`) loans need their own rule set** and
+  fail closed, as do unknown types and statuses.
+- **Arithmetic:** the identities "components = installment" and "paid + remaining = installment" are source-fatal at
+  ±0.01 TL, because a wrong payment total must never reach cash planning.
+- **Dates:** the latest payment-slip date is an activity date, never the snapshot date.
+- **Not yet:** no cash-planning metrics, UI or FX in this slice.
