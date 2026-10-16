@@ -58,6 +58,7 @@ services/store.py     SQLite: action status, history, memory, ai_calls metadata 
 | `tests/fixtures/synthetic_erp.py` | Synthetic ERP exports used by CI |
 | `services/refresh.py` | Controlled refresh (validate → build staging → verify → swap), API + CLI |
 | `services/importers/` | M6 importer framework: SourceSpec, formula-aware read-only Excel reading, validation report, confidence, exact-match entity resolution, fail-closed staging (`docs/m6_importer_framework.md`, D-035); not yet used by M5 |
+| `services/importers/sales_activity.py` | M6-2: `Srmmerk` → one source attribution per order document (`general` / `fuar` / `etkinlik` / `saha`), order and line keys, D-003 customer, exact master match (`docs/m6_order_source.md`, D-036); not yet used by M5 |
 | `tests/fixtures/xlsx_synth.py` | Runtime OOXML writer for synthetic workbooks with cached formulas, error cells and external links |
 | `tests/test_m5_browser.py` | Playwright smoke tests: real FastAPI + Chromium, synthetic data, disabled/mock AI |
 | `tests/js/` | jsdom DOM tests for the AI tab (node, pinned `package-lock.json`; run via `tests/test_m5_ui.py`) |
@@ -96,7 +97,7 @@ services/store.py     SQLite: action status, history, memory, ai_calls metadata 
 | 3 | Real LLM (OpenAI) behind the abstraction, with numeric safety | done (see STATUS.md) |
 | 4 | Live macro data (TCMB/TÜİK inflation, FX) | later |
 | 5 | "✨ AI Aksiyon Merkezi" tab: deterministic action queue first, AI on demand (design: `docs/m5_action_center.md`) | **complete** (M5-1 to M5-6: backend, read-only tab, action state, drafts + drawer, controlled refresh, browser verification) |
-| 6 | Additional data sources / sales intelligence foundation: validated importers for hedef raporu, detailed collections, Trodat sales, gider/gelir, kredi takip, bütçe (`docs/roadmap_m6_m7.md`) | in progress: M6-0 source inventory done (`docs/m6_source_inventory.md`, D-034); M6-1 importer framework done (`services/importers/`, D-035); M6-2 next |
+| 6 | Additional data sources / sales intelligence foundation: validated importers for hedef raporu, detailed collections, Trodat sales, gider/gelir, kredi takip, bütçe (`docs/roadmap_m6_m7.md`) | in progress: M6-0 source inventory done (`docs/m6_source_inventory.md`, D-034); M6-1 importer framework done (`services/importers/`, D-035); M6-2 order-source normalization done (D-036); M6-3 next |
 | 7 | Sales operating system: daily sales queue, customer 360, cross-sell, January fair command center, light CRM, new-buyer discovery | planned (D-021) |
 | — | Multi-user / remote deployment (auth, admin and salesperson roles, private deployment, backups) | future, out of scope for M5 (D-016) |
 

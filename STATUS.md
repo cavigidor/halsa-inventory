@@ -1,10 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-16 (M6-0 merged to `main` @ `979cd33`; M6-1 importer framework done on `claude/m6-1-importer-framework`, PR pending)._
+_Updated 2026-10-16 (M6-1 merged to `main` @ `c24488c`; M6-2 order-source normalization done on `claude/m6-2-order-source-normalization`, PR pending)._
 
 ## Git
-- **`main`:** `979cd33` (PR #11, M6-0 source inventory). **This checkpoint:** branch `claude/m6-1-importer-framework`
-  (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
+- **`main`:** `c24488c` (PR #12, M6-1 importer framework). **This checkpoint:** branch
+  `claude/m6-2-order-source-normalization` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
 - **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
   there to get M5 (see "Owner follow-ups" below).
 
@@ -13,7 +13,8 @@ _Updated 2026-10-16 (M6-0 merged to `main` @ `979cd33`; M6-1 importer framework 
 Two owner follow-ups remain that the sandboxes cannot do (they cannot reach `api.openai.com` or open a browser on
 the Mac): the visual check in the owner's own browser and one live WhatsApp draft tone check. Neither blocks M5.
 **Milestone 6 — Additional data sources / sales intelligence foundation: in progress.** M6-0 (source inventory,
-docs only) is merged; M6-1 (importer framework, `services/importers/`) is done (PR pending). M6-2 is not started.
+docs only) and M6-1 (importer framework, `services/importers/`) are merged; M6-2 (order activity/source normalization,
+`services/importers/sales_activity.py`) is done (PR pending). M6-3 is not started.
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -429,7 +430,7 @@ hash-checked unchanged.
     customer.
 - **Owner decisions** listed in the inventory §16; **M6-1 requirements** in §17; the sequence is kept (§18).
 
-## M6-1 (done; PR pending) — importer framework
+## M6-1 (done; merged in PR #12 @ `c24488c`) — importer framework
 Branch `claude/m6-1-importer-framework` from `main` @ `979cd33`. New package `services/importers/` (developer doc:
 `docs/m6_importer_framework.md`, decision D-035). Framework only: no source-specific importer, no API, tab, action or
 AI change, and nothing wired into the M5 context or refresh.
@@ -484,7 +485,74 @@ Tests:
   - Safety: the original was hash- and mtime-identical afterwards. The scratch copy was deleted and nothing
     was committed or sent to a provider.
 
+## M6-2 (done; PR pending) — order activity/source normalization
+Branch `claude/m6-2-order-source-normalization` from `main` @ `c24488c`. New source module
+`services/importers/sales_activity.py` on the M6-1 framework (doc: `docs/m6_order_source.md`, decision D-036). No
+generic framework change. No API, UI, action, persistence or M5 integration. No amounts and no DQ-5 lookup columns
+are imported.
+
+**What it contains:**
+- SourceSpecs:
+  - `sales_activity`: sheet index 0, header row 1, exact headers `sip_evrakno_seri`, `sip_evrakno_sira`,
+    `Pro_kodu` (order_customer), `Musterikod` (invoice_account), `sto_kod` (product), `Srmmerk`, `Tarih`. All
+    `trusted`; formulas forbidden; business date `max(Tarih)`.
+  - `sales_customer_master`: `liste.KODU`.
+- Parser: `GENEL` or `<YYYY><stem><TYPE>[seq]`, with the type matched from the right.
+  - Types: `general`, `fuar`, `etkinlik` (ETKİNLİK/ETKİNLİĞİ) and `saha` (SAHA/SAHAÇALIŞMASI).
+  - There is no `is_fair`.
+  - An unknown grammar fails closed.
+- Grain: orders are grouped by document. A conflicting label within an order is fatal. Conflicting dates or
+  customers are record-level.
+- Identity: canonical customer per D-003; exact master match with aggregate reports.
+- Keys: `order_key` = `record_key("sales_order", [series, number])`; `event_id` = year + exact stem + type +
+  sequence.
+
+**Real-data finding:** one real label has a digit right after the four-digit year. The first draft of the parser
+required the stem to start with a letter and failed closed on it (13 orders). That rule was my own addition, not
+the approved grammar. Fixed: the year is exactly the first four digits, and everything up to the type token is the
+opaque stem.
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (node + jsdom + Chromium) | `AI_PROVIDER=disabled REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 python -m pytest -q` | **414 passed, 7 skipped, 1 xfailed** (57 new in `tests/test_m6_order_source.py`; the other 357 unchanged) |
+
+Mutation checks: each of these fails at least one test:
+- dropping the label-conflict check;
+- mapping ETKİNLİĞİ → fuar;
+- classifying unknown labels as general;
+- putting the label into the order key;
+- invoice-first identity.
+
+**Real-data read-only check** (Mac VM, the 5 Oct 2026 sales export, opened read-only from a throwaway clone; only
+aggregates printed; hash and mtime identical before and after):
+
+| Check | M6-0 baseline | M6-2 |
+|---|---|---|
+| Sales lines / order documents | 182,121 / 38,215 | 182,121 / 38,215 |
+| Labels, one per order | 99, 100 % | 99, 0 conflicts |
+| Event orders | 8.0 % | 3,051 = 7.98 % (fuar 2,924 · etkinlik 57 · saha 70; general 35,164; sums to 38,215) |
+| Stems / events | 38 stems | 38 stems, 98 event editions, 44 orders on a sequenced label |
+| Unknown labels | — | 0 |
+| Edition year = order year | 95.8 %; +1 for 127, −1 for 1 | 95.8 %; +1 for 127, −1 for 1 |
+| `Pro_kodu` in `liste.KODU` (distinct) | 99.56 % | 6,717 of 6,747 = 99.56 % (6 of them on duplicated master keys) |
+| `Musterikod` in `liste.KODU` (distinct) | 100 % | 5,484 of 5,485. The one miss has trailing whitespace and matches only after trimming. M6-0 compared trimmed codes; M6-2 matches exactly (no trim declared). |
+
+Record-level, by order:
+- 8 orders have an unusable date (conflict);
+- 22 have conflicting customers, 4 of them event orders;
+- 8 are invoiced to several accounts;
+- 37 use the D-003 fallback.
+
+Customer master: 18,722 codes with 7 duplicated keys. Order-level canonical customers: 38,047 matched, 66 unmatched,
+80 on duplicated master keys, 22 null (conflict).
+
+Leak check: 0 of 6,906 labels, stems and codes appear in the safe summary; no path. Run time 76 s, about 660 MB.
+
+**M5 regression:** no M5 file changed. The live path does not import the new module (tested). M5 code is
+byte-identical to `main`, so M5 output on unchanged inputs is unchanged by construction.
+
 ## Immediate next task
-Review and merge the M6-1 PR. Then the owner decisions in `docs/m6_source_inventory.md` §16 (at minimum the
-missing exports and the fair taxonomy). Start **M6-2** (order activity/source normalization) only when it is moved
+Review and merge the M6-2 PR. Owner decisions remain open (`docs/m6_source_inventory.md` §16), notably the fair
+taxonomy (do ETKİNLİK / SAHA count as fairs?) and the conversion window. Start **M6-3** (Hedef) only when it is moved
 to *Current*.

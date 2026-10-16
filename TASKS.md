@@ -1,10 +1,10 @@
 # TASKS.md — active backlog
 
 Rules: one *Current* task at a time. Each task must be executable in one bounded session.
-Milestone 5 is complete. M6-0 and M6-1 are done; M6-2 must not be started until it is moved to *Current*.
+Milestone 5 is complete. M6-0, M6-1 and M6-2 are done; M6-3 must not be started until it is moved to *Current*.
 
 ## Current
-- [ ] **Review and merge the M6-1 PR** (`claude/m6-1-importer-framework`, importer framework only).
+- [ ] **Review and merge the M6-2 PR** (`claude/m6-2-order-source-normalization`, order activity/source normalization).
 
 ## Next
 - [ ] **Owner: M5 check on the Mac** (`git pull`, refresh, open http://127.0.0.1:8000/, desktop + phone width).
@@ -15,9 +15,13 @@ Milestone 5 is complete. M6-0 and M6-1 are done; M6-2 must not be started until 
   `Evrak Detaylı Tahsilat Raporu` export, a CRM export if one exists, and the historical fair invitation/attendance
   lists; decide the fair taxonomy (ETKİNLİK / SAHA), business-line mapping, revenue basis, salesperson of record,
   Trodat mapping, Hedef/Bütçe file of record.
-- [ ] **M6-2 Order activity/source normalization** (`Srmmerk`; first source built on `services/importers/`, see
-  `docs/m6_importer_framework.md` "How a source importer plugs in"). Needs the fair-taxonomy decision for the
-  ETKİNLİK / SAHA types. Start only when moved to *Current*.
+- [ ] **M6-3 Hedef raporu importer** (stale `Haftalık Kaşe Adedi` / `Risk` / `Kredi`; needs the owner's answer on
+  which Hedef file is maintained). Start only when moved to *Current*.
+- [ ] **Owner: fair taxonomy and conversion window** (M6-2 keeps `fuar`, `etkinlik` and `saha` separate; D-036). The
+  grouping and any follow-on window are configuration for M7.
+- [ ] **Identity whitespace policy (small, needs a decision):** 20 sales `Musterikod` and 19 `Pro_kodu` values carry a
+  trailing space. Exact matching leaves one invoice account unmatched that matches after trimming. Decide whether
+  customer-code fields declare `trim=True` (a spec change, not fuzzy matching).
 - [ ] **DQ-4: Stock coverage `#DIV/0!` rows are silently excluded.** In the stock export, `STOK Kontrol %` is
   `#DIV/0!` for 1,178 of 3,314 products (5 Oct 2026 data); `m_stock` coerces errors to NaN and requires coverage,
   so these products never appear in Azalan / Fazla Stok. Decide the rule (for example a separate "no coverage"
