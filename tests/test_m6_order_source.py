@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from services.importers import Confidence, IdentifierRole, MatchStatus, MasterIndex, record_key
+from services.importers import Confidence, IdentifierRole, MatchStatus, record_key
 from services.importers import sales_activity as SA
 from services.importers.sales_activity import (
     SALES_LINES_SPEC,
