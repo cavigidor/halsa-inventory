@@ -698,9 +698,10 @@ def test_66_no_refresh_dependency(tmp_path):
 
 
 def test_67_butce_not_imported():
+    # Bütçe now has its own importer (D-041); the two sources are never reconciled or merged with each other.
     src = (ROOT / "services/importers/gider_gelir.py").read_text()
-    assert "BUTCE_" not in src and "bütçe eylül" not in src.lower()
-    assert not (ROOT / "services/importers/butce.py").exists()
+    assert "BUTCE_" not in src and "bütçe eylül" not in src.lower() and "butce" not in src
+    assert "gider_gelir" not in (ROOT / "services/importers/butce.py").read_text().replace("2026_gider_gelir", "")
 
 
 # =============================================================================================

@@ -78,7 +78,7 @@ def _cell_xml(ref: str, v: Any) -> str:
     return _value_xml(ref, v)
 
 
-def _sheet_xml(rows: Sequence[Sequence[Any]]) -> str:
+def _sheet_xml(rows: Sequence[Sequence[Any]], merged: Sequence[str] = ()) -> str:
     out, max_c = [], 1
     for r, row in enumerate(rows, start=1):
         cells = [_cell_xml(f"{col_letter(c)}{r}", v) for c, v in enumerate(row, start=1) if v is not None]
@@ -90,7 +90,10 @@ def _sheet_xml(rows: Sequence[Sequence[Any]]) -> str:
     return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
             'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-            f'<dimension ref="{dim}"/><sheetData>{"".join(out)}</sheetData></worksheet>')
+            f'<dimension ref="{dim}"/><sheetData>{"".join(out)}</sheetData>'
+            + (f'<mergeCells count="{len(merged)}">' + "".join(f'<mergeCell ref="{m}"/>' for m in merged)
+               + "</mergeCells>" if merged else "")
+            + "</worksheet>")
 
 
 _STYLES = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -109,9 +112,10 @@ _NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
 
 def write_xlsx(path: str | Path, sheets: dict[str, Sequence[Sequence[Any]]], *,
-               external_links: Sequence[str] = ()) -> Path:
+               external_links: Sequence[str] = (), merged: dict[str, Sequence[str]] | None = None) -> Path:
     """Write a workbook with the given sheets (name → rows). `external_links` are link targets
-    (e.g. a fictional 'file:///C:/Users/someone/Other.xlsx'); the parts are only declared."""
+    (e.g. a fictional 'file:///C:/Users/someone/Other.xlsx'); the parts are only declared.
+    `merged` maps a sheet name to merged ranges (e.g. ["B5:D5"]); only the top-left cell holds a value."""
     path = Path(path)
     names = list(sheets)
     ct = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -158,7 +162,7 @@ def write_xlsx(path: str | Path, sheets: dict[str, Sequence[Sequence[Any]]], *,
         z.writestr("xl/_rels/workbook.xml.rels", "".join(rels))
         z.writestr("xl/styles.xml", _STYLES)
         for i, name in enumerate(names, start=1):
-            z.writestr(f"xl/worksheets/sheet{i}.xml", _sheet_xml(sheets[name]))
+            z.writestr(f"xl/worksheets/sheet{i}.xml", _sheet_xml(sheets[name], (merged or {}).get(name, ())))
         for j, target in enumerate(external_links, start=1):
             z.writestr(f"xl/externalLinks/externalLink{j}.xml",
                        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
