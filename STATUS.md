@@ -1,10 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-16 (M6-2 merged to `main` @ `41f56e2`; M6-3 Hedef importer done on `claude/m6-3-hedef-importer`, PR pending)._
+_Updated 2026-10-16 (M6-3 merged to `main` @ `5b19757`; Kredi takip importer (pulled forward, D-038) done on `claude/m6-kredi-importer`, PR pending)._
 
 ## Git
-- **`main`:** `41f56e2` (PR #13, M6-2 order-source normalization). **This checkpoint:** branch
-  `claude/m6-3-hedef-importer` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
+- **`main`:** `5b19757` (PR #14, M6-3 Hedef importer). **This checkpoint:** branch `claude/m6-kredi-importer`
+  (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
 - **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
   there to get M5 (see "Owner follow-ups" below).
 
@@ -13,8 +13,9 @@ _Updated 2026-10-16 (M6-2 merged to `main` @ `41f56e2`; M6-3 Hedef importer done
 Two owner follow-ups remain that the sandboxes cannot do (they cannot reach `api.openai.com` or open a browser on
 the Mac): the visual check in the owner's own browser and one live WhatsApp draft tone check. Neither blocks M5.
 **Milestone 6 — Additional data sources / sales intelligence foundation: in progress.** M6-0 (source inventory,
-docs only), M6-1 (importer framework) and M6-2 (order-source normalization) are merged; M6-3 (Hedef importer,
-`services/importers/hedef.py`) is done (PR pending). M6-4 is not started.
+docs only), M6-1 (framework), M6-2 (order source) and M6-3 (Hedef) are merged. **M6-4 (detailed collections) is
+BLOCKED** (the `Evrak Detaylı Tahsilat Raporu` export is missing), so the Kredi takip importer (part of M6-6) was pulled
+forward (D-038) and is done (PR pending). Trodat, gider/gelir and bütçe are not started.
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -552,7 +553,7 @@ Leak check: 0 of 6,906 labels, stems and codes appear in the safe summary; no pa
 **M5 regression:** no M5 file changed. The live path does not import the new module (tested). M5 code is
 byte-identical to `main`, so M5 output on unchanged inputs is unchanged by construction.
 
-## M6-3 (done; PR pending) — Hedef raporu importer
+## M6-3 (done; merged in PR #14 @ `5b19757`) — Hedef raporu importer
 Branch `claude/m6-3-hedef-importer` from `main` @ `41f56e2`. New source module `services/importers/hedef.py` on the
 M6-1 framework (doc: `docs/m6_hedef.md`, decision D-037). No framework change. No API, UI, actions, scoring,
 persistence or M5 refresh dependency.
@@ -631,13 +632,66 @@ Leak check: 0 of about 19,400 codes, reps and locations appear in any summary.
 **M5 / M6-2 regression:** no M5 or M6-2 code changed (one unused test import removed); the live path does not
 import the module (tested).
 
-## Immediate next task
-Review and merge the M6-3 PR. Owner decisions:
-- Hedef file of record: Feb 2026 vs the June 2026 file found in an old transfer folder vs dated snapshots; refresh
-  cadence.
-- Salesperson of record.
-- Customer-code whitespace policy.
-- Fair taxonomy.
+## Kredi takip importer (done; PR pending) — pulled forward from M6-6 while M6-4 is blocked
+Branch `claude/m6-kredi-importer` from `main` @ `5b19757`. New source module `services/importers/kredi.py` on the
+M6-1 framework (doc: `docs/m6_kredi.md`, decision D-038; the roadmap records the sequence exception). No framework
+change. No cash metrics, UI, API, AI, persistence or refresh dependency.
 
-Start **M6-4** (detailed collections) only when it is moved to *Current*; it needs the `Evrak Detaylı Tahsilat
-Raporu` export.
+**What it contains:**
+- **Audience:** `owner`. This is company financing, not customer credit.
+- **Grain:** one installment per row. Contract × installment is unique, and a repeat is fatal.
+- **Control-total row:** the export's trailing total row is detected, verified against the column sums and
+  excluded.
+- **Loan types:** amortizing only. `Rotatif` and unknown types fail closed; unknown statuses fail closed too.
+- **Contract-level fields** must be consistent. Installment number ≥ 1, and ≤ count unless the count is 0 (not
+  recorded).
+- **Arithmetic (both fatal, ±0.01 TL):** components = installment; paid + remaining = installment.
+- **Dates:** `latest_recorded_payment_date` is kept separate from the snapshot date, which is unknown unless
+  declared.
+- **Safe summary:** counts only.
+
+**Finding:** M6-0's "one repeated contract × installment pair" was the export's control-total row (its first cell
+is the row count, its amounts are column sums). Among real installment rows the pair is unique.
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (node + jsdom + Chromium) | `AI_PROVIDER=disabled REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 python -m pytest -q` | **518 passed, 7 skipped, 1 xfailed** (46 new in `tests/test_m6_kredi.py`; the other 472 unchanged) |
+
+Mutation checks: each of these fails tests:
+- revolving loans supported;
+- no duplicate check;
+- shared audience;
+- no arithmetic;
+- no control-total check.
+
+**Real-data read-only check** (Mac VM, throwaway clone, aggregates only; all 3 Kredi workbooks hash- and
+mtime-identical before and after; scratch deleted):
+
+| File | Result |
+|---|---|
+| `kredi sözleşmeleri.xlsx` (Feb 2026) | **staged** — see the breakdown below |
+| `kredi borçları.xlsx` (Dec 2025) | **fails closed** (by design): rule 1 fails on 37 and rule 2 on 51 of 489 rows. It contains `Rotatif` loans and repeated pairs with differing dates/amounts, so it is unsupported. |
+| `kredi borçları 27 haziran 2026.xlsx` (June 2026, old transfer folder) | **staged**: same headers, amortizing only; 316 installments, 35 contracts, 6 lenders, both identities 316/316. Not chosen as authoritative. |
+
+**Feb 2026 breakdown:**
+- 189 rows = 188 installments + 1 control-total row (it matches the column sums).
+- 25 contracts, 5 lenders, TL only, amortizing only.
+- Status: active 8, closed 180.
+- Due dates 2026-01-01 … 2027-07-16; 159 installments are due after the latest payment-slip date (2026-02-04).
+- Remaining principal filled on 188 of 188.
+- Both identities 188/188.
+- One contract with installment count 0.
+- No formulas or errors.
+- Leak check: 0 of 30 codes and 0 of 74 amounts appear in the summary; no path.
+
+**M5 / M6-2 / M6-3 regression:** no existing module changed; nothing live imports the new module (tested). Hedef
+stays explicit-path only.
+
+## Immediate next task
+Review and merge the Kredi PR. Still blocked or open:
+- M6-4 needs the `Evrak Detaylı Tahsilat Raporu` export.
+- Trodat needs a model → SKU mapping.
+- Gider/gelir needs the business-line mapping.
+- File of record for Bütçe, Hedef and now Kredi (Feb vs June export).
+- Salesperson of record, whitespace policy, fair taxonomy, revenue basis.

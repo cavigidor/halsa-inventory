@@ -175,6 +175,17 @@ It is not put into salesperson workflows without a specific business need.
 - **M6-6 Owner sources:** gider/gelir by business line, then kredi takip, then bütçe (only with
   cell-level validation).
 
+> **Sequence exception (2026-10-16, D-038):** the Kredi takip importer (part of M6-6) was pulled forward. The
+> reasons:
+>
+> - M6-4 is still blocked by the missing `Evrak Detaylı Tahsilat Raporu`. It must not be approximated from the
+>   account-level Cari aging.
+> - Trodat still needs a model → SKU mapping.
+> - Gider/gelir needs the business-line mapping.
+>
+> Kredi depends on none of these. The numbering is unchanged: M6-4 stays open and blocked, and the rest of M6-6
+> (gider/gelir, bütçe) is not started. Details: `docs/m6_kredi.md`.
+
 ## 4. M7 — Sales Operating System
 
 After M6 normalizes the required data, turn the deterministic analyses into a practical sales workflow.
