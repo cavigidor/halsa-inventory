@@ -830,3 +830,30 @@ def test_framework_imports_no_ai_and_m5_does_not_import_framework():
     for live in ("app.py", "dashboard_builder.py", "services/refresh.py", "services/context.py",
                  "services/action_sources.py"):
         assert "importers" not in (ROOT / live).read_text(), live
+
+
+# ---------------------------------------------------------------------------------------------
+# Framework additions used by the Bütçe importer (M6-6): FieldType.ANY and NormalizedValue.external_ref
+# ---------------------------------------------------------------------------------------------
+def test_any_type_keeps_raw_values_and_still_classifies_errors(tmp_path):
+    p = _wb(tmp_path, [["etiket", 1.5, 7], [E("#REF!"), F("B1*2", MISSING), F("B1*2", 3.0)]])
+    spec = _spec([], layout=MatrixLayout(bounds="A1:C2", ranges=(
+        MatrixRange("karisik", "A1:C2", T.ANY, required=False, tolerate_invalid_cells=True),)),
+        missing_cache=Severity.WARNING)
+    res = run_import(p, spec)
+    assert res.ok and "excel_error" in _codes(res, Severity.WARNING)
+    vals = {r.get("column_label"): r.values["value"] for r in res.records}
+    assert vals["A1"].value == "etiket" and vals["B1"].value == 1.5 and vals["C1"].value == 7
+    assert vals["A2"].error == "#REF!" and vals["A2"].confidence is Confidence.INVALID
+    assert vals["B2"].kind is CellKind.FORMULA_MISSING_CACHE and vals["B2"].value is None
+    assert vals["C2"].kind is CellKind.FORMULA_VALUE and vals["C2"].value == 3.0
+
+
+def test_external_ref_flag_carried_per_cell(tmp_path):
+    p = _wb(tmp_path, [["Kod", "Bagli"], ["K-1", F("[1]S!A1", 5)], ["K-2", F("B2+1", 6)]],
+            external_links=["file:///C:/x/Diger.xlsx"])
+    res = run_import(p, _spec([FieldSpec("kod", ID, header="Kod"), FieldSpec("bagli", T.INTEGER, header="Bagli")]))
+    assert res.ok
+    flags = [r.values["bagli"].external_ref for r in res.records]
+    assert flags == [True, False]
+    assert res.records[0].values["bagli"].value == 5   # the framework keeps the cached value; sources set policy

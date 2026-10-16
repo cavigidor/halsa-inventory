@@ -30,6 +30,7 @@ class FieldType(str, Enum):
     DECIMAL = "decimal"
     DATE = "date"
     BOOLEAN = "boolean"
+    ANY = "any"               # raw cell value, no conversion (validated-only regions with mixed content)
 
 
 @dataclass(frozen=True)

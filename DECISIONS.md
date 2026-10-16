@@ -512,3 +512,25 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   - Allocation overrides, ratios outside 0–1 and gross profit ≠ sales − cost (all present in the real source) are
     flagged, not corrected.
   - Missing or non-summing ratios, broken totals, Excel errors in money cells and external links are fatal.
+
+### D-041 · 2026-10-16 · Bütçe: partially usable owner planning data at cell level; no repairs; authority unresolved (M6-6)
+- **Cell-level validity:** Bütçe is imported as partially usable owner planning data, cell by cell.
+  - Technically valid cells stay `unverified`; they are never `trusted`.
+  - These cells are `invalid` and excluded from usable coverage: Excel errors, missing caches, non-numeric values in
+    value positions, and cells that depend on another workbook (including the row-1 cells computed from them).
+  - Invalid cells are isolated: they never fail the whole import and never contaminate unrelated cells.
+  - Only structural drift fails the import: anchors, headers, titles, panel labels, year.
+- **No repair, no fill:** the importer never repairs or recalculates formulas, never opens or resolves the linked
+  workbook, and never fills a broken cell. The forbidden sources are neighbors, other periods, Gider/Gelir and sales.
+  An external cell's cached value is kept aside internally only.
+- **Structural identity:** fixed block position with a verified title, segment (year × Forecast/GERCEK), month,
+  expense group × component, panel × scenario × line. Month labels alone are never identity. The two group-list
+  block titles are verified for consistency but not committed.
+- **Currency labels stay verbatim:** `$ kur` / `€ kur` are rate columns; `YTL` / `TL` are amount labels. There is
+  no conversion and no FX source.
+- **Source status** (`complete | partially_usable | unusable`) is reported separately from D-023. It is never
+  `authoritative`.
+- **File of record:** Ocak vs Taslak is unresolved; candidates are listed, never selected. Reconciliation with
+  Gider/Gelir is deferred.
+- **Framework additions** (backward compatible): `FieldType.ANY` for validated-only mixed regions and
+  `NormalizedValue.external_ref` for cell-level external-dependency policies.
