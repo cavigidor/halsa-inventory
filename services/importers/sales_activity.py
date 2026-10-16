@@ -131,7 +131,7 @@ TYPE_TOKENS: tuple[tuple[str, SourceType], ...] = (
 MIN_EDITION_YEAR = 2000
 MAX_EDITION_YEAR = 2099
 
-_LABEL_RE = re.compile(r"(?P<year>\d{4})(?P<rest>\D.*)", re.DOTALL)
+_LABEL_RE = re.compile(r"(?P<year>\d{4})(?P<rest>.+)", re.DOTALL)
 _SEQ_RE = re.compile(r"(?P<body>.*?)(?P<seq>[1-9]\d*)", re.DOTALL)
 
 
@@ -164,9 +164,10 @@ class ParsedLabel:
 def parse_label(raw: Any) -> ParsedLabel:
     """Parse one `Srmmerk` value by structural grammar only.
 
-    `GENEL` → general. Otherwise `<YYYY><stem><TYPE>[sequence]`: a four-digit edition year, a non-empty
-    stem that does not start with a digit, a verified type token matched from the right (longest
-    first), and an optional positive integer without leading zero. Anything else raises `LabelError`.
+    `GENEL` → general. Otherwise `<YYYY><stem><TYPE>[sequence]`: the first four characters are the
+    edition year (digits), the stem is everything between the year and the type token (non-empty,
+    opaque; it may itself contain digits, e.g. one real stem starts with a digit), a verified type token
+    matched from the right (longest first), and an optional positive integer without leading zero. Anything else raises `LabelError`.
     No case folding, no trimming, no dictionaries of names; only NFC normalization so that a decomposed
     `İ` / `Ç` still matches the type token. Different stems are never merged.
     """

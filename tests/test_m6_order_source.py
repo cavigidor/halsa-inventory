@@ -153,10 +153,14 @@ def test_10_future_edition_year():
 
 
 def test_11_missing_year_fails():
-    for bad in ("ANKARAFUAR", "26ANKARAFUAR", "202ANKARAFUAR", "20245ANKARAFUAR"):
+    for bad in ("ANKARAFUAR", "26ANKARAFUAR", "202ANKARAFUAR", "K2026ANKARAFUAR"):
         with pytest.raises(LabelError) as exc:
             parse_label(bad)
         assert exc.value.code == "label_no_year", bad
+    # The year is exactly the first four digits; a digit after it belongs to the opaque stem (seen in
+    # the real data) and is never read as part of the year or as a sequence.
+    p = parse_label("20253KURGUFUAR")
+    assert (p.edition_year, p.stem, p.sequence) == (2025, "3KURGU", None)
 
 
 def test_12_missing_stem_fails():
