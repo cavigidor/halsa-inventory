@@ -43,6 +43,10 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, task TEXT, attempt INTEGER,
             provider TEXT, model TEXT, success INTEGER, error_category TEXT,
             latency_ms INTEGER, input_tokens INTEGER, output_tokens INTEGER)""")
+        # M7-4 (D-045): fair-campaign operational state (local only). CREATE IF NOT EXISTS: existing action
+        # state, memory, AI cache and older databases are left untouched.
+        from services import fair_store
+        fair_store.init_tables(c)
 
 
 def content_key(category, entity_id, content_hash):

@@ -1,4 +1,5 @@
 """API sözleşmesi ve AI çıktı şemaları (Pydantic v2)."""
+import datetime as dt
 from typing import Optional, List, Any, Dict, Literal
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
@@ -469,6 +470,22 @@ class C360EventOrder(BaseModel):
     edition_year_offset: Optional[int] = None
 
 
+class C360FairCampaign(BaseModel):
+    """M7-4: read-only fair-campaign membership (local operational state; edited only in Fuar Merkezi)."""
+    campaign_id: int
+    name: str
+    status: str
+    edition_year: int
+    start_date: str
+    stage: str
+    stage_label: str
+    next_action_date: Optional[str] = None
+    has_note: bool = False
+    linked_event: bool = False
+    erp_fuar_orders: int = 0
+    erp_evidence: Optional[str] = None
+
+
 class C360Events(BaseModel):
     status: str
     orders_by_type: Dict[str, int]
@@ -477,6 +494,7 @@ class C360Events(BaseModel):
     recent_limit: int
     confidence: C360Confidence
     note: str
+    campaigns: List[C360FairCampaign] = []
 
 
 class C360Action(BaseModel):
@@ -728,4 +746,254 @@ class TerritoryResponse(BaseModel):
     hedef_file: Optional[str] = None
     hedef_snapshot_date: Optional[str] = None
     as_of_data_date: str
+    ai_used: Literal[False] = False
+
+
+# ---------- M7-4 Fuar Merkezi (historical FUAR intelligence + manual fair campaigns; never AI) ----------
+FairStage = Literal["invite_candidate", "called", "accepted", "hotel_confirmed", "meeting_planned", "attended",
+                    "offer", "order", "follow_up", "declined", "removed"]
+FairActiveStage = Literal["invite_candidate", "called", "accepted", "hotel_confirmed", "meeting_planned", "attended",
+                          "offer", "order", "follow_up"]
+
+
+class FairTop(BaseModel):
+    label: str
+    name: Optional[str] = None
+    net_order_amount: Optional[float] = None
+    quantity: float
+    orders: int
+    lines: int
+
+
+class FairEditionSummary(BaseModel):
+    event_id: str
+    edition_year: int
+    label: str                           # local only (may be a partner name); never logged
+    stem: str
+    sequence: Optional[int] = None
+    first_order_date: Optional[str] = None
+    last_order_date: Optional[str] = None
+    orders: int
+    lines: int
+    customers: int
+    products: int
+    quantity: float
+    net_order_amount: Optional[float] = None
+    missing_amount_lines: int
+    date_unusable_orders: int
+    customer_conflict_orders: int
+
+
+class FairHistoryList(BaseModel):
+    status: Literal["ok", "unavailable"]
+    as_of_data_date: Optional[str] = None
+    amount_label: str
+    amount_note: str
+    notes: List[str]
+    years: List[int]
+    year: Optional[int] = None
+    total: int
+    limit: int
+    truncated: bool
+    diagnostics: Dict[str, Any]          # counts only
+    items: List[FairEditionSummary]
+    ai_used: Literal[False] = False
+
+
+class FairEditionCustomer(BaseModel):
+    customer_code: str
+    display_name: str
+    in_customer360: bool
+    closed: Optional[bool] = None
+    master_status: str
+    warnings: List[Dict[str, str]] = []
+    orders: int
+    lines: int
+    net_order_amount: Optional[float] = None
+    quantity: float
+    first_order_date: Optional[str] = None
+    last_order_date: Optional[str] = None
+    in_campaign: bool = False
+
+
+class FairEditionDetail(FairEditionSummary):
+    amount_label: str
+    amount_note: str
+    notes: List[str]
+    customer_sort: str
+    customer_limit: int
+    customers_truncated: bool
+    top_products: List[FairTop]
+    top_groups: List[FairTop]
+    top_categories: List[FairTop]
+    customer_rows: List[FairEditionCustomer]
+    ai_used: Literal[False] = False
+
+
+class FairCampaignCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=120)
+    edition_year: int = Field(ge=2000, le=2099)
+    start_date: dt.date
+    end_date: Optional[dt.date] = None
+    event_stem: Optional[str] = Field(default=None, max_length=120)
+    event_sequence: Optional[int] = Field(default=None, ge=1, le=999)
+    status: Literal["planned", "active"] = "planned"
+
+    @model_validator(mode="after")
+    def _check(self):
+        if not self.name.strip():
+            raise ValueError("name must not be blank")
+        if self.end_date is not None and self.end_date < self.start_date:
+            raise ValueError("end_date must not be before start_date")
+        if self.event_stem is not None and not self.event_stem.strip():
+            self.event_stem = None
+        return self
+
+
+class FairCampaignUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    edition_year: Optional[int] = Field(default=None, ge=2000, le=2099)
+    start_date: Optional[dt.date] = None
+    end_date: Optional[dt.date] = None
+    clear_end_date: bool = False
+    event_stem: Optional[str] = Field(default=None, max_length=120)
+    clear_event_link: bool = False
+    event_sequence: Optional[int] = Field(default=None, ge=1, le=999)
+    status: Optional[Literal["planned", "active"]] = None
+
+    @model_validator(mode="after")
+    def _check(self):
+        if self.name is not None and not self.name.strip():
+            raise ValueError("name must not be blank")
+        return self
+
+
+class FairLinkedEvent(BaseModel):
+    configured: bool
+    found: bool
+    event_id: Optional[str] = None
+    label: Optional[str] = None
+    orders: Optional[int] = None
+    customers: Optional[int] = None
+    net_order_amount: Optional[float] = None
+    first_order_date: Optional[str] = None
+    last_order_date: Optional[str] = None
+
+
+class FairCampaignOut(BaseModel):
+    campaign_id: int
+    name: str
+    edition_year: int
+    start_date: str
+    end_date: Optional[str] = None
+    event_stem: Optional[str] = None
+    event_sequence: Optional[int] = None
+    status: Literal["planned", "active", "archived"]
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    total_customers: int
+    active_customers: int
+    stage_counts: Dict[str, int]
+    due_tasks: int
+    linked_event: FairLinkedEvent
+
+
+class FairStageOut(BaseModel):
+    key: str
+    label: str
+    terminal: bool
+
+
+class FairCampaignList(BaseModel):
+    stages: List[FairStageOut]
+    amount_label: str
+    items: List[FairCampaignOut]
+    ai_used: Literal[False] = False
+
+
+class FairCampaignCustomer(BaseModel):
+    customer_code: str
+    display_name: str
+    in_customer360: bool
+    last_order_date: Optional[str] = None
+    closed: Optional[bool] = None
+    master_status: str
+    warnings: List[Dict[str, str]] = []
+    stage: FairStage
+    stage_label: str
+    next_action_date: Optional[str] = None
+    due: bool
+    note: Optional[str] = None           # local only; never logged, never sent to AI
+    has_note: bool
+    segments: List[str]
+    collection_first: bool
+    erp_fuar_orders: int
+    erp_evidence: Optional[str] = None
+    erp_mismatch: Optional[Literal["erp_order_stage_differs", "stage_order_without_erp"]] = None
+    updated_at: Optional[str] = None
+
+
+class FairCampaignCustomers(BaseModel):
+    campaign_id: int
+    total: int
+    limit: int
+    truncated: bool
+    note: str
+    items: List[FairCampaignCustomer]
+    ai_used: Literal[False] = False
+
+
+class FairCustomersAdd(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    customer_codes: List[str] = Field(min_length=1, max_length=200)
+    stage: FairActiveStage = "invite_candidate"
+
+
+class FairAddResult(BaseModel):
+    added: List[str]
+    already_present: List[str]
+    blocked_kapali: List[str]
+    invalid: List[str]
+    warnings: List[Dict[str, str]] = []
+    counts: Dict[str, int]
+    ai_used: Literal[False] = False
+
+
+class FairCustomerUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    customer_code: str = Field(min_length=1, max_length=64)
+    stage: Optional[FairStage] = None
+    next_action_date: Optional[dt.date] = None
+    clear_next_action: bool = False
+    note: Optional[str] = Field(default=None, max_length=500)
+    clear_note: bool = False
+
+
+class FairCandidate(BaseModel):
+    customer_code: str
+    display_name: str
+    last_order_date: Optional[str] = None
+    closed: Optional[bool] = None
+    master_status: str
+    warnings: List[Dict[str, str]] = []
+    segments: List[str]
+    queue_score: Optional[float] = None
+    collection_first: bool
+    historical_fuar: bool
+    in_campaign: bool
+    campaign_stage: Optional[str] = None
+
+
+class FairCandidates(BaseModel):
+    segment: str
+    total: int
+    limit: int
+    truncated: bool
+    kapali_excluded: int
+    segment_counts: Dict[str, int]
+    segments: List[Dict[str, str]]
+    note: str
+    items: List[FairCandidate]
     ai_used: Literal[False] = False

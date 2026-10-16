@@ -53,6 +53,11 @@ CROSS_SELL_MIN_CONFIDENCE = 0.30        # pair_buyers / source_buyers
 CROSS_SELL_MIN_LIFT = 1.20              # confidence / target prevalence
 CROSS_SELL_MAX_TARGETS_PER_CUSTOMER = 3
 CROSS_SELL_SCORE_CAP = 69               # cross-sell score = min(cap, confidence × 100): never "high" or "critical"
+# M7-4 (D-045): a due fair task (explicit next-action date in a fair campaign) is an operational, not financial,
+# reason. One fixed score for every task (medium band, below high/critical financial reasons); it never varies by
+# revenue, Hedef, stage or days overdue. An operational placeholder the owner may tune later.
+FAIR_TASK_SCORE = 55
+MAX_FAIR_BULK_ADD = 200                 # explicit selection per request; never "add everyone"
 MAX_OPPORTUNITY_PAIRS = 50              # bounded pair table per request
 MAX_TERRITORY_ROWS = 200                # bounded territory rows per request
 ENABLE_AI = os.environ.get("ENABLE_AI", "true").lower() == "true"

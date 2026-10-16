@@ -21,6 +21,9 @@ from services import evidence as EV
 from services import customer360 as C360
 from services import sales_queue as SQ
 from services import opportunities as OP
+from services import fairs as FA
+from services import fair_store as FS
+from services import fair_center as FC
 from services import action_sources  # noqa: F401  (registers the built-in deterministic sources)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -355,11 +358,15 @@ def customer360_detail(customer_code: str, c360: C360.Customer360Repository = De
                        repo: ContextRepository = Depends(get_repo)):
     snap = _c360_snapshot(c360)
     ctx = repo.current()
+    same = ctx is not None and c360.signature_for(ctx) == snap.signature
     det = C360.customer_detail(snap, customer_code, ctx=ctx,
                                stored_actions=ST.get_entity_actions("customer", customer_code),
                                memory=ST.get_memory("customer", customer_code),
                                categories={c.key: c.label_tr for c in A.categories()},
-                               opportunities=_same_source_opportunities(c360, snap, ctx))
+                               opportunities=_same_source_opportunities(c360, snap, ctx),
+                               # M7-4: membership is local state; ERP evidence only from same-source FUAR data
+                               fair_campaigns=FC.customer360_campaigns(customer_code,
+                                                                       getattr(ctx, "fairs", None) if same else None))
     if det is None:
         raise HTTPException(404, f"Müşteri bulunamadı: {customer_code}")
     return det
@@ -424,6 +431,206 @@ def opportunities_territories(dimension: Literal["city", "district", "sector"] =
     if ctx is None or c360.signature_for(ctx) != snap.signature:
         raise HTTPException(503, {"state": "building", "message": "Müşteri verisi hazırlanıyor…"})
     return S.TerritoryResponse(**OP.territories(snap, getattr(ctx, "opportunities", None), dimension, limit))
+
+
+# ---------------- M7-4 Fuar Merkezi (historical FUAR facts + manual fair campaigns; never calls the AI provider) ---
+# History comes from the live context's private FUAR index (FUAR-tagged orders only); campaigns are local SQLite state
+# validated against the Customer 360 snapshot of the same sources. No Excel read. Mutations need X-StockAgent: 1
+# (global middleware). Nothing here logs names, codes, notes or event names.
+def _fair_history(repo):
+    ctx = repo.current()
+    hist = getattr(ctx, "fairs", None) if ctx is not None else None
+    if hist is None:
+        raise HTTPException(503, {"state": "error", "error_code": "fair_history_unavailable",
+                                  "message": "Fuar geçmişi bu bağlamda yok; verileri yenileyin."})
+    return ctx, hist
+
+
+def _fair_ctx_snap(repo, c360):
+    try:
+        snap = c360.snapshot()
+    except C360.Customer360NotReady as e:
+        raise HTTPException(503, {"state": e.state, "message": "Müşteri verisi hazırlanıyor…"})
+    except C360.Customer360Error as e:
+        raise HTTPException(503, {"state": "error", "error_code": e.code, "message": e.message})
+    ctx = repo.current()
+    if ctx is None or c360.signature_for(ctx) != snap.signature:
+        raise HTTPException(503, {"state": "building", "message": "Müşteri verisi hazırlanıyor…"})
+    return ctx, snap
+
+
+def _fair_error(e: "FC.FairError"):
+    raise HTTPException(e.status, {"error_code": e.code, "message": e.message})
+
+
+@app.get("/api/fairs/history", response_model=S.FairHistoryList)
+def fairs_history(year: int | None = None, q: str | None = None, limit: int = 50,
+                  repo: ContextRepository = Depends(get_repo)):
+    ctx, hist = _fair_history(repo)
+    n = max(1, min(int(limit), 200))
+    items, total = hist.list(year=year, q=(q or "").strip() or None, limit=n)
+    d = hist.diagnostics
+    safe = {k: d.get(k) for k in ("editions", "edition_year_min", "edition_year_max", "fuar_orders", "fuar_lines",
+                                  "fuar_customers", "fuar_lines_with_amount", "fuar_missing_amount_lines",
+                                  "fuar_date_unusable_orders", "fuar_customer_conflict_orders", "label_conflict_orders",
+                                  "unparsed_labels", "orders_by_type")}
+    return S.FairHistoryList(status=hist.status, as_of_data_date=hist.as_of, amount_label=FA.AMOUNT_LABEL,
+                             amount_note=FA.AMOUNT_NOTE, notes=FA.SCOPE_NOTES, years=hist.years(), year=year,
+                             total=total, limit=n, truncated=total > n, diagnostics=safe, items=items)
+
+
+@app.get("/api/fairs/history/{event_id}", response_model=S.FairEditionDetail)
+def fairs_history_detail(event_id: str, campaign_id: int | None = None, customer_limit: int = 100,
+                         repo: ContextRepository = Depends(get_repo),
+                         c360: C360.Customer360Repository = Depends(get_c360)):
+    ctx, snap = _fair_ctx_snap(repo, c360)
+    hist = getattr(ctx, "fairs", None)
+    e = hist.editions.get(event_id) if hist is not None else None
+    if e is None:
+        raise HTTPException(404, "Fuar bulunamadı.")
+    return S.FairEditionDetail(**FC.edition_detail(e, snap, campaign_id, customer_limit))
+
+
+def _stages():
+    return [S.FairStageOut(key=k, label=v, terminal=k in FS.TERMINAL_STAGES) for k, v in FS.STAGE_LABELS.items()]
+
+
+@app.get("/api/fairs/campaigns", response_model=S.FairCampaignList)
+def fairs_campaigns(repo: ContextRepository = Depends(get_repo)):
+    ctx = repo.current()
+    hist = getattr(ctx, "fairs", None) if ctx is not None else None
+    return S.FairCampaignList(stages=_stages(), amount_label=FA.AMOUNT_LABEL,
+                              items=[FC.campaign_summary(c, hist) for c in FS.list_campaigns()])
+
+
+@app.post("/api/fairs/campaigns", response_model=S.FairCampaignOut)
+def fairs_campaign_create(body: S.FairCampaignCreate, repo: ContextRepository = Depends(get_repo)):
+    c = FS.create_campaign(name=body.name.strip(), edition_year=body.edition_year,
+                           start_date=body.start_date.isoformat(),
+                           end_date=body.end_date.isoformat() if body.end_date else None,
+                           event_stem=body.event_stem, event_sequence=body.event_sequence, status=body.status)
+    ctx = repo.current()
+    return FC.campaign_summary(c, getattr(ctx, "fairs", None) if ctx is not None else None)
+
+
+@app.get("/api/fairs/campaigns/{campaign_id}", response_model=S.FairCampaignOut)
+def fairs_campaign(campaign_id: int, repo: ContextRepository = Depends(get_repo)):
+    try:
+        c = FC.require_campaign(campaign_id)
+    except FC.FairError as e:
+        _fair_error(e)
+    ctx = repo.current()
+    return FC.campaign_summary(c, getattr(ctx, "fairs", None) if ctx is not None else None)
+
+
+@app.put("/api/fairs/campaigns/{campaign_id}", response_model=S.FairCampaignOut)
+def fairs_campaign_update(campaign_id: int, body: S.FairCampaignUpdate, repo: ContextRepository = Depends(get_repo)):
+    fields = {}
+    for k in ("name", "edition_year", "event_sequence", "status"):
+        v = getattr(body, k)
+        if v is not None:
+            fields[k] = v.strip() if k == "name" else v
+    if body.start_date is not None:
+        fields["start_date"] = body.start_date.isoformat()
+    if body.end_date is not None:
+        fields["end_date"] = body.end_date.isoformat()
+    if body.clear_end_date:
+        fields["end_date"] = None
+    if body.event_stem is not None:
+        fields["event_stem"] = body.event_stem.strip() or None
+    if body.clear_event_link:
+        fields["event_stem"], fields["event_sequence"] = None, None
+    try:
+        FC.require_campaign(campaign_id)
+        c = FS.update_campaign(campaign_id, fields)
+    except FC.FairError as e:
+        _fair_error(e)
+    except FS.FairStoreError as e:
+        raise HTTPException(409 if e.code == "campaign_archived" else 422, {"error_code": e.code, "message": e.message})
+    ctx = repo.current()
+    return FC.campaign_summary(c, getattr(ctx, "fairs", None) if ctx is not None else None)
+
+
+@app.post("/api/fairs/campaigns/{campaign_id}/archive", response_model=S.FairCampaignOut)
+def fairs_campaign_archive(campaign_id: int, repo: ContextRepository = Depends(get_repo)):
+    try:
+        FC.require_campaign(campaign_id)
+        c = FS.archive_campaign(campaign_id)
+    except FC.FairError as e:
+        _fair_error(e)
+    except FS.FairStoreError as e:
+        raise HTTPException(409, {"error_code": e.code, "message": e.message})
+    ctx = repo.current()
+    return FC.campaign_summary(c, getattr(ctx, "fairs", None) if ctx is not None else None)
+
+
+@app.get("/api/fairs/campaigns/{campaign_id}/customers", response_model=S.FairCampaignCustomers)
+def fairs_campaign_customers(campaign_id: int, stage: str | None = None, due: bool = False,
+                             segment: str | None = None, q: str | None = None, limit: int = 100,
+                             repo: ContextRepository = Depends(get_repo),
+                             c360: C360.Customer360Repository = Depends(get_c360)):
+    try:
+        c = FC.require_campaign(campaign_id)
+    except FC.FairError as e:
+        _fair_error(e)
+    ctx, snap = _fair_ctx_snap(repo, c360)
+    res = FC.campaign_customers(c, ctx, snap, stage=stage if stage in FS.STAGE_LABELS else None, due=due,
+                                segment=segment if segment in FC.SEGMENT_KEYS else None, q=q, limit=limit)
+    return S.FairCampaignCustomers(campaign_id=campaign_id, **res)
+
+
+@app.post("/api/fairs/campaigns/{campaign_id}/customers", response_model=S.FairAddResult)
+def fairs_campaign_add(campaign_id: int, body: S.FairCustomersAdd, repo: ContextRepository = Depends(get_repo),
+                       c360: C360.Customer360Repository = Depends(get_c360)):
+    try:
+        FC.require_campaign(campaign_id)
+    except FC.FairError as e:
+        _fair_error(e)
+    _, snap = _fair_ctx_snap(repo, c360)
+    try:
+        return S.FairAddResult(**FC.add_customers(campaign_id, list(body.customer_codes), snap, body.stage))
+    except FC.FairError as e:
+        _fair_error(e)
+
+
+@app.put("/api/fairs/campaigns/{campaign_id}/customers", response_model=S.FairCampaignCustomer)
+def fairs_campaign_update_customer(campaign_id: int, body: S.FairCustomerUpdate,
+                                   repo: ContextRepository = Depends(get_repo),
+                                   c360: C360.Customer360Repository = Depends(get_c360)):
+    try:
+        c = FC.require_campaign(campaign_id)
+    except FC.FairError as e:
+        _fair_error(e)
+    ctx, snap = _fair_ctx_snap(repo, c360)
+    fields = {}
+    if body.stage is not None:
+        fields["stage"] = body.stage
+    if body.next_action_date is not None:
+        fields["next_action_date"] = body.next_action_date.isoformat()
+    if body.clear_next_action:
+        fields["next_action_date"] = None
+    if body.note is not None:
+        fields["note"] = body.note
+    if body.clear_note:
+        fields["note"] = None
+    try:
+        FC.update_customer(campaign_id, body.customer_code, snap, **fields)
+    except FC.FairError as e:
+        _fair_error(e)
+    rows = FC.campaign_customers(c, ctx, snap, limit=500)["items"]
+    row = next((r for r in rows if r["customer_code"] == body.customer_code), None)
+    if row is None:
+        raise HTTPException(404, "Müşteri bulunamadı.")
+    return row
+
+
+@app.get("/api/fairs/candidates", response_model=S.FairCandidates)
+def fairs_candidates(segment: str | None = None, q: str | None = None, campaign_id: int | None = None,
+                     fuar_first: bool = False, limit: int = 50, repo: ContextRepository = Depends(get_repo),
+                     c360: C360.Customer360Repository = Depends(get_c360)):
+    ctx, snap = _fair_ctx_snap(repo, c360)
+    return S.FairCandidates(**FC.candidates(ctx, snap, segment=segment, q=q, campaign_id=campaign_id,
+                                            fuar_first=fuar_first, limit=limit))
 
 
 # ---------------- draft message (copy-only; nothing is ever sent) ----------------

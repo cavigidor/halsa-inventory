@@ -254,7 +254,10 @@ milestone (D-016).
 >   Deterministic anagrup-level cross-sell (never-bought target gap, confidence score capped below "high") in Günlük
 >   Satış, Customer 360 and a read-only "Fırsatlar" tab; unverified Hedef territory counts (never a salesperson
 >   ranking, never a potential/penetration score); per-category queue reservoir.
-> - **M7-4 — January Fair Command Center.**
+> - **M7-4 — Fuar Merkezi (Fair Command Center): done** (D-045, `docs/m7_fair_command_center.md`). FUAR-only
+>   historical intelligence from ERP attribution (no conversion window, ROI or attendance claims) plus reusable,
+>   manually curated fair campaigns with a manual funnel; due fair tasks in Günlük Satış (fixed score 55);
+>   read-only candidate segments that never auto-enroll.
 > - **M7-5 — Lightweight CRM / follow-up workflow.**
 > - **M7-6 — Owner / management views + integration / polish.**
 
