@@ -511,6 +511,32 @@ class C360Warning(BaseModel):
     message: str
 
 
+class C360OpportunityItem(BaseModel):
+    """M7-3: one cross-sell target GROUP (anagrup) of this customer; never a SKU, never money."""
+    target_group: str
+    source_group: str
+    source_buyers: int
+    target_buyers: int
+    pair_buyers: int
+    confidence: float
+    lift: float
+    score: float
+    priority: Priority
+    never_purchased: Literal[True] = True
+    supporting_sources: List[str] = []
+
+
+class C360Opportunities(BaseModel):
+    status: Literal["available", "none", "unavailable"]
+    label: str
+    dimension: Literal["anagrup"] = "anagrup"
+    dimension_label: str
+    recent_window_days: int
+    closed: Optional[bool] = None
+    items: List[C360OpportunityItem] = []
+    notes: List[str] = []
+
+
 class Customer360Detail(BaseModel):
     customer_code: str
     as_of_data_date: str
@@ -520,6 +546,7 @@ class Customer360Detail(BaseModel):
     salespeople: List[C360Salesperson]
     sales: C360Sales
     products: C360Products
+    opportunities: C360Opportunities
     receivables: C360Receivables
     hedef: C360Hedef
     events: C360Events
@@ -622,4 +649,83 @@ class SalesQueueResponse(BaseModel):
     filters: List[SalesQueueFilter]
     diagnostics: Dict[str, Any]          # aggregate counts only, never customer identities
     items: List[SalesQueueItem]
+    ai_used: Literal[False] = False
+
+
+# ---------- M7-3 opportunity intelligence (deterministic, read-only; never AI) ----------
+class OpportunityPair(BaseModel):
+    source_group: str
+    target_group: str
+    source_buyers: int
+    target_buyers: int
+    pair_buyers: int
+    confidence: float
+    target_prevalence: float
+    lift: float
+
+
+class OpportunityThresholds(BaseModel):
+    recent_days: int
+    min_source_buyers: int
+    min_target_buyers: int
+    min_pair_buyers: int
+    min_confidence: float
+    min_lift: float
+    max_targets_per_customer: int
+    score_cap: int
+
+
+class OpportunitySummary(BaseModel):
+    status: Literal["ok", "unavailable"]
+    reason: Optional[str] = None
+    dimension: Literal["anagrup"] = "anagrup"
+    dimension_label: str
+    as_of_data_date: Optional[str] = None
+    window_start: Optional[str] = None
+    thresholds: OpportunityThresholds
+    active_customers: int
+    groups_in_model: int
+    eligible_pairs: int
+    customers_with_opportunities: int    # model level: before KAPALI, action state and the queue reservoir
+    opportunity_targets: int
+    targets_by_priority: Dict[str, int]
+    pair_limit: int
+    pairs_truncated: bool
+    pairs: List[OpportunityPair]
+    queue_reservoir: int                 # cross-sell reasons kept in the private Günlük Satış reservoir
+    notes: List[str]
+    ai_used: Literal[False] = False
+
+
+class TerritoryRow(BaseModel):
+    label: str                           # Hedef value as written (unverified); rendered as text only
+    matched_customers: int
+    active_customers: int
+    current_year_customers: int
+    cross_sell_customers: int
+    cross_sell_targets: int
+
+
+class TerritoryCoverage(BaseModel):
+    hedef_accounts: int
+    matched_customers: int
+    missing_value_customers: int
+    cross_sell_model: str
+
+
+class TerritoryResponse(BaseModel):
+    status: Literal["ok", "not_configured", "failed"]
+    message: Optional[str] = None
+    dimension: Literal["city", "district", "sector"]
+    dimension_label: str
+    confidence: Literal["unverified"] = "unverified"
+    note: str
+    limit: int
+    total_rows: int
+    truncated: bool
+    rows: List[TerritoryRow]
+    coverage: Optional[TerritoryCoverage] = None
+    hedef_file: Optional[str] = None
+    hedef_snapshot_date: Optional[str] = None
+    as_of_data_date: str
     ai_used: Literal[False] = False

@@ -22,7 +22,8 @@ dashboard_builder.py ── m_stock / m_collections / load_sales / m_lapsed / m_
    │──► dashboard.html            (Layer 1: deterministic Turkish dashboard, in use; plus the
    │                              server-driven "✨ AI Aksiyon Merkezi" tab from _ai_panel(), M5-2, and the
    │                              server-driven "Günlük Satış" tab from _sq_panel(), M7-2, and the
-   │                              server-driven "Müşteri 360" tab from _c360_panel(), M7-1)
+   │                              server-driven "Müşteri 360" tab from _c360_panel(), M7-1, and the
+   │                              server-driven "Fırsatlar" tab from _opp_panel(), M7-3)
    ▼
 services/context.py   build_context(): normalized, top-N "agent context"; the action queue comes from
    │                  registered sources (services/actions.py + action_sources.py), ranked by
@@ -46,6 +47,9 @@ services/customer360.py  M7-1 Customer 360: separate full-customer repository bu
 services/sales_queue.py  M7-2 Günlük Satış: one card per customer from the context's PRIVATE uncut customer
                       candidates (collections / winback / real_decline) + the matching Customer 360 snapshot +
                       shared SQLite state; GET /api/sales-queue; no new rules, never AI (D-043)
+services/opportunities.py  M7-3: cross-sell association model at anagrup level from the context's already-read
+                      sales frame (private AgentContext attribute) + descriptive Hedef territory counts;
+                      GET /api/opportunities/*; never AI (D-044)
 ```
 
 ## Important files
@@ -73,6 +77,7 @@ services/sales_queue.py  M7-2 Günlük Satış: one card per customer from the c
 | `services/importers/gider_gelir.py` | M6-6: Gider/Gelir (owner only) → expenses with native-line allocations, revenue by native line, unique ÖZET facts; ÖZET/Sheet1 duplicates are verification-only or excluded; no management mapping (`docs/m6_gider_gelir.md`, D-040); explicit file only; not used by M5 |
 | `services/customer360.py` | M7-1: Customer 360 repository (full customer population, not the agent context); exact live sources, signature cache, DQ-5-safe master attributes, invoice-account receivables (no allocation), optional explicit Hedef, M6-2 events; read-only, no AI (`docs/m7_customer_360.md`, D-042) |
 | `services/sales_queue.py` | M7-2: Günlük Satış queue. Private uncut customer candidates (`AgentContext` attributes, never serialized) grouped per Customer 360 customer; max-score, collection-first sequence, exclusive invoice-account mapping, master KAPALI; shared M5 action state (`docs/m7_daily_sales_queue.md`, D-043) |
+| `services/opportunities.py` | M7-3: cross-sell model (anagrup pairs: support / confidence / lift guards from `config.CROSS_SELL_*`; never-bought target gap; score = confidence capped at 69) and unverified Hedef territory counts; read-only, no AI (`docs/m7_opportunity_intelligence.md`, D-044) |
 | `services/importers/butce.py` | M6-6: Bütçe (owner only) → cell-level facts (sales blocks by segment and month, rates, expense groups, BÜTÇE ÖZET panels) with validity and a coverage map; invalid and externally dependent cells are isolated, never repaired; source status `partially_usable`, never authoritative (`docs/m6_butce.md`, D-041); explicit file only; not used by M5 |
 | `tests/fixtures/xlsx_synth.py` | Runtime OOXML writer for synthetic workbooks with cached formulas, error cells and external links |
 | `tests/test_m5_browser.py` | Playwright smoke tests: real FastAPI + Chromium, synthetic data, disabled/mock AI |
@@ -113,7 +118,7 @@ services/sales_queue.py  M7-2 Günlük Satış: one card per customer from the c
 | 4 | Live macro data (TCMB/TÜİK inflation, FX) | later |
 | 5 | "✨ AI Aksiyon Merkezi" tab: deterministic action queue first, AI on demand (design: `docs/m5_action_center.md`) | **complete** (M5-1 to M5-6: backend, read-only tab, action state, drafts + drawer, controlled refresh, browser verification) |
 | 6 | Additional data sources / sales intelligence foundation: validated importers for hedef raporu, detailed collections, Trodat sales, gider/gelir, kredi takip, bütçe (`docs/roadmap_m6_m7.md`) | in progress: M6-0 source inventory done (`docs/m6_source_inventory.md`, D-034); M6-1 importer framework done (`services/importers/`, D-035); M6-2 order-source normalization done (D-036); M6-3 Hedef importer done (D-037); M6-4 blocked (missing export), so the Kredi importer was pulled forward (D-038); M6-5 Trodat importer done (D-039); M6-6 Gider/Gelir done (D-040); M6-6 Bütçe done (D-041) |
-| 7 | Sales operating system: daily sales queue, customer 360, cross-sell, January fair command center, light CRM, new-buyer discovery | in progress: M7-1 searchable Customer 360 done (D-042); M7-2 Günlük Satış daily sales queue done (D-043); next M7-3 cross-sell + potential / territory |
+| 7 | Sales operating system: daily sales queue, customer 360, cross-sell, January fair command center, light CRM, new-buyer discovery | in progress: M7-1 searchable Customer 360 done (D-042); M7-2 Günlük Satış daily sales queue done (D-043); M7-3 cross-sell + opportunity / territory intelligence done (D-044); next M7-4 January Fair Command Center |
 | — | Multi-user / remote deployment (auth, admin and salesperson roles, private deployment, backups) | future, out of scope for M5 (D-016) |
 
 ## Product principle (D-015)

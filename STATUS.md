@@ -1,10 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-16 (M7-1 Customer 360 merged to `main` @ `a699d5e`; M7-2 Günlük Satış done on `claude/m7-2-daily-sales-queue`, PR pending)._
+_Updated 2026-10-16 (M7-2 Günlük Satış merged to `main` @ `b2ca2ca`; M7-3 opportunity intelligence done on `claude/m7-3-opportunity-intelligence`, PR pending)._
 
 ## Git
-- **`main`:** `a699d5e` (PR #19, M7-1 Customer 360). **This checkpoint:** branch
-  `claude/m7-2-daily-sales-queue` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
+- **`main`:** `b2ca2ca` (PR #20, M7-2 Günlük Satış). **This checkpoint:** branch
+  `claude/m7-3-opportunity-intelligence` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
 - **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
   there to get M5 (see "Owner follow-ups" below).
 
@@ -17,7 +17,7 @@ docs only), M6-1 (framework), M6-2 (order source) and M6-3 (Hedef) are merged. *
 BLOCKED** (the `Evrak Detaylı Tahsilat Raporu` export is missing). The Kredi takip importer (part of M6-6) was pulled
 forward (D-038) and is merged. M6-5 (Trodat), M6-6 Gider/Gelir and M6-6 Bütçe are merged: every currently available M6 source is done; M6-4 stays
 BLOCKED and is not renumbered.
-**Milestone 7 — Sales Operating System: in progress.** M7-1 (searchable Customer 360) is merged. M7-2 (Günlük Satış, the deterministic daily sales queue) is done (PR pending). M7-3 is not started.
+**Milestone 7 — Sales Operating System: in progress.** M7-1 (searchable Customer 360) and M7-2 (Günlük Satış) are merged. M7-3 (cross-sell + opportunity / territory intelligence) is done (PR pending). M7-4 is not started.
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -943,7 +943,7 @@ Tests:
 **Regression:** M5 (actions, order, drawer, drafts, refresh) and all M6 importers are unchanged. Detailed
 Collections stays blocked.
 
-## M7-2 Günlük Satış (done; PR pending) — deterministic daily sales queue
+## M7-2 Günlük Satış (merged, PR #20 @ `b2ca2ca`) — deterministic daily sales queue
 Branch `claude/m7-2-daily-sales-queue` from `main` @ `a699d5e`. Doc: `docs/m7_daily_sales_queue.md`, decision D-043.
 
 **What it contains:**
@@ -991,11 +991,63 @@ Tests:
 | AI calls / sources | 0 / hash- and mtime-identical; scratch deleted |
 
 **Regression:** M5 (actions, order, drawer, drafts, refresh), M7-1 Customer 360 semantics and all M6 importers are
-unchanged. DQ-1 to DQ-5 are not touched. Detailed Collections stays blocked. M7-3 is not started.
+unchanged. DQ-1 to DQ-5 are not touched. Detailed Collections stays blocked.
+
+## M7-3 Cross-sell + opportunity / territory intelligence (done; PR pending)
+Branch `claude/m7-3-opportunity-intelligence` from `main` @ `b2ca2ca`. Doc: `docs/m7_opportunity_intelligence.md`,
+decision D-044.
+
+**What it contains:**
+- **Cross-sell model** (`services/opportunities.py`): native `anagrup` groups from the already-read sales frame (no
+  Excel read).
+  - Active cohort = orders in the 365 days to the data date.
+  - Directed pair support, confidence and lift with the `config.CROSS_SELL_*` guards.
+  - Target = a group the customer has never bought, reached from an eligible source bought inside the window.
+  - One opportunity per target group, at most three per customer.
+  - Score = min(69, confidence × 100), so never high or critical; action confidence `medium`.
+- **Action surfaces:** categories declare `action_center` and/or `sales_queue`. Cross-sell appears in Günlük Satış only.
+  - M5 top 15 and `/api/agent/categories` are unchanged (tested against the old algorithm; confirmed on real data).
+- **Per-category queue reservoir:** 200 per category (`MAX_SALES_QUEUE_CANDIDATES_PER_CATEGORY`; the old variable is
+  honoured). No category starves another; there are no quotas on the final page.
+- **Günlük Satış:** `cross_sell` reason and "Çapraz Satış" filter.
+  - Sequence: collections → winback → rest by score.
+  - KAPALI removes cross-sell; the default draft is `sales_followup`.
+- **Customer 360:** "Fırsatlar" card with up to three target groups, strongest source, confidence, lift, support and a
+  "never bought" line. No SKU, revenue, penetration or potential.
+- **Fırsatlar tab:** model summary, strongest group pairs, and a territory view (Hedef İl / İlçe / Sektör kodu,
+  unverified, counts only, explicitly not a performance ranking).
+  - "Hedef dosyası yapılandırılmadı" / failed states.
+  - A deep link to the Günlük Satış cross-sell filter.
+- **API:** `GET /api/opportunities/summary`, `GET /api/opportunities/territories` (typed, bounded, no AI, no Excel read).
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (node + jsdom + Chromium) | `AI_PROVIDER=disabled REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 python -m pytest -q` | **902 passed, 7 skipped, 1 xfailed** (69 new: 63 unit/API tests in `tests/test_m7_opportunities.py`, 6 Playwright tests covering the 13 scenarios in `tests/test_m7_opp_browser.py`; M7-1/M7-2 tests updated only for the new tab, section, filter and reservoir) |
+
+**Real-data read-only check** (Mac VM, 5 Oct 2026 exports; aggregates only):
+
+| Item | Result |
+|---|---|
+| `anagrup` coverage | 100 % of 182,121 lines; 86 groups; all 6,754 customers |
+| Active cohort / groups in model / eligible pairs | 1,937 / 78 / 210 |
+| Customers with opportunities / targets | 1,516 (78 % of the cohort) / 3,795 (medium 1,634 · low 2,161) |
+| Reservoir | decline 200 · winback 200 · collections 7 · cross-sell 200 |
+| Günlük Satış | 576 customers (195 before); cross-sell filter 185; first 20 cards contain no cross-sell |
+| Latency | model 1.1 s in the context build; requests 3–12 ms median |
+| Territory (explicit Hedef smoke) | 6,427 matched; İl 81 · İlçe 612 · Sektör 76 rows |
+| AI calls / sources | 0 / unchanged |
+
+**Finding:** the initial thresholds give a **broad** cross-sell population (78 % of active customers). They were not
+tuned; whether to tighten them is an owner decision.
+
+**Regression:** M5 top 15, existing M7-2 reason ids and scores, Customer 360 semantics and all M6 importers are
+unchanged. DQ-1 to DQ-5 are not touched. Detailed Collections stays blocked. M7-4 is not started.
 
 ## Immediate next task
-Review and merge the M7-2 Günlük Satış PR. Next large checkpoint (not started): M7-3 cross-sell + potential /
-territory intelligence. Still blocked or open:
+Review and merge the M7-3 PR. Next large checkpoint (not started): M7-4 January Fair Command Center. Still blocked
+or open:
+- Cross-sell threshold review (broad population on real data).
 - M6-4 needs the `Evrak Detaylı Tahsilat Raporu` export.
 - Bütçe: file of record (Ocak vs Taslak), whether the link to the Gider/Gelir draft is intended, the meaning of
   `<y> expenses`, and the historical columns of the group blocks.

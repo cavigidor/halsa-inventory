@@ -1,14 +1,15 @@
 # TASKS.md — active backlog
 
 Rules: one *Current* task at a time. Each task must be executable in one bounded session.
-Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 (Customer 360) is merged; M7-2 (Günlük Satış) is done (PR pending); M7-3 is not started.
+Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 (Customer 360) and M7-2 (Günlük Satış) are merged; M7-3 (cross-sell + opportunity intelligence) is done (PR pending); M7-4 is not started.
 
 ## Current
-- [ ] **Review and merge the M7-2 Günlük Satış PR** (`claude/m7-2-daily-sales-queue`).
+- [ ] **Review and merge the M7-3 opportunity-intelligence PR** (`claude/m7-3-opportunity-intelligence`).
 
 ## Next (M7, large checkpoints; start each only when moved to *Current*)
-- [ ] **M7-3 — Cross-sell + potential / territory intelligence.** It plugs new reason sources into the Günlük Satış
-  queue (`services/sales_queue.QUEUE_CATEGORIES`) only after its own rules are approved.
+- [ ] **Owner: cross-sell threshold review.** On real data the initial guards give a broad population (78 % of active
+  customers have at least one target). Decide whether to tighten them (`config.CROSS_SELL_*`); nothing changes
+  automatically.
 - [ ] **M7-4 — January Fair Command Center.**
 - [ ] **M7-5 — Lightweight CRM / follow-up workflow.**
 - [ ] **M7-6 — Owner / management views + integration / polish.**

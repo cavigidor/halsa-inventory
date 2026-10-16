@@ -21,17 +21,26 @@ def _money(x):
 
 
 # ---------------- categories (server-described, D-022) ----------------
-CAT_COLLECTIONS = A.Category("collections", "Tahsilat", "#b45309", "customer", "collections_aging", "collection")
+# Surfaces (M7-3, D-044): the three customer categories feed both the M5 tab and Günlük Satış; overstock is a product
+# action (M5 only); cross-sell is a Günlük Satış reason only (never in the M5 top 15 or /api/agent/categories).
+_BOTH = (A.SURFACE_ACTION_CENTER, A.SURFACE_SALES_QUEUE)
+CAT_COLLECTIONS = A.Category("collections", "Tahsilat", "#b45309", "customer", "collections_aging", "collection",
+                             surfaces=_BOTH)
 CAT_OVERSTOCK = A.Category("overstock", "Stok Eritme", "#0e7490", "product", "overstock_buyers")
-CAT_WINBACK = A.Category("winback", "Geri Kazanım", "#6d28d9", "customer", "winback_lapsed", "winback")
+CAT_WINBACK = A.Category("winback", "Geri Kazanım", "#6d28d9", "customer", "winback_lapsed", "winback",
+                         surfaces=_BOTH)
 CAT_REAL_DECLINE = A.Category("real_decline", "Reel Satış Düşüşü", "#9f1239", "customer", "real_growth",
-                              "sales_followup")
+                              "sales_followup", surfaces=_BOTH)
+# Group-level opportunity: no SKU, stock or margin checked, so the default draft is a follow-up, never an offer.
+CAT_CROSS_SELL = A.Category("cross_sell", "Çapraz Satış", "#047857", "customer", "cross_sell_anagrup",
+                            "sales_followup", surfaces=(A.SURFACE_SALES_QUEUE,))
 
 A.DEFAULT_REASONS.update({
     "collections": "Vadesi geçen alacak tahsilat öncelik eşiğini aştı.",
     "overstock": "Stok maksimum seviyenin üzerinde; bağlı sermaye eritilmeli.",
     "winback": f"Geçmişte güçlü alım yapan müşteri {db.LAPSED_YEAR} yılında hiç alım yapmadı.",
     "real_decline": "Bu yılki ciro, enflasyondan arındırıldığında geçen yılın aynı döneminin altında.",
+    "cross_sell": "Benzer aktif müşterilerde sık görülen bir ürün grubundan bu müşteri hiç alım yapmadı.",
 })
 
 
@@ -126,12 +135,35 @@ def produce_real_decline(inp):
     return out
 
 
-# Registration order = M1 order (tie-break for equal scores). Idempotent on re-import.
+def produce_cross_sell(inp):
+    """M7-3: one action per (customer, target group) from the private cross-sell model (services/opportunities.py).
+    Score = association confidence capped at 69; confidence label "medium" (a deterministic inference over trusted
+    purchase facts). No amount, Hedef, stock, margin or salesperson field enters the action."""
+    from services import opportunities as OP
+    model = inp.get("cross_sell")
+    if model is None or model.status != "ok":
+        return []
+    days = model.thresholds.recent_days
+    out = []
+    for code, targets in model.targets.items():
+        name = model.names.get(code, code)
+        for t in targets:
+            out.append(A.make_action(source=CAT_CROSS_SELL.source, category="cross_sell", entity_type="customer",
+                                     entity_id=code, title=f"ÇAPRAZ SATIŞ — {name} · {t.target}",
+                                     reason=OP.target_reason(t), facts=OP.target_facts(t, days),
+                                     drivers={"confidence": round(t.confidence, 4), "lift": round(t.lift, 4),
+                                              "pair_buyers": t.pair_buyers, "source_buyers": t.source_buyers},
+                                     score=t.score, confidence="medium"))
+    return out
+
+
+# Registration order = M1 order (tie-break for equal scores); cross-sell is registered last. Idempotent on re-import.
 _BUILTINS = (
     A.ActionSource(CAT_COLLECTIONS.source, (CAT_COLLECTIONS,), produce_collections),
     A.ActionSource(CAT_OVERSTOCK.source, (CAT_OVERSTOCK,), produce_overstock),
     A.ActionSource(CAT_WINBACK.source, (CAT_WINBACK,), produce_winback),
     A.ActionSource(CAT_REAL_DECLINE.source, (CAT_REAL_DECLINE,), produce_real_decline),
+    A.ActionSource(CAT_CROSS_SELL.source, (CAT_CROSS_SELL,), produce_cross_sell),
 )
 for _s in _BUILTINS:
     if all(x.name != _s.name for x in A.sources()):

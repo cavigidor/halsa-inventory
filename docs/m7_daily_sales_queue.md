@@ -204,7 +204,9 @@ of the page is byte-identical without it (tested). The heading is **"Bugün kimi
 
 - **No backfill past the pool.** The pool keeps the 200 best-scored customer actions. Reasons hidden by state are
   not backfilled from below the pool. With 195 customers already in the pool this is far above the 20-card page, but
-  it is a bound, not a full ranking.
+  it is a bound, not a full ranking. **Superseded by M7-3 (D-044):** the reservoir is now 200 *per category*
+  (`MAX_SALES_QUEUE_CANDIDATES_PER_CATEGORY`), so no category starves another; and the conversation sequence is
+  collections → winback → the rest by score (`docs/m7_opportunity_intelligence.md`).
 - **Real decline dominates** the pool on current data (167 of 200). That is the existing M5 scoring, not a new rule.
   Any re-weighting is an owner decision.
 - **Two shared collection accounts** stay in M5 only. Splitting them needs an owner rule (open; not decided here).

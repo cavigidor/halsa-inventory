@@ -10,6 +10,7 @@ import config as C
 import dashboard_builder as db
 from services import scoring as SC
 from services import growth as GR
+from services import actions as A
 
 
 def _money(x):
@@ -36,14 +37,19 @@ class AgentContext(dict):
     The attributes are not dict items, so they never reach `/api/context`, `agent_context.json`, evidence packets or
     logs (json / pydantic serialize items only). They travel with this exact object, so a controlled refresh that
     installs a new context installs its matching candidates at the same moment.
-    - `sales_queue_candidates`: tuple of customer actions from the UNCUT candidate list (Python score order),
-      bounded by `MAX_SALES_QUEUE_CANDIDATES`.
-    - `sales_queue_rows`: the already-computed source rows of those candidates (collections / winback / shrinking),
-      so the existing draft and drawer endpoints can resolve them; used only for codes the public index lacks.
+    - `sales_queue_candidates`: tuple of customer actions of the sales-queue categories from the UNCUT candidate
+      list (Python score order); M7-3 (D-044): at most `MAX_SALES_QUEUE_CANDIDATES_PER_CATEGORY` per category, so
+      one category can never starve another.
+    - `sales_queue_rows`: the already-computed source rows of those candidates (collections / winback / shrinking,
+      plus a code+name row for cross-sell-only customers), so the existing draft and drawer endpoints can resolve
+      them; used only for codes the public index lacks.
+    - `opportunities`: the M7-3 cross-sell model (services/opportunities.CrossSellModel), built from the sales
+      frame already read here.
     """
 
     sales_queue_candidates = None
     sales_queue_rows = None
+    opportunities = None
 
 
 def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sources=None, frames=None):
@@ -163,16 +169,22 @@ def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sour
     # M5-4: every customer code classified KAPALI (order-source attribute or invoice party), so the draft
     # refusal does not depend on whether the customer happens to be in the top-N risk list.
     ctx["closed_customers"] = sorted({c for c, a in attr.items() if a.get("closed")} | set(cinv))
-    # M5 actions = the uncut candidates cut to MAX_DAILY_ACTIONS: identical to build_actions() (same producers,
-    # same stable sort, same cut). M7-2 keeps the customer candidates privately (not dict items, never serialized).
-    candidates = build_action_candidates(ctx, coll_scored, over_cand, lap, shrink_real_neg, infl)
-    ctx["actions"] = candidates[:C.MAX_DAILY_ACTIONS]
-    queue = tuple(a for a in candidates if a.get("entity_type") == "customer")[:C.MAX_SALES_QUEUE_CANDIDATES]
-    ctx.sales_queue_candidates = queue
-    qcodes = {str(a["entity_id"]) for a in queue}
+    # M7-3: cross-sell model from the sales frame already read above (no Excel read; private, never serialized).
+    from services import opportunities as OP
+    ctx.opportunities = OP.build_cross_sell(sdf, asof_d)
+    # M5 actions = the action-center surface of the uncut candidates cut to MAX_DAILY_ACTIONS: identical to
+    # build_actions() (same producers, same stable sort, same cut; sales-queue-only categories never enter).
+    candidates = build_action_candidates(ctx, coll_scored, over_cand, lap, shrink_real_neg, infl,
+                                         cross_sell=ctx.opportunities)
+    ctx["actions"] = A.action_center(candidates)[:C.MAX_DAILY_ACTIONS]
+    ctx.sales_queue_candidates = sales_queue_reservoir(candidates)
+    qcodes = {str(a["entity_id"]) for a in ctx.sales_queue_candidates}
     ctx.sales_queue_rows = {"collections": [r for r in coll_scored if str(r["code"]) in qcodes],
                             "winback": [r for r in lap if str(r["code"]) in qcodes],
-                            "shrinking": [r for r in shrink if str(r["code"]) in qcodes]}
+                            "shrinking": [r for r in shrink if str(r["code"]) in qcodes],
+                            "customers": [{"code": c, "name": ctx.opportunities.names.get(c, c)}
+                                          for c in sorted({str(a["entity_id"]) for a in ctx.sales_queue_candidates
+                                                           if a["category"] == "cross_sell"})]}
     # M5-4: the customer drawer and drafts look customers up in the lists above, which are cut to top-N, while
     # actions are produced from the full lists. Carry the already-computed rows of every customer that has an
     # action but fell outside a cut (no new calculation; the top-N lists themselves are unchanged).
@@ -185,12 +197,29 @@ def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sour
     return ctx
 
 
-def build_action_candidates(ctx, coll_scored, over_cand, lap, shrink_real_neg, infl):
-    """All deterministic actions, ranked, BEFORE the daily cut (M7-2 seam; same producers as build_actions)."""
+def build_action_candidates(ctx, coll_scored, over_cand, lap, shrink_real_neg, infl, cross_sell=None):
+    """All deterministic actions, ranked, BEFORE the daily cut (M7-2 seam; same producers as build_actions, plus the
+    M7-3 cross-sell source when its model is given)."""
     from services import action_sources  # noqa: F401  (registers the built-in sources)
-    from services import actions as A
     return A.produce_candidates({"ctx": ctx, "coll_scored": coll_scored, "over_cand": over_cand, "lap": lap,
-                                 "shrink_real_neg": shrink_real_neg, "infl": infl})
+                                 "shrink_real_neg": shrink_real_neg, "infl": infl, "cross_sell": cross_sell})
+
+
+def sales_queue_reservoir(candidates, per_category=None):
+    """M7-3 (D-044): the private Günlük Satış reservoir. For every sales-queue category keep its N best-scored
+    customer candidates (N = MAX_SALES_QUEUE_CANDIDATES_PER_CATEGORY), then their union in the global candidate
+    order (score ↓, stable registration order). No quota applies to the final queue page."""
+    from services import action_sources  # noqa: F401
+    per = int(per_category if per_category is not None else C.MAX_SALES_QUEUE_CANDIDATES_PER_CATEGORY)
+    keys = {c.key for c in A.categories(A.SURFACE_SALES_QUEUE)}
+    seen = {}
+    out = []
+    for a in candidates:
+        k = a.get("category")
+        if k in keys and a.get("entity_type") == "customer" and seen.get(k, 0) < per:
+            seen[k] = seen.get(k, 0) + 1
+            out.append(a)
+    return tuple(out)
 
 
 def build_actions(ctx, coll_scored, over_cand, lap, shrink_real_neg, infl):

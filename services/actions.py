@@ -14,6 +14,12 @@ from dataclasses import asdict, dataclass
 import config as C
 from services import store as ST
 
+#: Surfaces an action category can appear on (M7-3, D-044). A category declares where its actions are used:
+#: the M5 "✨ AI Aksiyon Merkezi" (`action_center`) and/or the M7 "Günlük Satış" queue (`sales_queue`).
+SURFACE_ACTION_CENTER = "action_center"
+SURFACE_SALES_QUEUE = "sales_queue"
+SURFACES = (SURFACE_ACTION_CENTER, SURFACE_SALES_QUEUE)
+
 REQUIRED_FIELDS = ("action_id", "source", "category", "entity_type", "entity_id", "title", "reason",
                    "facts", "drivers", "score", "priority", "confidence", "requires_approval")
 ENTITY_TYPES = {"customer", "product", "account", "company"}
@@ -28,6 +34,7 @@ class Category:
     entity_type: str
     source: str
     draft_purpose: str = None  # M5-4: default draft purpose (customer categories only); None = none suggested
+    surfaces: tuple = (SURFACE_ACTION_CENTER,)   # M7-3: where actions of this category appear (default: M5 only)
 
 
 @dataclass(frozen=True)
@@ -53,6 +60,8 @@ def register(source: ActionSource):
             raise ValueError(f"category already registered: {c.key}")
         if c.entity_type not in ENTITY_TYPES:
             raise ValueError(f"unknown entity_type {c.entity_type} for {c.key}")
+        if not c.surfaces or any(x not in SURFACES for x in c.surfaces):
+            raise ValueError(f"unknown surface for {c.key}: {c.surfaces}")
     _SOURCES.append(source)
     return source
 
@@ -70,8 +79,9 @@ def sources():
     return list(_SOURCES)
 
 
-def categories():
-    return [c for s in _SOURCES for c in s.categories]
+def categories(surface=None):
+    """Registered categories in registration order; `surface` keeps only the categories shown there."""
+    return [c for s in _SOURCES for c in s.categories if surface is None or surface in c.surfaces]
 
 
 def category(key):
@@ -79,7 +89,13 @@ def category(key):
 
 
 def categories_payload():
-    return [asdict(c) for c in categories()]
+    """`/api/agent/categories` (the M5 tab): action-center categories only, in the M5 shape (no `surfaces` key)."""
+    return [{k: v for k, v in asdict(c).items() if k != "surfaces"} for c in categories(SURFACE_ACTION_CENTER)]
+
+
+def on_surface(action, surface):
+    c = category(action.get("category"))
+    return c is not None and surface in c.surfaces
 
 
 def action_id(category_key, entity_id, facts):
@@ -131,9 +147,16 @@ def produce_candidates(inputs):
     return acts
 
 
+def action_center(candidates):
+    """The M5 surface of an uncut candidate list (order kept). Filtering a stably sorted list keeps the relative
+    order, so M5 sees exactly what it saw before sales-queue-only categories existed."""
+    return [a for a in candidates if on_surface(a, SURFACE_ACTION_CENTER)]
+
+
 def produce_all(inputs, limit=None):
-    """Run every registered source, validate, rank by Python score (stable), cut to the daily limit."""
-    return produce_candidates(inputs)[: (limit or C.MAX_DAILY_ACTIONS)]
+    """Run every registered source, validate, rank by Python score (stable), keep the action-center surface and cut
+    to the daily limit (M5)."""
+    return action_center(produce_candidates(inputs))[: (limit or C.MAX_DAILY_ACTIONS)]
 
 
 def normalize(a):

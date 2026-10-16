@@ -250,7 +250,10 @@ milestone (D-016).
 >   card per Customer 360 customer from the existing collections / winback / real-decline reasons, read from the
 >   uncut candidates (M5 top 15 unchanged); collection-first sequence, exclusive invoice-account mapping, master
 >   KAPALI; shared action state; drafts only on explicit click. No new rules.
-> - **M7-3 — Cross-sell + potential / territory intelligence.**
+> - **M7-3 — Cross-sell + opportunity / territory intelligence: done** (D-044, `docs/m7_opportunity_intelligence.md`).
+>   Deterministic anagrup-level cross-sell (never-bought target gap, confidence score capped below "high") in Günlük
+>   Satış, Customer 360 and a read-only "Fırsatlar" tab; unverified Hedef territory counts (never a salesperson
+>   ranking, never a potential/penetration score); per-category queue reservoir.
 > - **M7-4 — January Fair Command Center.**
 > - **M7-5 — Lightweight CRM / follow-up workflow.**
 > - **M7-6 — Owner / management views + integration / polish.**
