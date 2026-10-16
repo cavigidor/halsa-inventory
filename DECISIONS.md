@@ -494,3 +494,21 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   - The yearly "TRODAT SALES" rows are a different metric and are not part of the model.
 - **Year:** declared or taken from the approved filename pattern. The filename month is a label, never a snapshot
   date.
+
+### D-040 · 2026-10-16 · Gider/Gelir: native business lines, unique facts once, template year never the period (M6-6)
+- **Native lines:** Gider/Gelir keeps KIRTASIYE / TRODAT / TROTEC / IMALAT as native dimensions.
+  - The owner's management-category mapping (kaşe / kırtasiye / other-import) is a later configuration layer. Its
+    absence never fails the import.
+  - The accounting basis (cash vs accrual) is `unverified`, and amounts carry neutral `reported_*` names.
+- **The period year** comes from the declared year or the filename, and must agree with the workbook's own sheet names.
+  The template year text in the expense sheet's monthly headers (`2025 <Ay>` in the 2026 file) is never used as the
+  business period; only the month is read, with a warning.
+- **Each financial fact is normalized once,** from the sheet that owns it:
+  - expenses from GİDERLER;
+  - sales, cost and gross profit by line from GELİRLER;
+  - historical totals, the source budget and the accounting entries from ÖZET.
+- **Duplicates are controls:** ÖZET report-year P&L, the pasted pivot and Sheet1 are verification-only or excluded.
+- **Cached values are kept as recorded,** never recomputed.
+  - Allocation overrides, ratios outside 0–1 and gross profit ≠ sales − cost (all present in the real source) are
+    flagged, not corrected.
+  - Missing or non-summing ratios, broken totals, Excel errors in money cells and external links are fatal.

@@ -1,10 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-16 (Kredi importer merged to `main` @ `be6c135`; M6-5 Trodat importer done on `claude/m6-5-trodat-importer`, PR pending)._
+_Updated 2026-10-16 (M6-5 merged to `main` @ `e7fb7cc`; M6-6 Gider/Gelir importer done on `claude/m6-6-gider-gelir-importer`, PR pending)._
 
 ## Git
-- **`main`:** `be6c135` (PR #15, Kredi takip importer). **This checkpoint:** branch `claude/m6-5-trodat-importer`
-  (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
+- **`main`:** `e7fb7cc` (PR #16, M6-5 Trodat importer). **This checkpoint:** branch
+  `claude/m6-6-gider-gelir-importer` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
 - **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
   there to get M5 (see "Owner follow-ups" below).
 
@@ -15,7 +15,7 @@ the Mac): the visual check in the owner's own browser and one live WhatsApp draf
 **Milestone 6 — Additional data sources / sales intelligence foundation: in progress.** M6-0 (source inventory,
 docs only), M6-1 (framework), M6-2 (order source) and M6-3 (Hedef) are merged. **M6-4 (detailed collections) is
 BLOCKED** (the `Evrak Detaylı Tahsilat Raporu` export is missing). The Kredi takip importer (part of M6-6) was pulled
-forward (D-038) and is merged. M6-5 (Trodat importer) is done (PR pending). Gider/gelir and bütçe are not started.
+forward (D-038) and is merged. M6-5 (Trodat) is merged. M6-6 Gider/Gelir is done (PR pending). Bütçe is not started.
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -688,7 +688,7 @@ mtime-identical before and after; scratch deleted):
 **M5 / M6-2 / M6-3 regression:** no existing module changed; nothing live imports the new module (tested). Hedef
 stays explicit-path only.
 
-## M6-5 (done; PR pending) — Trodat sales report importer
+## M6-5 (done; merged in PR #16 @ `e7fb7cc`) — Trodat sales report importer
 Branch `claude/m6-5-trodat-importer` from `main` @ `be6c135`. New source module `services/importers/trodat.py` on the
 M6-1 matrix framework (doc: `docs/m6_trodat.md`, decision D-039). No framework change. No Halsa SKU mapping, analytics,
 UI, API, AI or refresh dependency.
@@ -743,11 +743,84 @@ before and after; scratch deleted):
 
 **Regression:** M5, M6-2, M6-3 and Kredi are unchanged; nothing live imports the module (tested).
 
+## M6-6 Gider/Gelir (done; PR pending) — owner financial source
+Branch `claude/m6-6-gider-gelir-importer` from `main` @ `e7fb7cc`. New source module `services/importers/gider_gelir.py`
+on the M6-1 framework (doc: `docs/m6_gider_gelir.md`, decision D-040). No framework change. No dashboard, analytics, AI,
+API, persistence or refresh dependency.
+
+**Structure, verified read-only** (it corrects the M6-0 notes in several places):
+- **GİDERLER:** 176 expense rows (M6-0's 178 counted the totals and note rows), 26 cost centers, header row 1 with 78
+  exact headers. The monthly headers say `2025 <Ay>` in the 2026 file.
+  - Ratios sum to 1 only within ±0.001 (rounded percentages); one row uses a negative reallocation ratio.
+  - 23 allocation cells are manual overrides, not total × ratio.
+- **GELİRLER:** four native-line blocks plus TOPLAM. Brüt Kar is entered and is not sales − cost (21 months differ).
+- **ÖZET:** the report-year P&L references GELİRLER; the expense line equals a pasted pivot of GİDERLER. Unique
+  facts are the historical totals, the budget column and the accounting-entry lines.
+- **Sheet1:** presentation copy, excluded.
+
+**What it contains:**
+- **Audience and files:** owner only, explicit path only.
+- **Year:** declared, or from the filename `<YYYY>_gider_gelir_<label>`. A conflict, or a mismatch with the workbook
+  sheet names or headers, fails. The revision label is a label, and the snapshot date stays unknown.
+- **Business lines:** the four native lines are separate; management mapping is `not_supplied`.
+- **Confidence:** every amount is `unverified`, and so is the accounting basis.
+- **Fatal checks:**
+  - missing or ±0.001-off allocation ratios;
+  - annual line allocations ≠ Σ monthly allocations;
+  - the expense totals row;
+  - GELİRLER TOPLAM and row totals;
+  - ÖZET P&L ≠ the GELİRLER values it references;
+  - ÖZET monthly identities;
+  - Excel errors or missing caches in money cells;
+  - external links.
+- **Warnings or info:**
+  - ratios outside 0–1;
+  - allocation overrides (flagged per month);
+  - an annual total ≠ Σ months;
+  - the pasted ÖZET pivot ≠ the expense table;
+  - gross profit ≠ sales − cost;
+  - known `#DIV/0!` ratio cells.
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (node + jsdom + Chromium) | `AI_PROVIDER=disabled REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 python -m pytest -q` | **638 passed, 7 skipped, 1 xfailed** (66 new in `tests/test_m6_gider_gelir.py`; the other 572 unchanged) |
+
+Mutation checks: each of these fails tests:
+- a shared audience;
+- non-fatal ratio sums;
+- a non-fatal ÖZET-vs-GELİRLER check;
+- ÖZET P&L imported twice;
+- a default year.
+
+**Real-data read-only check** (Mac VM, throwaway clone, aggregates only; all 7 Gider/Gelir workbooks hash- and
+mtime-identical before and after; scratch deleted):
+
+| File | Result |
+|---|---|
+| `2026_gider_gelir_Eylül.xlsx` | **staged** — see the breakdown below |
+| `2026_gider_gelir_mayıs.xlsx` | **staged** (same template) |
+| `2026_gider_gelir_TASLAK.xlsx` | **fails closed** (two accounting-entry rows absent) |
+| 2024 / 2025 files (4) | **unsupported template** (fail closed) |
+
+**`2026_gider_gelir_Eylül.xlsx` breakdown:**
+- Records: 84 summary records (12 lines), 176 expense rows → 2,112 expense-month records, 108 revenue records.
+- 9,877 formula cells.
+- Months with values: Jan–Sep.
+- Ratio rows: 0 of 176 fail.
+- Warnings: 1 ratio outside 0–1, 23 allocation overrides, 1 annual-total row.
+- Gross profit ≠ sales − cost: 21 months.
+- Cross-sheet: ÖZET vs GELİRLER 51/51 match, ÖZET expense vs table 18/18 match.
+- Errors: only the known `#DIV/0!` cells (3 in ÖZET, 15 in GELİRLER).
+- No external links.
+- Leak check: 0 of 202 labels appear in the summary; no path.
+
+**Regression:** M5, M6-2, M6-3, Kredi and Trodat are unchanged; nothing live imports the module (tested).
+
 ## Immediate next task
-Review and merge the M6-5 PR. Still blocked or open:
+Review and merge the M6-6 Gider/Gelir PR. Still blocked or open:
 - M6-4 needs the `Evrak Detaylı Tahsilat Raporu` export.
-- Trodat → Halsa SKU mapping (who maintains it) and the unit meaning of the Trodat values.
-- Trodat file of record and cadence.
-- Gider/gelir needs the business-line mapping.
-- File of record for Bütçe, Hedef and Kredi.
+- Bütçe is its own checkpoint (file of record, `#REF!`, external links).
+- Gider/Gelir: the management mapping of the four native lines, the accounting basis, and the file of record.
+- Trodat SKU mapping and units; file of record for Hedef, Kredi and Trodat.
 - Salesperson of record, whitespace policy, fair taxonomy, revenue basis, collection thresholds.

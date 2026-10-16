@@ -1,10 +1,10 @@
 # TASKS.md — active backlog
 
 Rules: one *Current* task at a time. Each task must be executable in one bounded session.
-Milestone 5 is complete. M6-0 to M6-3, the pulled-forward Kredi importer and M6-5 (Trodat) are done. M6-4 is BLOCKED (missing export).
+Milestone 5 is complete. M6-0 to M6-3, Kredi, M6-5 (Trodat) and M6-6 Gider/Gelir are done. M6-4 is BLOCKED (missing export); Bütçe is the remaining M6-6 source.
 
 ## Current
-- [ ] **Review and merge the M6-5 PR** (`claude/m6-5-trodat-importer`, Trodat sales report importer).
+- [ ] **Review and merge the M6-6 Gider/Gelir PR** (`claude/m6-6-gider-gelir-importer`).
 
 ## Next
 - [ ] **Owner: M5 check on the Mac** (`git pull`, refresh, open http://127.0.0.1:8000/, desktop + phone width).
@@ -23,6 +23,11 @@ Milestone 5 is complete. M6-0 to M6-3, the pulled-forward Kredi importer and M6-
 - [ ] **Owner: Trodat → Halsa SKU mapping (D-039).** Who maintains an explicit mapping table (Trodat model + optional
   variant → one or more Halsa SKUs, with status, effective date and provenance)? Also confirm whether the Trodat values are
   units, and the Trodat file of record and cadence. M6-5 imports the native data without any mapping.
+- [ ] **M6-6 Bütçe importer** (its own checkpoint: file of record `Ocak` vs `Taslak`, `#REF!`/`#DIV/0!`, external link).
+  Start only when moved to *Current*.
+- [ ] **Owner: Gider/Gelir decisions (D-040).** Map the four native lines (KIRTASIYE / TRODAT / TROTEC / IMALAT) to the
+  management views (kaşe / kırtasiye / other-import). Confirm the accounting basis (cash vs accrual), the file of record
+  and cadence, and whether older-year templates (2024/2025) or the TASLAK layout must be supported.
 - [ ] **Later (owner cash planning):** next 30/60/90-day obligations, outstanding principal, interest/tax visibility
   from the Kredi model. No UI or metrics yet.
 - [ ] **Owner: Hedef file of record** (D-037). Candidates: the Feb 2026 `hedef raporu.xlsx`, a June 2026
