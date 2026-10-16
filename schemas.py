@@ -554,3 +554,72 @@ class Customer360Status(BaseModel):
     hedef_status: Optional[str] = None
     error_code: Optional[str] = None
     message: Optional[str] = None
+
+
+# ---------- M7-2 Günlük Satış (deterministic customer-centric queue; never AI) ----------
+class SalesQueueReason(BaseModel):
+    action_id: str                      # the M5 action id: one state, shared with the AI Aksiyon Merkezi
+    source: Optional[str] = None
+    category: str
+    category_label: str
+    kind: Literal["collection", "sales"]
+    reason: Optional[str] = None
+    score: float
+    priority: Optional[Priority] = None
+    confidence: Optional[Confidence] = None
+    draft_purpose: Optional[str] = None
+    status: str = "open"
+    defer_until: Optional[str] = None
+    scope: Literal["customer", "invoice_account"]
+    account_code: Optional[str] = None  # collections: the invoice account the receivable belongs to
+    facts: List[str] = []               # M5 facts minus the legacy "Temsilci:" line (DQ-5)
+
+
+class SalesQueueWarning(BaseModel):
+    code: str
+    message: str
+
+
+class SalesQueueDraft(BaseModel):
+    default_purpose: str
+    allowed_purposes: List[str]
+    collection_target: Optional[str] = None
+    sales_target: str
+
+
+class SalesQueueItem(BaseModel):
+    customer_code: str
+    display_name: str
+    last_order_date: Optional[str] = None
+    closed: Optional[bool] = None
+    master_status: Literal["matched", "unmatched", "duplicate", "unavailable"]
+    queue_score: float
+    priority: Priority
+    collection_first: bool
+    primary_action_id: str
+    reasons: List[SalesQueueReason]
+    warnings: List[SalesQueueWarning] = []
+    customer360_available: bool = True
+    draft: SalesQueueDraft
+
+
+class SalesQueueFilter(BaseModel):
+    key: str
+    label: str
+
+
+class SalesQueueResponse(BaseModel):
+    as_of_data_date: Optional[str] = None
+    generated_at: Optional[str] = None
+    customer360_state: Literal["ready"] = "ready"
+    sources_consistent: Literal[True] = True
+    filter: str
+    limit: int
+    visible_customers: int
+    returned: int
+    truncated: bool
+    filter_counts: Dict[str, int]
+    filters: List[SalesQueueFilter]
+    diagnostics: Dict[str, Any]          # aggregate counts only, never customer identities
+    items: List[SalesQueueItem]
+    ai_used: Literal[False] = False

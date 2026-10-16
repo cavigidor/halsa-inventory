@@ -138,7 +138,7 @@ def test_ai_disabled_dashboard_and_action_center(browser, tmp_path):
         tabs = page.eval_on_selector_all(".tab", "els => els.map(e => e.dataset.t)")
         assert tabs[0] == "overview" and tabs[-1] == "ai" and "reorder" in tabs and "winback" in tabs
         for t in tabs[1:-1]:                                            # every existing tab still renders
-            if t == "c360":                                             # M7-1: server-driven, tested in test_m7_browser
+            if t in ("c360", "sq"):                                     # M7: server-driven, tested in test_m7_*browser
                 continue
             page.click(f'.tab[data-t="{t}"]')
             assert page.is_visible(f"#{t}") and page.query_selector(f"#{t} table") is not None

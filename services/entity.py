@@ -61,32 +61,15 @@ class ContextRepository:
     # ---- indices built from the assembled context (no Excel re-read) ----
     def _build_indices(self):
         ctx = self.context()
-        cust = {}
-        def merge(code, **kw):
-            d = cust.setdefault(str(code), {"customer_code": str(code)})
-            for k, v in kw.items():
-                if v is not None and d.get(k) in (None, "", []):
-                    d[k] = v
-        extra = ctx.get("action_customers") or {}       # rows of action customers outside the top-N cuts (M5-4)
-        for r in ctx.get("winback", []) + extra.get("winback", []):
-            merge(r["code"], name=r["name"], rep=r.get("rep"), sector=r.get("sector"),
-                  historical_spend=r.get("spend"), last_active_year=r.get("last"),
-                  winback_tier=r.get("tier"), overdue=r.get("overdue"),
-                  top_products=[p["name"] for p in r.get("detail", {}).get("products", [])],
-                  years=r.get("detail", {}).get("years", []))
-        for r in ctx.get("shrinking", []) + extra.get("shrinking", []):
-            merge(r["code"], name=r["name"], rep=r.get("rep"), sector=r.get("sector"),
-                  sales_2025=r.get("y2025"), sales_2026=r.get("y2026"),
-                  nominal_pct=r.get("nominal_pct"), real_pct=r.get("real_pct"))
-        for r in ctx.get("collections", []) + extra.get("collections", []):
-            merge(r["code"], name=r["name"], rep=r.get("rep"),
-                  overdue=r.get("overdue"), oldest_overdue=r.get("oldest"),
-                  collections_score=r.get("priority_score"),
-                  revenue_25_26=r.get("revenue_25_26"), still_active=r.get("still_active"))
-        for r in ctx.get("risk", []):
-            merge(r["code"], name=r["name"], rep=r.get("rep"), overdue=r.get("overdue"),
-                  revenue_25_26=r.get("rev"), still_ordering_2026=(r.get("active") == "Evet"),
-                  debt_to_revenue_pct=r.get("ratio"), closed=r.get("closed"))
+        cust = self._customer_index(ctx.get("winback", []), ctx.get("shrinking", []), ctx.get("collections", []),
+                                    ctx.get("risk", []), ctx.get("action_customers") or {})
+        # M7-2: customers of the private sales-queue candidates that the public index does not know. Fallback only:
+        # every customer already in the public index keeps exactly its M5 facts.
+        private = getattr(ctx, "sales_queue_rows", None) or {}
+        if private:
+            extra = self._customer_index([], [], [], [], private)
+            for code, d in extra.items():
+                cust.setdefault(code, d)
         for code in ctx.get("closed_customers", []):     # authoritative KAPALI classification (M5-4)
             if str(code) in cust:
                 cust[str(code)]["closed"] = True
@@ -101,6 +84,35 @@ class ContextRepository:
                       "inventory_value": r.get("inv"), "historical_buyer_count": r.get("buyers"),
                       "ranked_buyers": r.get("top_buyers", [])})
         self._cust_idx, self._prod_idx = cust, prod
+
+    @staticmethod
+    def _customer_index(winback, shrinking, collections, risk, extra):
+        cust = {}
+        def merge(code, **kw):
+            d = cust.setdefault(str(code), {"customer_code": str(code)})
+            for k, v in kw.items():
+                if v is not None and d.get(k) in (None, "", []):
+                    d[k] = v
+        for r in list(winback) + extra.get("winback", []):   # extra: rows of action customers outside the cuts (M5-4)
+            merge(r["code"], name=r["name"], rep=r.get("rep"), sector=r.get("sector"),
+                  historical_spend=r.get("spend"), last_active_year=r.get("last"),
+                  winback_tier=r.get("tier"), overdue=r.get("overdue"),
+                  top_products=[p["name"] for p in r.get("detail", {}).get("products", [])],
+                  years=r.get("detail", {}).get("years", []))
+        for r in list(shrinking) + extra.get("shrinking", []):
+            merge(r["code"], name=r["name"], rep=r.get("rep"), sector=r.get("sector"),
+                  sales_2025=r.get("y2025"), sales_2026=r.get("y2026"),
+                  nominal_pct=r.get("nominal_pct"), real_pct=r.get("real_pct"))
+        for r in list(collections) + extra.get("collections", []):
+            merge(r["code"], name=r["name"], rep=r.get("rep"),
+                  overdue=r.get("overdue"), oldest_overdue=r.get("oldest"),
+                  collections_score=r.get("priority_score"),
+                  revenue_25_26=r.get("revenue_25_26"), still_active=r.get("still_active"))
+        for r in risk:
+            merge(r["code"], name=r["name"], rep=r.get("rep"), overdue=r.get("overdue"),
+                  revenue_25_26=r.get("rev"), still_ordering_2026=(r.get("active") == "Evet"),
+                  debt_to_revenue_pct=r.get("ratio"), closed=r.get("closed"))
+        return cust
 
     def customer(self, code):
         if self._cust_idx is None:

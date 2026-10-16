@@ -1,10 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-16 (M6-6 Bütçe merged to `main` @ `422fe28`; M7-1 Customer 360 done on `claude/m7-1-customer-360`, PR pending)._
+_Updated 2026-10-16 (M7-1 Customer 360 merged to `main` @ `a699d5e`; M7-2 Günlük Satış done on `claude/m7-2-daily-sales-queue`, PR pending)._
 
 ## Git
-- **`main`:** `422fe28` (PR #18, M6-6 Bütçe importer). **This checkpoint:** branch
-  `claude/m7-1-customer-360` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
+- **`main`:** `a699d5e` (PR #19, M7-1 Customer 360). **This checkpoint:** branch
+  `claude/m7-2-daily-sales-queue` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
 - **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
   there to get M5 (see "Owner follow-ups" below).
 
@@ -17,7 +17,7 @@ docs only), M6-1 (framework), M6-2 (order source) and M6-3 (Hedef) are merged. *
 BLOCKED** (the `Evrak Detaylı Tahsilat Raporu` export is missing). The Kredi takip importer (part of M6-6) was pulled
 forward (D-038) and is merged. M6-5 (Trodat), M6-6 Gider/Gelir and M6-6 Bütçe are merged: every currently available M6 source is done; M6-4 stays
 BLOCKED and is not renumbered.
-**Milestone 7 — Sales Operating System: started.** M7-1 (searchable Customer 360) is done (PR pending). M7-2 is not started.
+**Milestone 7 — Sales Operating System: in progress.** M7-1 (searchable Customer 360) is merged. M7-2 (Günlük Satış, the deterministic daily sales queue) is done (PR pending). M7-3 is not started.
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -881,7 +881,7 @@ scratch deleted):
 
 **Regression:** M5, M6-2, M6-3, Kredi, Trodat and Gider/Gelir are unchanged; nothing live imports the module (tested).
 
-## M7-1 Customer 360 (done; PR pending) — searchable, deterministic, read-only
+## M7-1 Customer 360 (merged, PR #19 @ `a699d5e`) — searchable, deterministic, read-only
 Branch `claude/m7-1-customer-360` from `main` @ `422fe28`. Doc: `docs/m7_customer_360.md`, decision D-042.
 
 **What it contains:**
@@ -941,11 +941,61 @@ Tests:
 - All source workbooks hash- and mtime-identical; scratch deleted.
 
 **Regression:** M5 (actions, order, drawer, drafts, refresh) and all M6 importers are unchanged. Detailed
-Collections stays blocked. M7-2 is not started.
+Collections stays blocked.
+
+## M7-2 Günlük Satış (done; PR pending) — deterministic daily sales queue
+Branch `claude/m7-2-daily-sales-queue` from `main` @ `a699d5e`. Doc: `docs/m7_daily_sales_queue.md`, decision D-043.
+
+**What it contains:**
+- **Candidate seam:** `actions.produce_candidates` (uncut, same producers and stable sort); `produce_all` = that list
+  cut to `MAX_DAILY_ACTIONS`.
+  - The M5 top 15 (ids, scores, facts, order, AI cache keys) is identical to the old implementation; tested on both
+    synthetic datasets and confirmed on real data.
+- **Private candidates:** `AgentContext` attributes (not dict items).
+  - Customer candidates bounded by `MAX_SALES_QUEUE_CANDIDATES` = 200, plus their rows.
+  - Never in `/api/context`, `agent_context.json`, `/api/agent/actions`, evidence packets or logs.
+  - They swap atomically with the context on refresh.
+- **Queue:** `services/sales_queue.py` and `GET /api/sales-queue` (typed, `ai_used: false`).
+  - Uses only the existing `collections` / `winback` / `real_decline` reasons. One card per Customer 360 customer.
+  - `queue_score` = maximum reason score; collection-first sets the topic order (no bonus); `config.band` priority.
+  - Collections attach only through an exclusive invoice account; shared and unlinked accounts are counted, never
+    assigned.
+  - A trusted master KAPALI keeps collections only; a duplicate master gives a warning and invents no status.
+  - Reason state is the shared M5 SQLite state (same ids). The page's reasons are upserted, so state works outside
+    the top 15.
+  - 503 while Customer 360 builds, on a source-signature mismatch, or without candidates.
+- **UI:** "Günlük Satış" tab before Müşteri 360 ("Bugün kimi aramalıyım?").
+  - Filters, cards, reason list with Yapıldı / Ertele / Gizle / Geri al.
+  - A Müşteri 360 deep link (additive `window.StockAgentC360.open`).
+  - An explicit-only "Mesaj taslağı" (the existing copy-only endpoint; KAPALI → collection only).
+  - `file://` message, building state, 390 px layout, `textContent` only.
+- **No new rules:** no cross-sell, potential, territory, fair, CRM, new-buyer or salesperson logic, and no new
+  thresholds.
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (node + jsdom + Chromium) | `AI_PROVIDER=disabled REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 python -m pytest -q` | **833 passed, 7 skipped, 1 xfailed** (64 new: 55 in `tests/test_m7_sales_queue.py`, 9 Playwright tests covering the 16 scenarios in `tests/test_m7_queue_browser.py`; the other 769 unchanged) |
+
+**Real-data read-only check** (Mac VM, 5 Oct 2026 exports; aggregates only):
+
+| Item | Result |
+|---|---|
+| M5 top 15 identical | yes |
+| Uncut customer actions → private pool | 793 → 200 (real decline 167 · winback 26 · collections 7) |
+| Grouped customers | 195; 5 collection-first |
+| Excluded | 2 shared collection accounts · 0 unlinked · 2 KAPALI sales reasons |
+| Queue page | 20 of 195 (8 critical · 12 high) |
+| Latency | build ≈ 13 ms; HTTP 4.4 ms median (36 ms on the first call, which upserts) |
+| Memory | private payload ≈ 117 KB; queue build peak ≈ 339 KB; no RSS growth |
+| AI calls / sources | 0 / hash- and mtime-identical; scratch deleted |
+
+**Regression:** M5 (actions, order, drawer, drafts, refresh), M7-1 Customer 360 semantics and all M6 importers are
+unchanged. DQ-1 to DQ-5 are not touched. Detailed Collections stays blocked. M7-3 is not started.
 
 ## Immediate next task
-Review and merge the M7-1 Customer 360 PR. Next large checkpoint (not started): M7-2 daily sales queue / opportunity
-engine. Still blocked or open:
+Review and merge the M7-2 Günlük Satış PR. Next large checkpoint (not started): M7-3 cross-sell + potential /
+territory intelligence. Still blocked or open:
 - M6-4 needs the `Evrak Detaylı Tahsilat Raporu` export.
 - Bütçe: file of record (Ocak vs Taslak), whether the link to the Gider/Gelir draft is intended, the meaning of
   `<y> expenses`, and the historical columns of the group blocks.

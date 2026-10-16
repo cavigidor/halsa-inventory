@@ -557,6 +557,10 @@ class Customer360Repository:
         self._error: tuple[SourceSignature, Customer360Error] | None = None
         self.builds = 0
 
+    def signature_for(self, ctx: dict) -> SourceSignature:
+        """The signature a snapshot must carry to match this context (M7-2 consistency check)."""
+        return signature_of(ctx, self._hedef_path, self._hedef_snapshot)
+
     def retry(self) -> None:
         """Forget a failed build so the next access tries again (explicit user retry)."""
         with self._lock:

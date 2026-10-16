@@ -558,3 +558,34 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   scores or rankings, no cross-sell, no CRM writes.
 - **No AI:** Customer 360 is read-only and never calls AI. Its new data (Hedef values, event names, master
   attributes) is not sent to any AI provider in M7-1; that needs a separate review.
+
+### D-043 · 2026-10-16 · Günlük Satış: a customer-centric queue over the existing reasons, from private uncut candidates; M5 unchanged (M7-2)
+- **Reasons:** only existing, tested customer categories: `collections`, `winback`, `real_decline`.
+  - No new rule, score or threshold: no cross-sell, potential, territory, fair, CRM follow-up, new-buyer,
+    positive-growth or salesperson logic.
+  - Product actions stay in M5. Later M7 sources join by adding their category to `QUEUE_CATEGORIES` after their own
+    approval.
+- **Candidate seam:** `actions.produce_candidates` returns every validated action, sorted stably, before any cut.
+  - M5 `ctx["actions"]` is that list cut to `MAX_DAILY_ACTIONS`: the same ids, scores, facts, order and AI cache
+    keys (regression-tested against the old implementation).
+  - The queue never reads the cut top 15, so products cannot take sales slots.
+- **Private by construction:** the customer candidates (≤ `MAX_SALES_QUEUE_CANDIDATES`) and their rows are attributes
+  of `AgentContext` (a dict subclass), not dict items.
+  - They are never serialized to `/api/context`, `agent_context.json`, evidence packets or logs.
+  - They swap atomically with the context.
+  - The entity index uses them only as a fallback for codes M5 does not know.
+- **One card per canonical customer** (Customer 360 identity; the M5 "Temsilci:" fact is not shown).
+  - `queue_score` = maximum visible reason score; secondary reasons add nothing; priority = `config.band`.
+  - A visible collections reason makes the card collection-first and its primary topic. This sets the sequence only,
+    with no score bonus.
+  - Order: score ↓, collection-first, code ↑.
+- **Collections** attach only when the invoice account maps to exactly one customer. Shared accounts are never
+  assigned or divided, and unlinked accounts are not attached. Both are counted and stay in M5.
+- **KAPALI:** only the trusted unique master KAPALI removes sales reasons; collections stay and drafts are limited to
+  collection. A duplicate master invents no status (warning only).
+- **State** is per reason, in the shared SQLite table with the M5 ids (`is_hidden` semantics). The queue upserts the
+  reasons it returns, so complete / defer / dismiss / reopen work outside the top 15.
+- **Consistency:** the queue is served only when the live context signature equals the Customer 360 snapshot
+  signature (503 `building` otherwise). It never reads Excel and never calls AI; a message draft is generated only on
+  an explicit click through the existing copy-only endpoint.
+- **Bounded pool:** reasons hidden by state are not backfilled from below the 200-candidate pool (documented limit).

@@ -18,6 +18,7 @@ from services import actions as A
 from services import refresh as RF
 from services import evidence as EV
 from services import customer360 as C360
+from services import sales_queue as SQ
 from services import action_sources  # noqa: F401  (registers the built-in deterministic sources)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -358,6 +359,28 @@ def customer360_detail(customer_code: str, c360: C360.Customer360Repository = De
     if det is None:
         raise HTTPException(404, f"Müşteri bulunamadı: {customer_code}")
     return det
+
+
+# ---------------- M7-2 Günlük Satış (deterministic, customer-centric; never calls the AI provider) ----------------
+# Built from the live context's PRIVATE customer candidates (before the M5 top-15 cut), the Customer 360 snapshot of
+# the same sources and the shared SQLite action state. No Excel read. Reason state changes use /api/actions/*.
+@app.get("/api/sales-queue", response_model=S.SalesQueueResponse)
+def sales_queue(limit: int = C.MAX_DAILY_SALES_QUEUE, filter: str = "all",
+                repo: ContextRepository = Depends(get_repo), c360: C360.Customer360Repository = Depends(get_c360)):
+    try:
+        snap = c360.snapshot()
+    except C360.Customer360NotReady as e:
+        raise HTTPException(503, {"state": e.state, "message": "Müşteri verisi hazırlanıyor…"})
+    except C360.Customer360Error as e:
+        raise HTTPException(503, {"state": "error", "error_code": e.code, "message": e.message})
+    ctx = repo.current()
+    if ctx is None or c360.signature_for(ctx) != snap.signature:     # never mix candidates of A with customers of B
+        raise HTTPException(503, {"state": "building", "message": "Müşteri verisi hazırlanıyor…"})
+    try:
+        q = SQ.build_queue(ctx, snap, limit=limit, flt=filter)
+    except SQ.QueueUnavailable as e:
+        raise HTTPException(503, {"state": "error", "error_code": e.code, "message": e.message})
+    return S.SalesQueueResponse(**q)
 
 
 # ---------------- draft message (copy-only; nothing is ever sent) ----------------

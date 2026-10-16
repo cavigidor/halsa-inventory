@@ -118,15 +118,22 @@ def validate(a):
     return a
 
 
-def produce_all(inputs, limit=None):
-    """Run every registered source, validate, rank by Python score (stable), cut to the daily limit."""
+def produce_candidates(inputs):
+    """Every contract-valid action from every registered source, ranked by Python score (stable: equal scores keep
+    registration order), BEFORE any cut. M7-2 reads customer candidates from here; scores, facts and ids are the
+    producers' own (no second copy of any rule)."""
     acts = []
     for s in _SOURCES:
         for a in s.produce(inputs) or []:
             a.setdefault("source", s.name)
             acts.append(validate(a))
     acts.sort(key=lambda a: -a["score"])          # stable: equal scores keep registration order
-    return acts[: (limit or C.MAX_DAILY_ACTIONS)]
+    return acts
+
+
+def produce_all(inputs, limit=None):
+    """Run every registered source, validate, rank by Python score (stable), cut to the daily limit."""
+    return produce_candidates(inputs)[: (limit or C.MAX_DAILY_ACTIONS)]
 
 
 def normalize(a):

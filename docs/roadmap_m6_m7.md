@@ -246,7 +246,10 @@ milestone (D-016).
 > **blocked** by the missing export and is not renumbered. M7 starts anyway, in large checkpoints:
 > - **M7-1 — Searchable Customer 360: done** (D-042, `docs/m7_customer_360.md`). A separate full-customer
 >   deterministic repository and a "Müşteri 360" tab. Read-only, no AI, no ranking.
-> - **M7-2 — Expanded deterministic daily sales queue / opportunity engine** (built on Customer 360).
+> - **M7-2 — Günlük Satış (deterministic daily sales queue): done** (D-043, `docs/m7_daily_sales_queue.md`). One
+>   card per Customer 360 customer from the existing collections / winback / real-decline reasons, read from the
+>   uncut candidates (M5 top 15 unchanged); collection-first sequence, exclusive invoice-account mapping, master
+>   KAPALI; shared action state; drafts only on explicit click. No new rules.
 > - **M7-3 — Cross-sell + potential / territory intelligence.**
 > - **M7-4 — January Fair Command Center.**
 > - **M7-5 — Lightweight CRM / follow-up workflow.**
