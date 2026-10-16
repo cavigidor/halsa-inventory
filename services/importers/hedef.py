@@ -275,16 +275,23 @@ class ReconciliationSummary(BaseModel):
 
 
 class AssignmentSummary(BaseModel):
-    """Aggregate agreement between Hedef `Temsilci` and the master's current `TEMSİLCİ` (no names)."""
+    """Aggregate agreement between Hedef `Temsilci` and the master's current `TEMSİLCİ` (no names).
+
+    `same` is exact text. Representative names are labels, not identifiers, and the real Hedef file pads them
+    with a trailing space, so a second, labelled count ignores surrounding whitespace (values stay unchanged).
+    """
 
     model_config = ConfigDict(extra="forbid")
     comparable: int = 0
     same: int = 0
     different: int = 0
+    same_ignoring_surrounding_whitespace: int = 0
     missing_on_hedef: int = 0
     missing_on_master: int = 0
     not_resolvable: int = 0
     agreement_rate: float = 0.0
+    agreement_rate_ignoring_surrounding_whitespace: float = 0.0
+    hedef_rep_with_surrounding_whitespace: int = 0
     hedef_rep_equals_customer_rep: int = 0
 
 
@@ -561,6 +568,8 @@ def assignment_drift(result: HedefResult, sales_path: str | Path) -> AssignmentS
         h = a.hedef_rep.value
         if h is not None and h == a.customer_rep.value:
             s.hedef_rep_equals_customer_rep += 1
+        if h is not None and h != h.strip():
+            s.hedef_rep_with_surrounding_whitespace += 1
         rows = reps.get(a.customer_code)
         if rows is None or len(rows) != 1:
             s.not_resolvable += 1
@@ -576,7 +585,11 @@ def assignment_drift(result: HedefResult, sales_path: str | Path) -> AssignmentS
                 s.same += 1
             else:
                 s.different += 1
-    s.agreement_rate = round(s.same / s.comparable, 4) if s.comparable else 0.0
+            if h.strip() == m.strip():
+                s.same_ignoring_surrounding_whitespace += 1
+    if s.comparable:
+        s.agreement_rate = round(s.same / s.comparable, 4)
+        s.agreement_rate_ignoring_surrounding_whitespace = round(s.same_ignoring_surrounding_whitespace / s.comparable, 4)
     result.counts.assignment = s
     return s
 

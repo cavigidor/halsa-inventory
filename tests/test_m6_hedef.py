@@ -493,6 +493,17 @@ def test_52_assignment_counts_aggregate(tmp_path):
     # 0001: Alfa vs Alfa → same; 0002: Beta vs Alfa → different; 0003: master empty → missing on master
     assert (s.comparable, s.same, s.different, s.missing_on_master, s.missing_on_hedef) == (2, 1, 1, 1, 0)
     assert s.agreement_rate == 0.5 and s.hedef_rep_equals_customer_rep == 0
+    assert s.same_ignoring_surrounding_whitespace == 1
+
+
+def test_52b_assignment_whitespace_is_a_labelled_second_count(tmp_path):
+    p = sales_book(tmp_path)
+    res = import_hedef(hedef_book(tmp_path, [row(CUR, "100.01.0001", 0, Temsilci=REPS[0] + " "),
+                                             row(CUR, "100.01.0002", 1, Temsilci=REPS[0] + " ")]),
+                       master=master_from_sales_workbook(p))
+    s = assignment_drift(res, p)
+    assert (s.same, s.same_ignoring_surrounding_whitespace, s.hedef_rep_with_surrounding_whitespace) == (0, 2, 2)
+    assert by_code(res)["100.01.0001"].hedef_rep.value == REPS[0] + " "   # value never altered
 
 
 def test_53_no_salesperson_names_in_assignment(tmp_path):
