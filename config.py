@@ -34,6 +34,12 @@ _load_dotenv()
 # --- context / cost control ---
 MAX_CONTEXT_ITEMS_PER_CATEGORY = int(os.environ.get("MAX_CONTEXT_ITEMS_PER_CATEGORY", 20))
 MAX_DAILY_ACTIONS = int(os.environ.get("MAX_DAILY_ACTIONS", 15))
+# M7-2 Günlük Satış: operational caps only (never business thresholds). The private candidate pool holds the
+# best-scored customer actions BEFORE the M5 global cut; the queue shows at most MAX_DAILY_SALES_QUEUE customer
+# cards by default and never more than MAX_SALES_QUEUE_LIMIT per request.
+MAX_SALES_QUEUE_CANDIDATES = int(os.environ.get("MAX_SALES_QUEUE_CANDIDATES", 200))
+MAX_DAILY_SALES_QUEUE = int(os.environ.get("MAX_DAILY_SALES_QUEUE", 20))
+MAX_SALES_QUEUE_LIMIT = 50
 ENABLE_AI = os.environ.get("ENABLE_AI", "true").lower() == "true"
 ENABLE_MACRO = os.environ.get("ENABLE_MACRO", "true").lower() == "true"
 

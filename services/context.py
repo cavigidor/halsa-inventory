@@ -30,6 +30,22 @@ def resolve_inflation(explicit=None, macro=None):
     return None, "unavailable"
 
 
+class AgentContext(dict):
+    """The agent context (a plain dict for every existing reader) plus PRIVATE runtime attributes for M7-2.
+
+    The attributes are not dict items, so they never reach `/api/context`, `agent_context.json`, evidence packets or
+    logs (json / pydantic serialize items only). They travel with this exact object, so a controlled refresh that
+    installs a new context installs its matching candidates at the same moment.
+    - `sales_queue_candidates`: tuple of customer actions from the UNCUT candidate list (Python score order),
+      bounded by `MAX_SALES_QUEUE_CANDIDATES`.
+    - `sales_queue_rows`: the already-computed source rows of those candidates (collections / winback / shrinking),
+      so the existing draft and drawer endpoints can resolve them; used only for codes the public index lacks.
+    """
+
+    sales_queue_candidates = None
+    sales_queue_rows = None
+
+
 def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sources=None, frames=None):
     """sources/frames (M5-5): a frozen source selection and its already-read raw frames (controlled refresh);
     by default the newest files in data_folder are selected and read, as before."""
@@ -118,7 +134,7 @@ def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sour
     macro_block = macro or {"available": False, "reason": "not_fetched",
                             "note": "Milestone 4'te TCMB/TÜİK sağlayıcısı eklenecek."}
 
-    ctx = {
+    ctx = AgentContext({
         "generated_at": dt.datetime.now().isoformat(timespec="seconds"),
         "as_of_data_date": asof_d.isoformat(),
         "source_files": {"stock": os.path.basename(sp), "sales": os.path.basename(ep),
@@ -143,11 +159,20 @@ def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sour
         "shrinking": cut(sorted(shrink, key=lambda x: (x["real_pct"] if x["real_pct"] is not None else x["pct"]))),
         "low_stock": cut(low),
         "risk": cut(risk),
-    }
+    })
     # M5-4: every customer code classified KAPALI (order-source attribute or invoice party), so the draft
     # refusal does not depend on whether the customer happens to be in the top-N risk list.
     ctx["closed_customers"] = sorted({c for c, a in attr.items() if a.get("closed")} | set(cinv))
-    ctx["actions"] = build_actions(ctx, coll_scored, over_cand, lap, shrink_real_neg, infl)
+    # M5 actions = the uncut candidates cut to MAX_DAILY_ACTIONS: identical to build_actions() (same producers,
+    # same stable sort, same cut). M7-2 keeps the customer candidates privately (not dict items, never serialized).
+    candidates = build_action_candidates(ctx, coll_scored, over_cand, lap, shrink_real_neg, infl)
+    ctx["actions"] = candidates[:C.MAX_DAILY_ACTIONS]
+    queue = tuple(a for a in candidates if a.get("entity_type") == "customer")[:C.MAX_SALES_QUEUE_CANDIDATES]
+    ctx.sales_queue_candidates = queue
+    qcodes = {str(a["entity_id"]) for a in queue}
+    ctx.sales_queue_rows = {"collections": [r for r in coll_scored if str(r["code"]) in qcodes],
+                            "winback": [r for r in lap if str(r["code"]) in qcodes],
+                            "shrinking": [r for r in shrink if str(r["code"]) in qcodes]}
     # M5-4: the customer drawer and drafts look customers up in the lists above, which are cut to top-N, while
     # actions are produced from the full lists. Carry the already-computed rows of every customer that has an
     # action but fell outside a cut (no new calculation; the top-N lists themselves are unchanged).
@@ -158,6 +183,14 @@ def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sour
     ctx["action_customers"] = {"collections": _extra("collections", coll_scored), "winback": _extra("winback", lap),
                                "shrinking": _extra("shrinking", shrink)}
     return ctx
+
+
+def build_action_candidates(ctx, coll_scored, over_cand, lap, shrink_real_neg, infl):
+    """All deterministic actions, ranked, BEFORE the daily cut (M7-2 seam; same producers as build_actions)."""
+    from services import action_sources  # noqa: F401  (registers the built-in sources)
+    from services import actions as A
+    return A.produce_candidates({"ctx": ctx, "coll_scored": coll_scored, "over_cand": over_cand, "lap": lap,
+                                 "shrink_real_neg": shrink_real_neg, "infl": infl})
 
 
 def build_actions(ctx, coll_scored, over_cand, lap, shrink_real_neg, infl):

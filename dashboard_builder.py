@@ -221,7 +221,7 @@ def m_collections(path,df=None):
     return rows, owed_map
 
 # ---------- oluştur ----------
-def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True):
+def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True):
     """sources/frames (M5-5): a frozen source selection and the already-read raw frames, so a controlled
     refresh builds from exactly what it validated. stats_out (dict): filled with build totals for verification."""
     today=today or dt.date.today()
@@ -301,7 +301,7 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     meta={'date':d_tr,'stock':os.path.basename(sp) if sp else '','sales':os.path.basename(ep) if ep else '',
           'aging':os.path.basename(ap) if ap else '','tiers':tier_counts,'total':total,'has_aging':has_aging,
           'asof':_asof_iso(sdf)}
-    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel))
+    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel))
     if stats_out is not None:
         stats_out.update({'asof':meta['asof'],'overdue_total':overdue_total,'overstock_value':over_val,
                           'tabs':list(modules.keys()),'products':total,'lapsed':len(lap),'low':len(low),
@@ -1137,6 +1137,8 @@ function activityCard(a){
 
 tabBtn.addEventListener('click',start);   // lazy: nothing is fetched until the tab is opened
 $('.c3-q').addEventListener('input',onInput);
+// M7-2 deep link: Günlük Satış opens this tab with one exact customer (deterministic GET, no AI)
+window.StockAgentC360={open:function(code){start(); if(code) openCustomer(String(code));}};
 })();
 """
 
@@ -1150,7 +1152,263 @@ def _c360_panel(meta):
     return btn,block
 
 
-def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True):
+# ---------------- M7-2: Günlük Satış tab (deterministic customer-centric queue, server-driven) ----------------
+# One tab button + one panel in markers (like the AI and Müşteri 360 tabs). The order, grouping, scores, primary
+# reason and KAPALI rules all come from Python (GET /api/sales-queue); the page never re-sorts. Reason state uses the
+# existing /api/actions/* endpoints (one state with the AI Aksiyon Merkezi). A message draft is generated only after
+# an explicit click (POST /api/agent/draft-message, copy-only). All text is set with textContent.
+_SQ_CSS=r"""
+#sq .sq-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 10px}
+#sq .sq-date{font-size:12px;color:var(--muted);margin-left:auto}
+#sq .sq-state{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:8px 0 12px}
+#sq .sq-state.off,#sq .sq-state.err{border-color:#f3c4c4;background:#fdf3f3;color:#b42318;font-weight:600}
+#sq .sq-state.wait,#sq .sq-state.empty{color:var(--muted)}
+#sq .sq-filters{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
+#sq .sq-f{border:1px solid var(--line);background:var(--card);color:var(--muted);font:inherit;font-size:12px;font-weight:600;padding:5px 11px;border-radius:999px;cursor:pointer}
+#sq .sq-f.on{background:var(--ink);border-color:var(--ink);color:#fff}
+#sq .sq-card{background:var(--card);border:1px solid var(--line);border-left:4px solid #9aa3ad;border-radius:10px;padding:11px 14px;margin:0 0 10px;min-width:0}
+#sq .sq-card.pri-critical{border-left-color:var(--crit)}#sq .sq-card.pri-high{border-left-color:var(--low)}#sq .sq-card.pri-medium{border-left-color:var(--gold)}
+#sq .sq-top{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11px}
+#sq .sq-pri{font-weight:800;letter-spacing:.06em;color:#6b7480}
+#sq .pri-critical .sq-pri{color:var(--crit)}#sq .pri-high .sq-pri{color:var(--low)}#sq .pri-medium .sq-pri{color:var(--gold)}
+#sq .sq-score{font-family:"SF Mono",Menlo,Consolas,monospace;color:var(--muted);white-space:nowrap}
+#sq .sq-kapali{font-size:10px;font-weight:800;letter-spacing:.04em;color:#fff;background:var(--crit);border-radius:4px;padding:1px 6px}
+#sq .sq-badge{font-size:10px;font-weight:700;border-radius:4px;padding:1px 6px;color:#92660a;background:#fef6e7;border:1px solid #f5d9a8}
+#sq .sq-name{font-size:16px;font-weight:800;letter-spacing:-.01em;margin:6px 0 1px}
+#sq .sq-sub{font-size:12px;color:var(--muted);display:flex;gap:10px;flex-wrap:wrap}
+#sq .sq-code{font-family:"SF Mono",Menlo,Consolas,monospace}
+#sq .sq-cf{background:var(--warn-bg);border:1px solid #f5d9a8;color:var(--warn);border-radius:8px;padding:7px 10px;margin:8px 0 0;font-size:13px;font-weight:600}
+#sq .sq-primary{margin:8px 0 4px;font-size:13.5px}
+#sq .sq-chips{display:flex;gap:5px;flex-wrap:wrap;margin:6px 0 0}
+#sq .sq-chip{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:2px 9px;color:var(--muted)}
+#sq .sq-acts{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:9px}
+#sq .sq-btn{border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-size:12px;font-weight:600;padding:5px 10px;border-radius:8px;cursor:pointer}
+#sq .sq-btn:hover{border-color:#c3c8cf}#sq .sq-btn:disabled{opacity:.5;cursor:wait}
+#sq .sq-btn.pri{background:var(--ink);border-color:var(--ink);color:#fff}
+#sq .sq-reasons{margin:8px 0 0;border-top:1px solid var(--line)}
+#sq .sq-r{padding:8px 0;border-bottom:1px solid var(--line)}
+#sq .sq-r-h{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px}
+#sq .sq-r-cat{font-weight:700}
+#sq .sq-r-meta{color:var(--muted)}
+#sq .sq-r-txt{font-size:13px;margin:3px 0}
+#sq .sq-r-facts{font-size:12px;color:var(--muted);margin:2px 0 4px}
+#sq .sq-deferf{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:12px;color:var(--muted)}
+#sq .sq-deferf input{border:1px solid var(--line);border-radius:6px;padding:3px 6px;font:inherit;color:var(--ink)}
+#sq .sq-err{font-size:12px;color:#b42318;font-weight:600;margin:6px 0 0}
+#sq .sq-draft{margin-top:9px;border:1px solid var(--line);border-radius:8px;padding:9px 11px;background:#fbfbfc}
+#sq .sq-drow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+#sq .sq-drow select{border:1px solid var(--line);border-radius:6px;padding:4px 6px;font:inherit;font-size:12px;color:var(--ink);background:var(--card)}
+#sq .sq-dmsg{width:100%;min-height:96px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit;font-size:13.5px;margin-top:8px}
+#sq .sq-note{font-size:12px;color:var(--muted);margin:6px 0}
+#sq .sq-undo{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:20;display:flex;gap:14px;align-items:center;background:var(--ink);color:#fff;border-radius:10px;padding:9px 10px 9px 16px;font-size:13px;max-width:calc(100% - 32px)}
+#sq .sq-undo-b{background:transparent;border:1px solid rgba(255,255,255,.55);color:#fff;font:inherit;font-weight:700;padding:4px 11px;border-radius:7px;cursor:pointer;white-space:nowrap}
+#sq [hidden]{display:none!important}
+#sq .sq-name,#sq .sq-primary,#sq .sq-r-txt,#sq .sq-r-facts,#sq .sq-cf,#sq .sq-state,#sq .sq-sub{overflow-wrap:anywhere}
+@media(max-width:600px){#sq .sq-date{margin-left:0;width:100%}#sq .sq-btn,#sq .sq-f{min-height:36px}
+#sq .sq-undo{left:12px;right:12px;transform:none;max-width:none;justify-content:space-between}}
+"""
+
+_SQ_BODY="""
+<h2 class="sec">Bugün kimi aramalıyım?</h2>
+<p class="note">Her müşteri bir kez görünür; birden fazla gerekçesi varsa birlikte listelenir. Sıralama, skorlar ve gerekçeler Python'dandır (mevcut aksiyon kuralları). Tahsilat varsa önce tahsilat konuşulur. Yapay zekâ yalnızca "Taslak oluştur"a tıkladığınızda kullanılır.</p>
+<div class="sq-bar"><span class="sq-date"></span></div>
+<div class="sq-state" role="status" hidden></div>
+<div class="sq-filters" hidden></div>
+<div class="sq-list"></div>
+<p class="sq-note sq-more" hidden></p>
+<div class="sq-undo" role="status" aria-live="polite" hidden></div>
+"""
+
+_SQ_JS=r"""
+(function(){
+'use strict';
+const root=document.getElementById('sq'), tabBtn=document.querySelector('.tab[data-t="sq"]');
+if(!root||!tabBtn) return;
+const POLL_MS=window.__SQ_POLL_MS||2000, POLL_MAX=window.__SQ_POLL_MAX||450, UNDO_MS=window.__SQ_UNDO_MS||5000, DEFER_DAYS=7;
+const POST_HEADERS={'Content-Type':'application/json','X-StockAgent':'1'};   // local CSRF guard (D-020)
+const MSG={
+  file:'Günlük Satış için panoyu http://127.0.0.1:8000/ üzerinden açın.',
+  offline:'Sunucu çalışmıyor. Terminalde uvicorn app:app --host 127.0.0.1 çalıştırıp http://127.0.0.1:8000 adresini açın. Diğer sekmeler normal çalışır.',
+  building:'Müşteri verisi hazırlanıyor…',
+  slow:'Müşteri verisi hâlâ hazırlanıyor; biraz sonra sekmeyi yeniden açın.',
+  fail:'Günlük Satış yüklenemedi',
+  empty:'Bugün için açık satış görevi yok.',
+  noneInFilter:'Bu filtrede müşteri yok.',
+  stateFail:'Durum kaydedilemedi.',
+  badDate:'Geçerli bir ileri tarih seçin.',
+  complete:'Gerekçe tamamlandı.',
+  dismiss:'Gerekçe gizlendi.',
+  drafting:'Taslak hazırlanıyor…',
+  draftFail:'Taslak oluşturulamadı.',
+  aiOff:'AI kapalı (.env: AI_PROVIDER=openai); taslak oluşturulamaz.',
+  copied:'Kopyalandı', copyFail:'Kopyalanamadı; metni seçip elle kopyalayın.',
+  draftNote:'Yalnızca taslak: inceleyin, kopyalayın ve kendiniz gönderin.'
+};
+const PRI={critical:'KRİTİK',high:'YÜKSEK',medium:'ORTA',low:'DÜŞÜK'};
+const CONF={high:'yüksek',medium:'orta',low:'düşük'};
+const STATUS={open:'açık',deferred:'ertelendi',completed:'tamamlandı',ignored:'gizlendi'};
+const CHANNELS=[['whatsapp','WhatsApp'],['email','E-posta']];
+const PURPOSES={collection:'Tahsilat',offer:'Teklif',winback:'Geri kazanım',sales_followup:'Satış takibi',fair_invite:'Fuar daveti'};
+const AY=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+const st={started:false,filter:'all',data:null,busy:new Set(),err:{},open:new Set(),draft:{},undo:null};
+const $=s=>root.querySelector(s);
+function el(tag,cls,text){const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=String(text); return e;}
+function show(n,on){n.hidden=!on;}
+function state(t,k){const n=$('.sq-state'); n.textContent=t||''; n.className='sq-state'+(k?' '+k:''); show(n,!!t);}
+function fmtDate(iso){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||'')); return m?(+m[3])+' '+AY[+m[2]-1]+' '+m[1]:'—';}
+function fmtScore(s){const n=Number(s); return Number.isFinite(n)?n.toLocaleString('tr-TR',{maximumFractionDigits:1}):'—';}
+function btn(cls,label,fn){const b=el('button','sq-btn'+(cls?' '+cls:''),label); b.type='button'; b.addEventListener('click',fn); return b;}
+async function post(path,body){
+  try{const r=await fetch(path,{method:'POST',headers:POST_HEADERS,body:JSON.stringify(body||{})}); return r.ok?await r.json():null;}
+  catch(e){return null;}
+}
+
+function start(){
+  if(st.started) return; st.started=true;
+  if(location.protocol==='file:'){state(MSG.file,'off'); return;}   // the API is same-origin only; no request
+  load(0);
+}
+async function load(n){
+  let r, body=null;
+  try{r=await fetch('/api/sales-queue?filter='+encodeURIComponent(st.filter)+'&limit=20',{headers:{'Accept':'application/json'}});
+      try{body=await r.json();}catch(e){body=null;}}
+  catch(e){state(MSG.offline,'off'); return;}
+  if(r.status===503){
+    const d=(body&&body.detail)||{};
+    if(d.state==='building'){state(n<POLL_MAX?MSG.building:MSG.slow,'wait'); if(n<POLL_MAX) setTimeout(()=>load(n+1),POLL_MS); return;}
+    state(d.message||MSG.fail,'err'); return;
+  }
+  if(!r.ok||!body){state(MSG.fail+' (HTTP '+r.status+').','err'); return;}
+  st.data=body; render();
+}
+function render(){
+  const d=st.data; state('');
+  $('.sq-date').textContent=d.as_of_data_date?'Veri: '+fmtDate(d.as_of_data_date):'';
+  const fb=$('.sq-filters'); fb.replaceChildren();
+  (d.filters||[]).forEach(f=>{const b=el('button','sq-f'+(st.filter===f.key?' on':''),f.label+' ('+((d.filter_counts||{})[f.key]||0)+')');
+    b.type='button'; b.dataset.k=f.key; b.addEventListener('click',()=>{st.filter=f.key; load(0);}); fb.append(b);});
+  show(fb,(d.filter_counts||{}).all>0);
+  const list=$('.sq-list'); list.replaceChildren();
+  const items=Array.isArray(d.items)?d.items:[];
+  if(!items.length) state((d.filter_counts||{}).all?MSG.noneInFilter:MSG.empty,'empty');
+  items.forEach(it=>list.append(card(it)));   // Python order, never re-sorted
+  const more=$('.sq-more'); more.textContent=d.truncated?('İlk '+d.returned+' müşteri gösteriliyor ('+d.visible_customers+' içinden).'):''; show(more,!!d.truncated);
+}
+function card(it){
+  const pri=PRI[it.priority]?it.priority:'low', c=el('article','sq-card pri-'+pri); c.dataset.code=it.customer_code;
+  const top=el('div','sq-top'); top.append(el('span','sq-pri',PRI[it.priority]||it.priority), el('span','sq-score','skor '+fmtScore(it.queue_score)));
+  if(it.closed===true) top.append(el('span','sq-kapali','KAPALI'));
+  (it.warnings||[]).filter(w=>w.code!=='collection_account_scope').forEach(w=>{const b=el('span','sq-badge',w.code==='master_duplicate'?'çift ana kayıt':'ana kayıt yok'); b.title=w.message; top.append(b);});
+  c.append(top, el('h3','sq-name',it.display_name));
+  const sub=el('div','sq-sub'); sub.append(el('span','sq-code',it.customer_code), el('span',null,'son sipariş: '+fmtDate(it.last_order_date)));
+  c.append(sub);
+  const reasons=Array.isArray(it.reasons)?it.reasons:[], primary=reasons.find(r=>r.action_id===it.primary_action_id)||reasons[0];
+  if(it.collection_first&&primary){const cf=el('div','sq-cf','Önce tahsilat: fatura hesabı '+(primary.account_code||'—')+' için vadesi geçen alacak konuşulmalı; diğer satış konuları sonra.'); cf.dataset.cf='1'; c.append(cf);}
+  if(primary){const p=el('p','sq-primary'); p.append(el('b',null,primary.category_label+': '),document.createTextNode(primary.reason||'')); c.append(p);}
+  const chips=el('div','sq-chips'), counts={};
+  reasons.forEach(r=>{counts[r.category_label]=(counts[r.category_label]||0)+1;});
+  Object.keys(counts).forEach(k=>chips.append(el('span','sq-chip',k+(counts[k]>1?' ×'+counts[k]:''))));
+  c.append(chips);
+  const acts=el('div','sq-acts'), code=it.customer_code;
+  acts.append(btn('sq-toggle','Gerekçeler ('+reasons.length+')',()=>{st.open.has(code)?st.open.delete(code):st.open.add(code); replace(code);}),
+              btn('sq-c360','Müşteri 360',()=>openC360(code)),
+              btn('sq-drafto','Mesaj taslağı',()=>{const d=st.draft[code]; if(d) d.open=!d.open; else st.draft[code]={open:true,purpose:it.draft.default_purpose,channel:'whatsapp'}; replace(code);}));
+  c.append(acts);
+  if(st.open.has(code)){const box=el('div','sq-reasons'); reasons.forEach(r=>box.append(reasonRow(r,code))); c.append(box);}
+  if(st.draft[code]&&st.draft[code].open) c.append(draftPanel(it));
+  if(st.err[code]) c.append(el('p','sq-err',st.err[code]));
+  return c;
+}
+function replace(code){const it=(st.data.items||[]).find(x=>x.customer_code===code), old=root.querySelector('.sq-card[data-code="'+CSS.escape(code)+'"]');
+  if(it&&old) old.replaceWith(card(it));}
+function reasonRow(r,code){
+  const row=el('div','sq-r'); row.dataset.id=r.action_id; row.dataset.cat=r.category;
+  const h=el('div','sq-r-h'); h.append(el('span','sq-r-cat',r.category_label),
+    el('span','sq-r-meta',(r.scope==='invoice_account'?'fatura hesabı '+(r.account_code||''):'müşteri')+' · skor '+fmtScore(r.score)+' · güven: '+(CONF[r.confidence]||r.confidence||'—')+(r.status&&r.status!=='open'?' · '+(STATUS[r.status]||r.status):'')));
+  row.append(h, el('p','sq-r-txt',r.reason||''));
+  if(Array.isArray(r.facts)&&r.facts.length) row.append(el('p','sq-r-facts',r.facts.join(' · ')));
+  const a=el('div','sq-acts'), busy=st.busy.has(r.action_id);
+  const b1=btn('sq-done','✓ Yapıldı',()=>mutate(r.action_id,'complete',null,code)), b2=btn('sq-defer','⏸ Ertele',()=>toggleDefer(row,r.action_id,code)),
+        b3=btn('sq-hide','✕ Gizle',()=>mutate(r.action_id,'dismiss',null,code));
+  [b1,b2,b3].forEach(b=>{b.disabled=busy;}); a.append(b1,b2,b3); row.append(a);
+  return row;
+}
+function isoLocal(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function inDays(n){const d=new Date(); d.setDate(d.getDate()+n); return isoLocal(d);}
+function toggleDefer(row,id,code){
+  const open=row.querySelector('.sq-deferf'); if(open){open.remove(); return;}
+  const f=el('div','sq-deferf'), inp=el('input'), msg=el('span','sq-err');
+  inp.type='date'; inp.min=inDays(1); inp.value=inDays(DEFER_DAYS); inp.setAttribute('aria-label','Erteleme tarihi'); show(msg,false);
+  f.append(el('span',null,'Ne zamana?'),inp,btn('sq-defer-ok','Ertele',()=>{const v=inp.value;
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(v)||v<inp.min){msg.textContent=MSG.badDate; show(msg,true); return;} mutate(id,'defer',v,code);}),
+    btn('sq-defer-no','Vazgeç',()=>f.remove()),msg);
+  row.append(f);
+}
+async function mutate(id,kind,until,code){
+  if(st.busy.has(id)) return; st.busy.add(id); delete st.err[code];
+  const res=await post('/api/actions/'+encodeURIComponent(id)+'/'+kind,kind==='defer'?{until:until}:{});
+  st.busy.delete(id);
+  if(!res){st.err[code]=MSG.stateFail; replace(code); return;}   // not confirmed: nothing changes but the error
+  offerUndo(id,kind==='defer'?'Gerekçe '+fmtDate(res.defer_until||until)+' tarihine ertelendi.':MSG[kind]);
+  load(0);   // the server recomputes visible reasons, primary reason, queue score and order
+}
+function clearUndo(){if(st.undo) clearTimeout(st.undo.timer); st.undo=null; const t=$('.sq-undo'); t.replaceChildren(); show(t,false);}
+function offerUndo(id,text){
+  clearUndo(); const t=$('.sq-undo');
+  t.append(el('span','sq-undo-t',text),btn('sq-undo-b','Geri al',async()=>{clearUndo(); const r=await post('/api/actions/'+encodeURIComponent(id)+'/reopen',{});
+    if(!r) state(MSG.stateFail,'err'); load(0);}));
+  t.querySelector('.sq-undo-b').className='sq-undo-b'; show(t,true);
+  st.undo={id:id,timer:setTimeout(clearUndo,UNDO_MS)};
+}
+function openC360(code){   // the existing Müşteri 360 tab, loaded with this exact customer
+  const t=document.querySelector('.tab[data-t="c360"]'); if(t) t.click();
+  if(window.StockAgentC360&&typeof window.StockAgentC360.open==='function') window.StockAgentC360.open(code);
+}
+function draftPanel(it){
+  const code=it.customer_code, d=st.draft[code], box=el('div','sq-draft'), row=el('div','sq-drow');
+  const sel=(opts,val,fn)=>{const s=el('select'); opts.forEach(([k,l])=>{const o=el('option',null,l); o.value=k; s.append(o);}); s.value=val; s.addEventListener('change',()=>fn(s.value)); return s;};
+  const purposes=(it.draft.allowed_purposes||['collection']).map(p=>[p,PURPOSES[p]||p]);
+  const go=btn('pri sq-dgo','Taslak oluştur',()=>makeDraft(it)); go.disabled=!!d.busy;
+  row.append(el('span',null,'Amaç'),sel(purposes,d.purpose,v=>{d.purpose=v;}),el('span',null,'Kanal'),sel(CHANNELS,d.channel,v=>{d.channel=v;}),go);
+  box.append(row);
+  if(it.closed===true) box.append(el('p','sq-note','KAPALI müşteri: yalnızca tahsilat taslağı.'));
+  if(d.busy) box.append(el('p','sq-note',MSG.drafting));
+  if(d.err) box.append(el('p','sq-err',d.err));
+  if(d.text!=null){const ta=el('textarea','sq-dmsg'); ta.value=d.text; ta.setAttribute('aria-label','Taslak metni'); ta.addEventListener('input',()=>{d.text=ta.value;});
+    box.append(ta); const f=el('div','sq-drow'); f.append(btn('sq-dcopy','Kopyala',()=>copy(code)));
+    if(d.copy) f.append(el('span',null,d.copy==='ok'?MSG.copied:MSG.copyFail)); f.append(el('span',null,MSG.draftNote)); box.append(f);}
+  return box;
+}
+async function makeDraft(it){
+  const code=it.customer_code, d=st.draft[code]; if(d.busy) return;
+  d.busy=true; d.err=null; d.text=null; d.copy=null; replace(code);
+  const target=(d.purpose==='collection'&&it.draft.collection_target)?it.draft.collection_target:it.draft.sales_target;
+  const res=await post('/api/agent/draft-message',{customer_code:target,channel:d.channel,purpose:d.purpose});
+  d.busy=false;
+  if(!res) d.err=MSG.draftFail;
+  else if(!res.available) d.err=(res.ai_error_category==='disabled'||res.ai_error_category==='missing_key')?MSG.aiOff:(res.reason||MSG.draftFail);
+  else d.text=String(res.message||'');
+  replace(code);
+}
+async function copy(code){const d=st.draft[code]; let ok=false;
+  try{if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(d.text); ok=true;}}catch(e){ok=false;}
+  d.copy=ok?'ok':'fail'; replace(code);}
+
+tabBtn.addEventListener('click',start);   // lazy: nothing is fetched until the tab is opened
+})();
+"""
+
+def _sq_panel(meta):
+    """(tab button, panel block) for Günlük Satış, wrapped in markers like the other server-driven tabs."""
+    asof=html.escape(str(meta.get('asof') or ''),quote=True)
+    btn='<button class="tab" data-t="sq">Günlük Satış</button>'
+    block=('\n<!--SQ-TAB-START-->\n<style>'+_SQ_CSS+'</style>\n'
+           f'<div id="sq" class="panel" data-asof="{asof}">'+_SQ_BODY+'</div>\n'
+           '<script>'+_SQ_JS+'</script>\n<!--SQ-TAB-END-->')
+    return btn,block
+
+
+def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True):
     blob=json.dumps(modules,ensure_ascii=False).replace('</','<\\/')
     tabs=['overview']+list(modules.keys())
     tabbtns=''.join(f'<button class="tab" data-t="{t}">{("Genel Bakış" if t=="overview" else modules[t]["title"])}'
@@ -1160,6 +1418,7 @@ def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True):
     src=f"Stok: {meta['stock']} · Satış: {meta['sales']}"+(f" · Alacaklar: {meta['aging']}" if meta['has_aging'] else '')
     ai_btn,ai_block=_ai_panel(meta) if ai_panel else ('','')
     c3_btn,c3_block=_c360_panel(meta) if c360_panel else ('','')
+    sq_btn,sq_block=_sq_panel(meta) if sq_panel else ('','')
     return f"""<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Şirket Panosu — {meta['date']}</title>
 <style>
@@ -1221,7 +1480,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <header><div class="eyebrow">Şirket Panosu</div>
 <h1>Şirket Panosu — {meta['date']}</h1>
 <div class="sub">{src} · {meta['total']:,} ürün</div></header>
-<div class="tabs">{tabbtns}{c3_btn}{ai_btn}</div>
+<div class="tabs">{tabbtns}{sq_btn}{c3_btn}{ai_btn}</div>
 <div id="overview" class="panel on">
 <h2 class="sec">Aktif Analizler</h2>
 <p class="note">İlk istediğiniz ikisi — <b>stok uyarıları</b> (azalan + fazla) ve <b>kayıp müşteriler</b> (geri kazanım) — çalışıyor. Gezinmek, aramak ve sıralamak için yukarıdaki sekmelere tıklayın. Her şey doğrudan tablolarınızdan hesaplanır: filtreleme, müşteri ve stok kodu üzerinden birleştirme ve aritmetik — hiçbir şey tahmin değil.</p>
@@ -1231,7 +1490,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <p class="note">Hazır olduğunuzda açabileceğimiz, tamamen gerçeğe dayalı diğer analizler — her biri yalnızca ilgili sayfanın <code>data</code> klasöründe olmasını ister, sonra kendi sekmesi olur. Yapay zekâ yok, bunlarla aynı.</p>
 <ul class="later">{laterlist}</ul>
 </div>
-<div id="panels"></div>{c3_block}{ai_block}
+<div id="panels"></div>{sq_block}{c3_block}{ai_block}
 <script>
 const DATA={blob};
 const fmtMoney=v=>'₺'+Math.round(v).toLocaleString('tr-TR');

@@ -1,14 +1,14 @@
 # TASKS.md — active backlog
 
 Rules: one *Current* task at a time. Each task must be executable in one bounded session.
-Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 (Customer 360) is done; M7-2 is not started.
+Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 (Customer 360) is merged; M7-2 (Günlük Satış) is done (PR pending); M7-3 is not started.
 
 ## Current
-- [ ] **Review and merge the M7-1 Customer 360 PR** (`claude/m7-1-customer-360`).
+- [ ] **Review and merge the M7-2 Günlük Satış PR** (`claude/m7-2-daily-sales-queue`).
 
 ## Next (M7, large checkpoints; start each only when moved to *Current*)
-- [ ] **M7-2 — Expanded deterministic daily sales queue / opportunity engine** on top of Customer 360.
-- [ ] **M7-3 — Cross-sell + potential / territory intelligence.**
+- [ ] **M7-3 — Cross-sell + potential / territory intelligence.** It plugs new reason sources into the Günlük Satış
+  queue (`services/sales_queue.QUEUE_CATEGORIES`) only after its own rules are approved.
 - [ ] **M7-4 — January Fair Command Center.**
 - [ ] **M7-5 — Lightweight CRM / follow-up workflow.**
 - [ ] **M7-6 — Owner / management views + integration / polish.**
