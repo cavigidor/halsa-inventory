@@ -57,6 +57,8 @@ services/store.py     SQLite: action status, history, memory, ai_calls metadata 
 | `schemas.py` | API and strict AI-output Pydantic schemas |
 | `tests/fixtures/synthetic_erp.py` | Synthetic ERP exports used by CI |
 | `services/refresh.py` | Controlled refresh (validate → build staging → verify → swap), API + CLI |
+| `services/importers/` | M6 importer framework: SourceSpec, formula-aware read-only Excel reading, validation report, confidence, exact-match entity resolution, fail-closed staging (`docs/m6_importer_framework.md`, D-035); not yet used by M5 |
+| `tests/fixtures/xlsx_synth.py` | Runtime OOXML writer for synthetic workbooks with cached formulas, error cells and external links |
 | `tests/test_m5_browser.py` | Playwright smoke tests: real FastAPI + Chromium, synthetic data, disabled/mock AI |
 | `tests/js/` | jsdom DOM tests for the AI tab (node, pinned `package-lock.json`; run via `tests/test_m5_ui.py`) |
 | `weekly_agent.py` | Older optional weekly email agent (unused) |
@@ -94,7 +96,7 @@ services/store.py     SQLite: action status, history, memory, ai_calls metadata 
 | 3 | Real LLM (OpenAI) behind the abstraction, with numeric safety | done (see STATUS.md) |
 | 4 | Live macro data (TCMB/TÜİK inflation, FX) | later |
 | 5 | "✨ AI Aksiyon Merkezi" tab: deterministic action queue first, AI on demand (design: `docs/m5_action_center.md`) | **complete** (M5-1 to M5-6: backend, read-only tab, action state, drafts + drawer, controlled refresh, browser verification) |
-| 6 | Additional data sources / sales intelligence foundation: validated importers for hedef raporu, detailed collections, Trodat sales, gider/gelir, kredi takip, bütçe (`docs/roadmap_m6_m7.md`) | in progress: M6-0 source inventory done (`docs/m6_source_inventory.md`, D-034); M6-1 next |
+| 6 | Additional data sources / sales intelligence foundation: validated importers for hedef raporu, detailed collections, Trodat sales, gider/gelir, kredi takip, bütçe (`docs/roadmap_m6_m7.md`) | in progress: M6-0 source inventory done (`docs/m6_source_inventory.md`, D-034); M6-1 importer framework done (`services/importers/`, D-035); M6-2 next |
 | 7 | Sales operating system: daily sales queue, customer 360, cross-sell, January fair command center, light CRM, new-buyer discovery | planned (D-021) |
 | — | Multi-user / remote deployment (auth, admin and salesperson roles, private deployment, backups) | future, out of scope for M5 (D-016) |
 
@@ -110,6 +112,9 @@ explanation. Dashboard code never depends on a specific workbook layout. Validat
 Sources planned for M6: hedef raporu (potential, territory, visits), the detailed collections report,
 the Trodat sales report (SKU intelligence), and the owner-only sources gider/gelir, kredi takip and
 bütçe (bütçe gated by cell-level validation because of formula errors).
+Every M6 source is a `SourceSpec` run through `services/importers.run_import` (D-035): exact headers at a declared
+row or an explicit matrix map, Excel errors and missing formula caches as `invalid`, exact-match entity resolution,
+and reports that contain shapes and counts only.
 
 **Data confidence (D-023):** fields carry a Python-assigned status: `trusted`, `incomplete`, `stale`,
 `unverified` or `invalid`. The 2020–2026 sales history (including its order activity/source field, used
