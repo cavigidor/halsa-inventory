@@ -1,10 +1,10 @@
 # TASKS.md — active backlog
 
 Rules: one *Current* task at a time. Each task must be executable in one bounded session.
-Milestone 5 is complete. M6-0 is done; M6-1 must not be started until it is moved to *Current*.
+Milestone 5 is complete. M6-0 and M6-1 are done; M6-2 must not be started until it is moved to *Current*.
 
 ## Current
-- [ ] **Review and merge the M6-0 PR** (`claude/m6-0-source-inventory`, docs only).
+- [ ] **Review and merge the M6-1 PR** (`claude/m6-1-importer-framework`, importer framework only).
 
 ## Next
 - [ ] **Owner: M5 check on the Mac** (`git pull`, refresh, open http://127.0.0.1:8000/, desktop + phone width).
@@ -15,16 +15,18 @@ Milestone 5 is complete. M6-0 is done; M6-1 must not be started until it is move
   `Evrak Detaylı Tahsilat Raporu` export, a CRM export if one exists, and the historical fair invitation/attendance
   lists; decide the fair taxonomy (ETKİNLİK / SAHA), business-line mapping, revenue basis, salesperson of record,
   Trodat mapping, Hedef/Bütçe file of record.
-- [ ] **M6-1 Importer framework** (requirements in `docs/m6_source_inventory.md` §17). Start only when moved to
-  *Current*.
+- [ ] **M6-2 Order activity/source normalization** (`Srmmerk`; first source built on `services/importers/`, see
+  `docs/m6_importer_framework.md` "How a source importer plugs in"). Needs the fair-taxonomy decision for the
+  ETKİNLİK / SAHA types. Start only when moved to *Current*.
 - [ ] **DQ-4: Stock coverage `#DIV/0!` rows are silently excluded.** In the stock export, `STOK Kontrol %` is
   `#DIV/0!` for 1,178 of 3,314 products (5 Oct 2026 data); `m_stock` coerces errors to NaN and requires coverage,
   so these products never appear in Azalan / Fazla Stok. Decide the rule (for example a separate "no coverage"
   list); **needs owner approval** (changes dashboard lists).
 - [ ] **DQ-5: Sales `Temsilci` / `Açık / Kapalı` / `Sektör` are invoice-account lookups.** They are Excel XLOOKUPs
   on `Musterikod` against the current `liste` sheet (cached values). `cust_attrs` applies them to the order-source
-  customer (`Pro_kodu`), and 10.6 % of order-source customers have several invoice accounts. M6-1 should source
-  these attributes from the master explicitly with a documented key; changing M5 behavior **needs owner approval**.
+  customer (`Pro_kodu`), and 10.6 % of order-source customers have several invoice accounts. M6-1 added the seam
+  (`AttributeSource`: attribute ← master field via a declared key and identifier role); M5 `cust_attrs` is
+  unchanged and DQ-5 stays open. Changing M5 behavior **needs owner approval**.
 - [ ] **DQ-1: Fix dashboard margin missing-cost handling.**
   `m_margin` uses `fillna(0)` on `Net_Tutar_Maliyet_Dusulmus`, so a missing cost counts as zero
   profit and margin is understated. Exclude rows without cost from both revenue and profit in

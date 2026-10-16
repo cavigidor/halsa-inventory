@@ -1,9 +1,9 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-13 (M5-6 merged to `main` @ `b3e4e4a`, Milestone 5 complete; M6-0 source inventory done on `claude/m6-0-source-inventory`, PR pending)._
+_Updated 2026-10-16 (M6-0 merged to `main` @ `979cd33`; M6-1 importer framework done on `claude/m6-1-importer-framework`, PR pending)._
 
 ## Git
-- **`main`:** `b3e4e4a` (M5-6 merged, Milestone 5 complete). **This checkpoint:** branch `claude/m6-0-source-inventory`
+- **`main`:** `979cd33` (PR #11, M6-0 source inventory). **This checkpoint:** branch `claude/m6-1-importer-framework`
   (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
 - **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
   there to get M5 (see "Owner follow-ups" below).
@@ -13,7 +13,7 @@ _Updated 2026-10-13 (M5-6 merged to `main` @ `b3e4e4a`, Milestone 5 complete; M6
 Two owner follow-ups remain that the sandboxes cannot do (they cannot reach `api.openai.com` or open a browser on
 the Mac): the visual check in the owner's own browser and one live WhatsApp draft tone check. Neither blocks M5.
 **Milestone 6 — Additional data sources / sales intelligence foundation: in progress.** M6-0 (source inventory,
-docs only) is done; M6-1 (importer framework) is next and not started.
+docs only) is merged; M6-1 (importer framework, `services/importers/`) is done (PR pending). M6-2 is not started.
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -403,7 +403,7 @@ AI call would be counted; no browser exists or can be downloaded in the VM, so t
    "Taslak oluştur" once. Do not send it. Judge: natural Turkish, concise, professional, human, no internal analysis,
    no unsupported number, sendable after a light edit. If the tone needs work, add it to Q-2 (no prompt campaign).
 
-## M6-0 (done; PR pending) — source inventory and technical verification
+## M6-0 (done; merged in PR #11 @ `979cd33`) — source inventory and technical verification
 Branch `claude/m6-0-source-inventory` from `main` @ `b3e4e4a`. **Docs only:** `docs/m6_source_inventory.md` (canonical
 inventory) and D-034. No importer, dashboard, action or AI code. The real workbooks were read only on the Mac, with
 local metadata-only scripts outside Git; no workbook data reached any AI provider. All 22 inspected files were
@@ -429,6 +429,62 @@ hash-checked unchanged.
     customer.
 - **Owner decisions** listed in the inventory §16; **M6-1 requirements** in §17; the sequence is kept (§18).
 
+## M6-1 (done; PR pending) — importer framework
+Branch `claude/m6-1-importer-framework` from `main` @ `979cd33`. New package `services/importers/` (developer doc:
+`docs/m6_importer_framework.md`, decision D-035). Framework only: no source-specific importer, no API, tab, action or
+AI change, and nothing wired into the M5 context or refresh.
+- **Pipeline:** `run_import(path, spec)`: inspect → read → normalize → validate → (fail closed) → exact-match entity
+  resolution → verify → in-memory `ImportResult` (`staged` / `failed`, records empty on failure).
+- **SourceSpec:**
+  - Table layout at a fixed header row, or matrix layout (explicit cells, label anchors, ranges, sections).
+  - Exact raw headers; duplicates selected by `(name, occurrence)`.
+  - Types; per-field confidence (D-023) and audience (`shared` / `owner`).
+  - Identity fields; row rules; business-date strategy; verification limits.
+- **Excel:**
+  - Formula view + cached-value view: literal / cached formula / missing cache / Excel error. Never recalculated.
+  - The 7 error codes (+ `#OTHER`) become `invalid`, never NaN.
+  - External links detected from relationships and formula text; never opened.
+- **Identifiers and matching:**
+  - Opaque string IDs (leading zeros, punctuation, long codes kept; float cells rejected).
+  - Pattern/placeholder rules per source.
+  - Statuses matched / unmatched / ambiguous / null / duplicate_master; roles; aggregate match reports.
+  - `AttributeSource` seam for DQ-5.
+- **Reports:** `ValidationReport` / `ImportResult.summary()` carry basename, counts, positions, codes and date
+  min/max only. A sentinel test proves no row values, codes, amounts or paths leak.
+- **Keys:** `record_key` = SHA-256 of type-tagged identity parts + occurrence (no `hash()`; stable across processes).
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (node + jsdom + Chromium) | `AI_PROVIDER=disabled REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 python -m pytest -q` | **357 passed, 7 skipped, 1 xfailed** (52 new in `tests/test_m6_importers.py`; the other 305 unchanged) |
+
+- **Fixtures:** all test workbooks are synthetic and generated at runtime by `tests/fixtures/xlsx_synth.py`, a
+  low-level OOXML writer for cached formula values, error cells and external links. No binary fixture is committed.
+- **Mutation checks:** each of these fails at least one test:
+  - missing cache read as empty;
+  - a duplicate master returning a match;
+  - trimmed headers;
+  - errors read as values;
+  - Python `hash()` keys;
+  - no anchor-moved check.
+- **M5 regression:** no M5 file changed. The live path (`app.py`, `dashboard_builder.py`, `services/refresh.py`,
+  `context.py`, `action_sources.py`) does not import the framework (tested). M5 refresh still reads only its three
+  exports. Because M5 code is byte-identical to `main`, the 15-action real-data baseline is unchanged by
+  construction.
+- **Real-file smoke (read-only, Mac VM, 16 Oct 2026):**
+  - Setup: a throwaway clone of this branch and a *copy* of the 5 Oct 2026 stock export in the VM's scratch
+    space, run against a test spec that was not committed (`Stok_Kodu` occurrence 1, `STOK Kontrol %`,
+    `TOPLAM STOK MİKTAR `).
+  - Result: staged, 3,311 records. Both duplicated headers were reported by column letter.
+  - Coverage: 1,178 `#DIV/0!` cells reported as cell-level `invalid` (matches DQ-4 exactly), 3,311 cached
+    formula values.
+  - Duplicates: one duplicated SKU got a distinct occurrence key. Without an occurrence the spec fails with
+    `ambiguous_header`.
+  - Leak check: 0 of 3,420 sampled real cell values and no absolute path appear in the serialized report.
+  - Safety: the original was hash- and mtime-identical afterwards. The scratch copy was deleted and nothing
+    was committed or sent to a provider.
+
 ## Immediate next task
-Review and merge the M6-0 PR. Then the owner decisions in `docs/m6_source_inventory.md` §16 (at minimum the
-missing exports and the fair taxonomy), and start **M6-1** (importer framework) only when it is moved to *Current*.
+Review and merge the M6-1 PR. Then the owner decisions in `docs/m6_source_inventory.md` §16 (at minimum the
+missing exports and the fair taxonomy). Start **M6-2** (order activity/source normalization) only when it is moved
+to *Current*.

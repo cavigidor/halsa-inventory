@@ -383,3 +383,35 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **Actual source files:** "kredi takip" = the ERP export `kredi sözleşmeleri.xlsx` (installment grain);
   "bütçe" = `BUTCE_2026 <revision>.xlsx` (`invalid` until cell-level validation). The detailed collections report,
   a CRM export and historical fair invitation/attendance lists were not located.
+
+### D-035 · 2026-10-16 · M6 importer framework: declarative specs, two-view Excel reading, fail-closed staging (M6-1)
+- **Decision:** every M6 source is a declarative `SourceSpec` run through one pipeline, `services/importers.run_import`:
+  inspect → read → normalize → validate → fail closed → exact-match entity resolution → verify → in-memory
+  `ImportResult`. Source modules declare specs. They do not write their own readers. Details:
+  `docs/m6_importer_framework.md`.
+- **Layout is configuration, never discovered:**
+  - Headers are matched exactly (spaces, newlines, case, Unicode form) at a declared row.
+  - Duplicated headers are selected by `(name, occurrence)`; without an occurrence they are an error.
+  - Matrices are read only through explicit cells, anchors (which must be exactly once at the declared cell),
+    ranges and sections with exact column labels.
+  - Drift is an error.
+- **Excel reading:**
+  - Read-only, in two views (formulas + cached values), never recalculated, never saved.
+  - Excel errors, missing formula caches, type mismatches and malformed/placeholder IDs become `invalid` values
+    with a code, never None/NaN.
+  - External links are detected and never opened.
+- **Validity vs confidence:** technical validity and D-023 business confidence are separate. Confidence is declared
+  per field and can only be downgraded.
+  - A required field with invalid cells fails the import.
+  - An optional one is marked unusable (warning).
+  - `tolerate_invalid_cells` makes invalidity cell-level.
+- **Identifiers and matching:**
+  - Identifiers are opaque strings with per-source pattern/placeholder rules.
+  - Entity resolution is exact string equality only. Duplicate master keys are never matched.
+  - Roles: `order_customer`, `invoice_account`, `product`, `loan`, `other`.
+  - Attribute provenance is declared via `AttributeSource` (the DQ-5 seam; M5 is unchanged).
+- **Reports:** reports and summaries carry basenames, positions, codes and counts only (date min/max allowed). Row
+  indexes and resolved master rows stay internal.
+- **Keys:** record keys are SHA-256 over type-tagged identity parts + occurrence.
+- **Business date:** never mtime. Filename dates only by opt-in.
+- **Not yet:** persistence, refresh integration and API exposure come with each source's own checkpoint.
