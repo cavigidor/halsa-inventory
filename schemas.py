@@ -298,3 +298,259 @@ class MessageDraftAI(BaseModel):
                                      "en fazla 2 [[FACT:..]].")
     evidence_fact_ids: List[str] = Field(description=_D_EVID)
     warnings: List[str]
+
+
+# ---------- M7-1 Customer 360 (deterministic, read-only; never AI) ----------
+C360Confidence = Literal["trusted", "unverified", "incomplete", "stale", "invalid", "unavailable"]
+
+
+class C360Value(BaseModel):
+    value: Any = None
+    confidence: C360Confidence
+    note: Optional[str] = None
+
+
+class C360Source(BaseModel):
+    key: str
+    label: str
+    status: str
+    confidence: C360Confidence
+    file: Optional[str] = None          # basename only, never a path
+    as_of: Optional[str] = None
+    detail: Optional[str] = None
+
+
+class C360Identity(BaseModel):
+    customer_code: str
+    display_name: str
+    display_name_source: Literal["master", "sales_project", "invoice_account", "code"]
+    sales_name: Optional[str] = None
+    fallback_to_invoice_account: bool
+    code_has_surrounding_whitespace: bool
+
+
+class C360Master(BaseModel):
+    status: Literal["matched", "unmatched", "duplicate", "unavailable"]
+    duplicate_rows: int = 0
+    name: C360Value
+    status_raw: C360Value
+    closed: Optional[bool] = None       # only from a unique master row; None = unknown
+    sector: C360Value
+    rep: C360Value
+
+
+class C360Salesperson(BaseModel):
+    source: Literal["order_satici", "master_temsilci", "hedef_temsilci", "hedef_musteri_temsilcisi"]
+    label: str
+    values: List[str] = []
+    confidence: C360Confidence
+
+
+class C360Year(BaseModel):
+    year: int
+    net_order_amount: Optional[float] = None
+    quantity: Optional[float] = None
+    orders: int
+    lines: int
+    missing_amount_lines: int = 0
+
+
+class C360Sales(BaseModel):
+    amount_label: str
+    amount_note: str
+    confidence: C360Confidence
+    first_order_date: Optional[str] = None
+    last_order_date: Optional[str] = None
+    orders: int
+    lines: int
+    active_years: List[int]
+    current_year: int
+    has_current_year_orders: bool
+    recent_orders: int
+    recent_window_days: int
+    zero_amount_lines: int
+    missing_amount_lines: int
+    distinct_products: int
+    total_net_order_amount: Optional[float] = None
+    years: List[C360Year]
+
+
+class C360Product(BaseModel):
+    sku: str
+    name: Optional[str] = None
+    net_order_amount: Optional[float] = None
+    quantity: Optional[float] = None
+    orders: int
+    lines: int
+    last_order_date: Optional[str] = None
+    category: Optional[str] = None
+    group: Optional[str] = None
+
+
+class C360Mix(BaseModel):
+    label: str
+    net_order_amount: Optional[float] = None
+    lines: int
+    share: Optional[float] = None
+
+
+class C360Products(BaseModel):
+    limit: int
+    amount_label: str
+    top: List[C360Product]
+    categories: List[C360Mix]
+    groups: List[C360Mix]
+
+
+class C360Aging(BaseModel):
+    available: bool
+    present_in_file: bool
+    overdue: Optional[float] = None
+    oldest_bucket: Optional[str] = None
+    confidence: C360Confidence
+
+
+class C360InvoiceAccount(BaseModel):
+    account_code: str
+    account_name: Optional[str] = None
+    is_customer_code: bool
+    orders: int
+    lines: int
+    net_order_amount: Optional[float] = None
+    first_order_date: Optional[str] = None
+    last_order_date: Optional[str] = None
+    shared: bool
+    shared_with_customers: int
+    aging: C360Aging
+    warning: Optional[str] = None
+
+
+class C360Receivables(BaseModel):
+    aging_status: str
+    aging_file: Optional[str] = None
+    level: Literal["invoice_account"] = "invoice_account"
+    accounts: List[C360InvoiceAccount]
+    limitations: List[str]
+    detailed_collections: Literal["not_supplied"] = "not_supplied"
+    detailed_collections_note: str
+
+
+class C360HedefField(BaseModel):
+    key: str
+    label: str
+    value: Any = None
+    confidence: C360Confidence
+    note: Optional[str] = None
+
+
+class C360HedefYear(BaseModel):
+    year: int
+    stamp_qty: C360Value
+    reported_net_revenue: C360Value
+
+
+class C360Hedef(BaseModel):
+    status: Literal["not_configured", "failed", "unmatched", "matched"]
+    file: Optional[str] = None
+    snapshot_date: Optional[str] = None
+    snapshot_date_origin: Optional[str] = None
+    schema_version: Optional[str] = None
+    fields: List[C360HedefField] = []
+    years: List[C360HedefYear] = []
+    notes: List[str] = []
+
+
+class C360EventOrder(BaseModel):
+    order_date: Optional[str] = None
+    source_type: Literal["general", "fuar", "etkinlik", "saha"]
+    edition_year: Optional[int] = None
+    event_name: Optional[str] = None     # local display only: never logged, summarized or sent to AI
+    event_stem: Optional[str] = None
+    edition_year_offset: Optional[int] = None
+
+
+class C360Events(BaseModel):
+    status: str
+    orders_by_type: Dict[str, int]
+    distinct_events_by_type: Dict[str, int]
+    recent: List[C360EventOrder]
+    recent_limit: int
+    confidence: C360Confidence
+    note: str
+
+
+class C360Action(BaseModel):
+    action_id: str
+    category: Optional[str] = None
+    category_label: Optional[str] = None
+    title: Optional[str] = None
+    reason: Optional[str] = None
+    priority: Optional[str] = None
+    status: Optional[str] = None
+    origin: Literal["current", "stored"]
+    generated_at: Optional[str] = None
+    defer_until: Optional[str] = None
+    completed_at: Optional[str] = None
+
+
+class C360Memory(BaseModel):
+    ts: Optional[str] = None
+    kind: Optional[str] = None
+    detail: Optional[str] = None
+    next_followup: Optional[str] = None
+
+
+class C360Activity(BaseModel):
+    current_actions: List[C360Action]
+    stored_actions: List[C360Action]
+    memory: List[C360Memory]
+
+
+class C360Warning(BaseModel):
+    code: str
+    message: str
+
+
+class Customer360Detail(BaseModel):
+    customer_code: str
+    as_of_data_date: str
+    identity: C360Identity
+    sources: List[C360Source]
+    master: C360Master
+    salespeople: List[C360Salesperson]
+    sales: C360Sales
+    products: C360Products
+    receivables: C360Receivables
+    hedef: C360Hedef
+    events: C360Events
+    activity: C360Activity
+    warnings: List[C360Warning]
+    ai_used: Literal[False] = False
+
+
+class C360SearchHit(BaseModel):
+    customer_code: str
+    display_name: str
+    closed: Optional[bool] = None
+    last_order_date: Optional[str] = None
+    match: Literal["exact_code", "code_prefix", "name_prefix", "name_substring", "code_substring"]
+
+
+class Customer360Search(BaseModel):
+    query: str
+    limit: int
+    min_chars: int
+    count: int
+    truncated: bool
+    as_of_data_date: str
+    results: List[C360SearchHit]
+
+
+class Customer360Status(BaseModel):
+    state: Literal["ready", "building", "error"]
+    as_of_data_date: Optional[str] = None
+    sales_file: Optional[str] = None
+    customers: Optional[int] = None
+    hedef_status: Optional[str] = None
+    error_code: Optional[str] = None
+    message: Optional[str] = None
