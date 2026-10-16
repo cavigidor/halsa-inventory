@@ -471,7 +471,18 @@ Tests:
   `context.py`, `action_sources.py`) does not import the framework (tested). M5 refresh still reads only its three
   exports. Because M5 code is byte-identical to `main`, the 15-action real-data baseline is unchanged by
   construction.
-- **Real-file smoke:** see the M6-1 PR / final report.
+- **Real-file smoke (read-only, Mac VM, 16 Oct 2026):**
+  - Setup: a throwaway clone of this branch and a *copy* of the 5 Oct 2026 stock export in the VM's scratch
+    space, run against a test spec that was not committed (`Stok_Kodu` occurrence 1, `STOK Kontrol %`,
+    `TOPLAM STOK MİKTAR `).
+  - Result: staged, 3,311 records. Both duplicated headers were reported by column letter.
+  - Coverage: 1,178 `#DIV/0!` cells reported as cell-level `invalid` (matches DQ-4 exactly), 3,311 cached
+    formula values.
+  - Duplicates: one duplicated SKU got a distinct occurrence key. Without an occurrence the spec fails with
+    `ambiguous_header`.
+  - Leak check: 0 of 3,420 sampled real cell values and no absolute path appear in the serialized report.
+  - Safety: the original was hash- and mtime-identical afterwards. The scratch copy was deleted and nothing
+    was committed or sent to a provider.
 
 ## Immediate next task
 Review and merge the M6-1 PR. Then the owner decisions in `docs/m6_source_inventory.md` §16 (at minimum the
