@@ -1,9 +1,9 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-16 (M6-3 merged to `main` @ `5b19757`; Kredi takip importer (pulled forward, D-038) done on `claude/m6-kredi-importer`, PR pending)._
+_Updated 2026-10-16 (Kredi importer merged to `main` @ `be6c135`; M6-5 Trodat importer done on `claude/m6-5-trodat-importer`, PR pending)._
 
 ## Git
-- **`main`:** `5b19757` (PR #14, M6-3 Hedef importer). **This checkpoint:** branch `claude/m6-kredi-importer`
+- **`main`:** `be6c135` (PR #15, Kredi takip importer). **This checkpoint:** branch `claude/m6-5-trodat-importer`
   (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
 - **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
   there to get M5 (see "Owner follow-ups" below).
@@ -14,8 +14,8 @@ Two owner follow-ups remain that the sandboxes cannot do (they cannot reach `api
 the Mac): the visual check in the owner's own browser and one live WhatsApp draft tone check. Neither blocks M5.
 **Milestone 6 — Additional data sources / sales intelligence foundation: in progress.** M6-0 (source inventory,
 docs only), M6-1 (framework), M6-2 (order source) and M6-3 (Hedef) are merged. **M6-4 (detailed collections) is
-BLOCKED** (the `Evrak Detaylı Tahsilat Raporu` export is missing), so the Kredi takip importer (part of M6-6) was pulled
-forward (D-038) and is done (PR pending). Trodat, gider/gelir and bütçe are not started.
+BLOCKED** (the `Evrak Detaylı Tahsilat Raporu` export is missing). The Kredi takip importer (part of M6-6) was pulled
+forward (D-038) and is merged. M6-5 (Trodat importer) is done (PR pending). Gider/gelir and bütçe are not started.
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -632,7 +632,7 @@ Leak check: 0 of about 19,400 codes, reps and locations appear in any summary.
 **M5 / M6-2 regression:** no M5 or M6-2 code changed (one unused test import removed); the live path does not
 import the module (tested).
 
-## Kredi takip importer (done; PR pending) — pulled forward from M6-6 while M6-4 is blocked
+## Kredi takip importer (done; merged in PR #15 @ `be6c135`) — pulled forward from M6-6 while M6-4 is blocked
 Branch `claude/m6-kredi-importer` from `main` @ `5b19757`. New source module `services/importers/kredi.py` on the
 M6-1 framework (doc: `docs/m6_kredi.md`, decision D-038; the roadmap records the sequence exception). No framework
 change. No cash metrics, UI, API, AI, persistence or refresh dependency.
@@ -688,10 +688,66 @@ mtime-identical before and after; scratch deleted):
 **M5 / M6-2 / M6-3 regression:** no existing module changed; nothing live imports the new module (tested). Hedef
 stays explicit-path only.
 
+## M6-5 (done; PR pending) — Trodat sales report importer
+Branch `claude/m6-5-trodat-importer` from `main` @ `be6c135`. New source module `services/importers/trodat.py` on the
+M6-1 matrix framework (doc: `docs/m6_trodat.md`, decision D-039). No framework change. No Halsa SKU mapping, analytics,
+UI, API, AI or refresh dependency.
+
+**Layout, verified read-only on the Nov and Dec 2025 reports** (identical layouts):
+- Sheet `Halsa_Turkey`, bounds A1:P47, 7 exact anchors, both month headers checked exactly.
+- Section 1: rows 2–29 with a SUM total in row 31.
+- Section 2: rows 32–39 (display-pack variants), total in row 40.
+- Section 3: "Daters Numberers", rows 44–47, no total row.
+- Not read: row 41 (ratios) and rows 50–65 (yearly "TRODAT SALES" series, a different metric). M6-0's "seven TRODAT
+  SALES sections" were these yearly rows, not product families.
+
+**Model:**
+- Grain: one `TrodatLine` per model × variant (or family line), and `TrodatModelMonth` records with
+  `reported_quantity` (always `unverified`).
+- Codes are opaque strings; variants are separate.
+- Families come from exact labels; section-1 printy is inferred (unverified) and section 2 is unlabelled.
+- Year: declared, or from the approved filename pattern, else fail. The filename month is a label only and the
+  snapshot date stays unknown.
+- Keys: `record_key("trodat_model", [code, variant])`, and month keys from line + year + month.
+
+**Totals:**
+- Line totals must equal the plain or pack-expanded sum; otherwise fatal.
+- Section 1 monthly and annual totals: fatal on mismatch.
+- Section 2 workbook controls are inconsistent in the real files, so they are a warning and those lines are marked
+  `control_verified = False`.
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (node + jsdom + Chromium) | `AI_PROVIDER=disabled REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 python -m pytest -q` | **572 passed, 7 skipped, 1 xfailed** (54 new in `tests/test_m6_trodat.py`; the other 518 unchanged) |
+
+Mutation checks: each of these fails tests:
+- section-1 total made non-fatal;
+- blank months turned into records;
+- the row number put into the key;
+- any line total accepted.
+
+**Real-data read-only check** (Mac VM, throwaway clone, aggregates only; both Trodat files hash- and mtime-identical
+before and after; scratch deleted):
+
+| File | Year | Lines | Records | Months with values |
+|---|---|---|---|---|
+| Nov 2025 | 2025 (filename) | 36 model + 4 family lines (10 with a variant) | 440 | 1–11; December is blank, so it is missing, not zero |
+| Dec 2025 | 2025 (filename) | same | 480 | 1–12 |
+
+- All values are integer-like; no decimals or errors in the detail cells. 66 formula cells (totals).
+- Line totals: 37 plain and 3 pack-expanded in each file, 0 mismatches.
+- Section 1: 0 mismatches in both files.
+- Section 2 warnings: 1 month (Nov) and 2 months (Dec), from the workbook's own formula slips.
+- Leak check: 0 of 39 codes/variants and 0 of about 160 values appear in any summary; no path.
+
+**Regression:** M5, M6-2, M6-3 and Kredi are unchanged; nothing live imports the module (tested).
+
 ## Immediate next task
-Review and merge the Kredi PR. Still blocked or open:
+Review and merge the M6-5 PR. Still blocked or open:
 - M6-4 needs the `Evrak Detaylı Tahsilat Raporu` export.
-- Trodat needs a model → SKU mapping.
+- Trodat → Halsa SKU mapping (who maintains it) and the unit meaning of the Trodat values.
+- Trodat file of record and cadence.
 - Gider/gelir needs the business-line mapping.
-- File of record for Bütçe, Hedef and now Kredi (Feb vs June export).
-- Salesperson of record, whitespace policy, fair taxonomy, revenue basis.
+- File of record for Bütçe, Hedef and Kredi.
+- Salesperson of record, whitespace policy, fair taxonomy, revenue basis, collection thresholds.

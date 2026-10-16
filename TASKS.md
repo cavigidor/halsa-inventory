@@ -1,10 +1,10 @@
 # TASKS.md — active backlog
 
 Rules: one *Current* task at a time. Each task must be executable in one bounded session.
-Milestone 5 is complete. M6-0 to M6-3 and the pulled-forward Kredi importer are done. M6-4 is BLOCKED (missing export).
+Milestone 5 is complete. M6-0 to M6-3, the pulled-forward Kredi importer and M6-5 (Trodat) are done. M6-4 is BLOCKED (missing export).
 
 ## Current
-- [ ] **Review and merge the Kredi PR** (`claude/m6-kredi-importer`, Kredi takip importer, pulled forward per D-038).
+- [ ] **Review and merge the M6-5 PR** (`claude/m6-5-trodat-importer`, Trodat sales report importer).
 
 ## Next
 - [ ] **Owner: M5 check on the Mac** (`git pull`, refresh, open http://127.0.0.1:8000/, desktop + phone width).
@@ -20,6 +20,9 @@ Milestone 5 is complete. M6-0 to M6-3 and the pulled-forward Kredi importer are 
 - [ ] **Owner: Kredi file of record.** The Feb 2026 `kredi sözleşmeleri.xlsx` and a June 2026 `kredi borçları 27 haziran
   2026.xlsx` (old transfer folder) both pass. The Dec 2025 `kredi borçları.xlsx` (revolving loans) is unsupported.
   Revolving (`Rotatif`) loans would need their own rule set if they matter.
+- [ ] **Owner: Trodat → Halsa SKU mapping (D-039).** Who maintains an explicit mapping table (Trodat model + optional
+  variant → one or more Halsa SKUs, with status, effective date and provenance)? Also confirm whether the Trodat values are
+  units, and the Trodat file of record and cadence. M6-5 imports the native data without any mapping.
 - [ ] **Later (owner cash planning):** next 30/60/90-day obligations, outstanding principal, interest/tax visibility
   from the Kredi model. No UI or metrics yet.
 - [ ] **Owner: Hedef file of record** (D-037). Candidates: the Feb 2026 `hedef raporu.xlsx`, a June 2026

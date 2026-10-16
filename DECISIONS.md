@@ -476,3 +476,21 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   ±0.01 TL, because a wrong payment total must never reach cash planning.
 - **Dates:** the latest payment-slip date is an activity date, never the snapshot date.
 - **Not yet:** no cash-planning metrics, UI or FX in this slice.
+
+### D-039 · 2026-10-16 · Trodat: native model × variant × month, independent of Halsa SKUs (M6-5)
+- **Identity:** M6-5 normalizes Trodat's native model × variant × month data on its own.
+  - Model codes are opaque strings, and variants are separate fields.
+  - Families come from exact workbook labels only; an inferred family is `unverified`.
+  - Keys are built from code + variant (+ year + month), never from the row or the file.
+- **Halsa SKU mapping is a later, explicit data/configuration layer:** Trodat model (+ variant) → one or more Halsa
+  SKUs, with status, effective date and provenance. It is never guessed (no fuzzy, substring, name or number-similarity
+  matching), and its absence never blocks the import. Who maintains it is an owner decision.
+- **Values:** the reported value is `reported_quantity` with `unverified` semantics until the owner confirms its
+  meaning. Reconciling totals does not upgrade it.
+- **Layout:** read through an explicit matrix spec (exact anchors and headers; drift fails closed).
+  - Workbook totals are verified against cached results.
+  - Section-1 totals are fatal on mismatch.
+  - Section-2 totals, which are inconsistent in the real workbook, are a warning, and those lines are flagged.
+  - The yearly "TRODAT SALES" rows are a different metric and are not part of the model.
+- **Year:** declared or taken from the approved filename pattern. The filename month is a label, never a snapshot
+  date.
