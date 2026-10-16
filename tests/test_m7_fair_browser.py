@@ -296,6 +296,9 @@ def test_daily_sales_fair_filter_and_draft(browser, tmp_path):
 def test_hostile_text_and_phone_width(browser, tmp_path):
     with fair_server(tmp_path) as srv:
         page = open_page(browser, viewport={"width": 390, "height": 844})
+        # wider glyphs than the local font (CI runners render text wider): long tokens must still wrap
+        page.add_init_script("document.addEventListener('DOMContentLoaded',()=>{const s=document.createElement('style');"
+                             "s.textContent='*{letter-spacing:1.2px!important}';document.head.append(s);});")
         open_fair(page, srv["base"])
         create_campaign(page, name=XSS_CAMPAIGN)
         add_by_search(page, "930.10.0012", P[12])                                               # hostile name

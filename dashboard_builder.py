@@ -1624,6 +1624,7 @@ _FAIR_CSS=r"""
 #fair .fm-hit{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);border-radius:8px;padding:6px 9px}
 #fair .fm-toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:20;background:var(--ink);color:#fff;border-radius:10px;padding:9px 14px;font-size:13px;max-width:calc(100% - 32px)}
 #fair [hidden]{display:none!important}
+#fair h4,#fair .fm-name,#fair .fm-code,#fair .fm-note,#fair .fm-muted,#fair .fm-warn,#fair .fm-erp,#fair .fm-err,#fair .fm-hit{overflow-wrap:anywhere;min-width:0}
 @media(max-width:600px){#fair .fm-btn,#fair .fm-stage{min-height:36px}#fair .fm-toast{left:12px;right:12px;transform:none;max-width:none}}
 """
 
