@@ -1,10 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-13 (M5-5 merged to `main` @ `1f018c4`; M5-6 verification + polish done on `claude/m5-6-verification-polish`, PR pending)._
+_Updated 2026-10-13 (M5-6 merged to `main` @ `b3e4e4a`, Milestone 5 complete; M6-0 source inventory done on `claude/m6-0-source-inventory`, PR pending)._
 
 ## Git
-- **`main`:** `1f018c4` (M5-5 merged). **This checkpoint:** branch `claude/m5-6-verification-polish` (PR pending);
-  the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
+- **`main`:** `b3e4e4a` (M5-6 merged, Milestone 5 complete). **This checkpoint:** branch `claude/m6-0-source-inventory`
+  (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
 - **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
   there to get M5 (see "Owner follow-ups" below).
 
@@ -12,8 +12,8 @@ _Updated 2026-10-13 (M5-5 merged to `main` @ `1f018c4`; M5-6 verification + poli
 **Milestone 5 — AI Aksiyon Merkezi: COMPLETE** (M5-1 to M5-6; final acceptance in the M5-6 section below).
 Two owner follow-ups remain that the sandboxes cannot do (they cannot reach `api.openai.com` or open a browser on
 the Mac): the visual check in the owner's own browser and one live WhatsApp draft tone check. Neither blocks M5.
-Next major milestone: **M6 — Additional data sources / sales intelligence foundation**, starting with M6-0
-(not started).
+**Milestone 6 — Additional data sources / sales intelligence foundation: in progress.** M6-0 (source inventory,
+docs only) is done; M6-1 (importer framework) is next and not started.
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -344,7 +344,7 @@ Real-data regression (Mac VM, 5 Oct 2026 exports via read-only links in a temp f
   dashboard and context unchanged in both. No staging leftovers, zero AI calls.
 - The original exports are byte-identical afterwards; the real `data/agent_state.db` was not touched.
 
-## M5-6 (done; PR pending) — verification, browser smoke tests, polish
+## M5-6 (done; merged in PR #10 @ `b3e4e4a`) — verification, browser smoke tests, polish
 Branch `claude/m5-6-verification-polish` from `main` @ `1f018c4`. Harness decision in D-033. No business logic changed.
 - **Playwright (Python, `tests/test_m5_browser.py`, pinned in `requirements-dev.txt`):** each test starts the real
   FastAPI app (free port, synthetic workbooks, temporary dashboard + SQLite, `AI_PROVIDER=disabled|mock`, no `.env`),
@@ -403,6 +403,32 @@ AI call would be counted; no browser exists or can be downloaded in the VM, so t
    "Taslak oluştur" once. Do not send it. Judge: natural Turkish, concise, professional, human, no internal analysis,
    no unsupported number, sendable after a light edit. If the tone needs work, add it to Q-2 (no prompt campaign).
 
+## M6-0 (done; PR pending) — source inventory and technical verification
+Branch `claude/m6-0-source-inventory` from `main` @ `b3e4e4a`. **Docs only:** `docs/m6_source_inventory.md` (canonical
+inventory) and D-034. No importer, dashboard, action or AI code. The real workbooks were read only on the Mac, with
+local metadata-only scripts outside Git; no workbook data reached any AI provider. All 22 inspected files were
+hash-checked unchanged.
+- **Located:** main sales (with a `liste` customer-master sheet), Hedef (Feb 2026 + two dated snapshots), account
+  aging, one Trodat report (Nov 2025), gider/gelir 2026, the kredi ERP export (`kredi sözleşmeleri`, the "kredi
+  takip" equivalent), Bütçe 2026 (`Ocak`, `Taslak`), two 2026 fair summaries, a 2025 call/lead log.
+- **Not located:** `Evrak Detaylı Tahsilat Raporu`; a CRM export with customer IDs; historical fair
+  invitation/attendance lists.
+- **Key facts:**
+  - Sales row grain is the sales-order line (order document × SKU; ordered = delivered + remaining + cancelled
+    on 100 % of rows).
+  - The activity/source field is `Srmmerk`: 99 labels, 100 % filled, one per order document, grammar
+    `<YYYY><EVENT><FUAR|ETKİNLİK|SAHA>` or `GENEL`.
+  - Fair attribution is deterministic at order level and joins to customer and SKU.
+  - D-003 is confirmed. Hedef revenue matches sales by `Pro_kodu` for 89 % of accounts, against 68 % by invoice
+    account.
+  - Trodat model numbers match no Halsa SKU, so a mapping is needed.
+  - Bütçe has 70 `#REF!`/`#DIV/0!` errors and an external link → `invalid`.
+- **New data-quality items:**
+  - DQ-4: 1,178 stock rows have `#DIV/0!` coverage and are silently excluded from stock lists.
+  - DQ-5: the sales rep / KAPALI / sector columns are XLOOKUPs on the invoice account, applied to the order-source
+    customer.
+- **Owner decisions** listed in the inventory §16; **M6-1 requirements** in §17; the sequence is kept (§18).
+
 ## Immediate next task
-Review and merge the M5-6 PR, then the two owner follow-ups above. Then decide on DQ-1 / DQ-2 / DQ-3 and the lapsed
-window, and start **M6-0** (source inventory and technical verification) only when it is moved to *Current*.
+Review and merge the M6-0 PR. Then the owner decisions in `docs/m6_source_inventory.md` §16 (at minimum the
+missing exports and the fair taxonomy), and start **M6-1** (importer framework) only when it is moved to *Current*.
