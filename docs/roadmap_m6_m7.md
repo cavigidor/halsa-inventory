@@ -242,6 +242,16 @@ The rule throughout: **Python selects and ranks; AI may explain but never select
 Per-salesperson queues and access for the sales team depend on the **Multi-user / remote deployment**
 milestone (D-016).
 
+> **M7 sequence (2026-10-16).** All currently available M6 sources are imported; M6-4 (detailed collections) stays
+> **blocked** by the missing export and is not renumbered. M7 starts anyway, in large checkpoints:
+> - **M7-1 — Searchable Customer 360: done** (D-042, `docs/m7_customer_360.md`). A separate full-customer
+>   deterministic repository and a "Müşteri 360" tab. Read-only, no AI, no ranking.
+> - **M7-2 — Expanded deterministic daily sales queue / opportunity engine** (built on Customer 360).
+> - **M7-3 — Cross-sell + potential / territory intelligence.**
+> - **M7-4 — January Fair Command Center.**
+> - **M7-5 — Lightweight CRM / follow-up workflow.**
+> - **M7-6 — Owner / management views + integration / polish.**
+
 ## 5. Sales organization and CRM data quality (D-024)
 
 - **Two current primary salespeople** (names are never written into the repository).

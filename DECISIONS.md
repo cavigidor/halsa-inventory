@@ -534,3 +534,27 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   Gider/Gelir is deferred.
 - **Framework additions** (backward compatible): `FieldType.ANY` for validated-only mixed regions and
   `NormalizedValue.external_ref` for cell-level external-dependency policies.
+
+### D-042 · 2026-10-16 · Customer 360: a separate full-customer deterministic repository; account-grain receivables; explicit sources; no AI (M7-1)
+- **Separate repository:** Customer 360 is its own deterministic repository (`services/customer360.py`), not the
+  minimized agent context.
+  - It indexes every canonical customer of the live sales workbook.
+  - The agent context and `/api/context` stay top-N and unchanged.
+- **Exact live sources:** it is built from the live context's exact sources: the sales basename inside `DATA_FOLDER`,
+  that workbook's `liste`, and the context's aging file.
+  - The sales workbook's max date must equal the context's `as_of_data_date`.
+  - The cache is keyed by the source signature. A changed signature drops the snapshot immediately (never served
+    stale) and rebuilds; mismatches are refused, never mixed. No mtime.
+- **Identity:** D-003 exactly; codes are never trimmed or fuzzy-matched.
+- **Master attributes** (KAPALI, sector, rep, name) come from `liste` by exact canonical code. The cached sales lookup
+  columns are not used (the DQ-5-safe pattern for new M7 features; M5 `cust_attrs` is unchanged). A duplicate master
+  code is never resolved to one row.
+- **Receivables stay at invoice-account grain.** Shared invoice accounts are flagged, and their balances are never
+  allocated to one order customer. Cari aging is not Detailed Collections (M6-4 stays blocked).
+- **Sources with unresolved file-of-record decisions** enter only through explicit configuration. Hedef is used only
+  via `HEDEF_PATH` / `HEDEF_SNAPSHOT_DATE`, with field-level D-023 status visible (stale capacity/Risk/Kredi,
+  incomplete visits). Owner-only sources and Trodat are not used.
+- **Labels and scope:** amounts are labelled "Net Sipariş Tutarı (Nettutar)" (revenue basis open). No margin, no
+  scores or rankings, no cross-sell, no CRM writes.
+- **No AI:** Customer 360 is read-only and never calls AI. Its new data (Hedef values, event names, master
+  attributes) is not sent to any AI provider in M7-1; that needs a separate review.
