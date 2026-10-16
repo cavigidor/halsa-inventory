@@ -436,3 +436,25 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **Privacy:** labels and stems can be partner company names. They live only in in-memory records, never in summaries,
   reports, logs or committed docs.
 - **Scope:** no amounts are imported (revenue basis is open), and the DQ-5 lookup columns are not imported.
+
+### D-037 · 2026-10-16 · Hedef: explicit file, exact schema variants, field-level confidence (M6-3)
+- **No automatic file of record:** until the owner decides which Hedef workbook is maintained, Hedef is imported only
+  from an explicit path. Candidate listing never selects (no mtime, name order or "newest" logic).
+  - Several files share the layouts: the Feb 2026 file, a June 2026 file and dated snapshots.
+- **Schemas:** exact variants (`current_2026`, `legacy_snapshot`). A workbook must carry every header of exactly one
+  variant, otherwise the import fails closed.
+  - The variant is structure only, never authority.
+  - Legacy placeholder/target columns are `invalid` and excluded from the model.
+- **Identity:** `cari_kod` is the canonical / order-customer concept (D-003), matched exactly against `liste.KODU`.
+  - Never trimmed.
+  - Duplicates are fatal.
+  - Keyed by code alone, so the key is stable across snapshots.
+- **Confidence:** field-level, never one status per workbook.
+  - `Haftalık Kaşe Adedi`, `Risk` and `Kredi` are always `stale`, whatever their parse result. They are historical
+    references that never feed capacity, penetration, credit, collection, scoring or actions.
+  - `Ziyaret Sayısı` is `incomplete`. Zero may mean "not logged"; it is never a performance or contact signal.
+- **Sales reconciliation** is a technical identity check against the existing `Nettutar`, keyed by the D-003
+  customer. It is not a revenue policy and never overwrites Hedef values.
+- **Assignment fields:** `Temsilci` and `Müşteri Temsilcisi` stay separate and unranked. The salesperson of record
+  stays open.
+- **Snapshot date:** declared or opt-in filename only; otherwise unknown.
