@@ -34,6 +34,9 @@ CAT_REAL_DECLINE = A.Category("real_decline", "Reel Satış Düşüşü", "#9f12
 # Group-level opportunity: no SKU, stock or margin checked, so the default draft is a follow-up, never an offer.
 CAT_CROSS_SELL = A.Category("cross_sell", "Çapraz Satış", "#047857", "customer", "cross_sell_anagrup",
                             "sales_followup", surfaces=(A.SURFACE_SALES_QUEUE,))
+# M7-4 (D-045): a due task from an explicit fair campaign (user-maintained state, request time). Günlük Satış only.
+CAT_FAIR_FOLLOWUP = A.Category("fair_followup", "Fuar Takibi", "#1d4ed8", "customer", "fair_campaign",
+                               "fair_invite", surfaces=(A.SURFACE_SALES_QUEUE,))
 
 A.DEFAULT_REASONS.update({
     "collections": "Vadesi geçen alacak tahsilat öncelik eşiğini aştı.",
@@ -41,6 +44,7 @@ A.DEFAULT_REASONS.update({
     "winback": f"Geçmişte güçlü alım yapan müşteri {db.LAPSED_YEAR} yılında hiç alım yapmadı.",
     "real_decline": "Bu yılki ciro, enflasyondan arındırıldığında geçen yılın aynı döneminin altında.",
     "cross_sell": "Benzer aktif müşterilerde sık görülen bir ürün grubundan bu müşteri hiç alım yapmadı.",
+    "fair_followup": "Fuar kampanyasında kayıtlı takip tarihi geldi.",
 })
 
 
@@ -157,13 +161,34 @@ def produce_cross_sell(inp):
     return out
 
 
-# Registration order = M1 order (tie-break for equal scores); cross-sell is registered last. Idempotent on re-import.
+def produce_fair_followup(inp):
+    """M7-4: one action per due fair-campaign member (rows from services/fair_store.due_members, passed in at REQUEST
+    time by the sales queue; the context build passes none). Facts = campaign id, stage, next-action date, so the id
+    is stable for the same campaign / customer / stage / date and a new date or stage yields a new task. Fixed
+    operational score; confidence "high" means the TASK exists (explicit user state), not that anyone will attend."""
+    from services import fair_store as FS
+    out = []
+    for r in inp.get("fair_tasks") or []:
+        stage = FS.STAGE_LABELS.get(r["stage"], r["stage"])
+        facts = [f"Fuar kampanyası no: {r['campaign_id']}", f"Aşama: {stage}",
+                 f"Sonraki adım tarihi: {r['next_action_date']}"]
+        reason = (f"{r['name']} için fuar takibi zamanı geldi. Mevcut aşama: {stage}. Bu, kayıtlı bir takip "
+                  "tarihidir; katılım veya sipariş beklentisi değildir.")
+        out.append(A.make_action(source=CAT_FAIR_FOLLOWUP.source, category="fair_followup", entity_type="customer",
+                                 entity_id=r["customer_code"], title=f"FUAR TAKİBİ — {r['name']}", reason=reason,
+                                 facts=facts, drivers={"campaign_id": r["campaign_id"], "stage": r["stage"]},
+                                 score=C.FAIR_TASK_SCORE, confidence="high"))
+    return out
+
+
+# Registration order = M1 order (tie-break for equal scores); M7 sources are registered last. Idempotent on re-import.
 _BUILTINS = (
     A.ActionSource(CAT_COLLECTIONS.source, (CAT_COLLECTIONS,), produce_collections),
     A.ActionSource(CAT_OVERSTOCK.source, (CAT_OVERSTOCK,), produce_overstock),
     A.ActionSource(CAT_WINBACK.source, (CAT_WINBACK,), produce_winback),
     A.ActionSource(CAT_REAL_DECLINE.source, (CAT_REAL_DECLINE,), produce_real_decline),
     A.ActionSource(CAT_CROSS_SELL.source, (CAT_CROSS_SELL,), produce_cross_sell),
+    A.ActionSource(CAT_FAIR_FOLLOWUP.source, (CAT_FAIR_FOLLOWUP,), produce_fair_followup),
 )
 for _s in _BUILTINS:
     if all(x.name != _s.name for x in A.sources()):

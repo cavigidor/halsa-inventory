@@ -70,7 +70,7 @@ def _old_produce_all(inputs, limit=None):
     """The pre-M7-2 implementation of actions.produce_all, copied verbatim (regression reference), over the four
     pre-M7-3 sources (M7-3 registers the sales-queue-only cross-sell source after them)."""
     acts = []
-    for s in [x for x in A._SOURCES if x.name != "cross_sell_anagrup"]:
+    for s in [x for x in A._SOURCES if x.name not in ("cross_sell_anagrup", "fair_campaign")]:
         for a in s.produce(inputs) or []:
             a.setdefault("source", s.name)
             acts.append(A.validate(a))
@@ -523,7 +523,7 @@ def test_32_typed_response(client):
               "collection_first", "primary_action_id", "reasons", "warnings", "draft"):
         assert k in it
     assert [f["key"] for f in b["filters"]] == ["all", "collection_first", "collections", "winback", "real_decline",
-                                                "cross_sell"]
+                                                "cross_sell", "fair_followup"]            # M7-3, M7-4 filters
     assert [f["label"] for f in b["filters"]][:2] == ["Tümü", "Tahsilat önce"]
     S = APP.S
     S.SalesQueueResponse(**b)
@@ -554,7 +554,7 @@ def test_34_bounded_limit_and_filters(client):
     assert {k["customer_code"] for k in rd["items"]} == {Q1, Q9}
     assert cl.get("/api/sales-queue", params={"filter": "bogus"}).json()["filter"] == "all"
     assert cf["filter_counts"] == {"all": 6, "collection_first": 2, "collections": 2, "winback": 3,
-                                   "real_decline": 2, "cross_sell": 0}
+                                   "real_decline": 2, "cross_sell": 0, "fair_followup": 0}
 
 
 def test_35_building_state(client, data_dir, ctx):
@@ -753,7 +753,8 @@ def test_no_new_rules_or_categories():
     for banned in ("penetration", "potential", "territory", "fair_invite_due",
                    "new_buyer", "growth", "salesperson", "Hedef", "hedef", "read_excel", "openpyxl", "THRESHOLD"):
         assert banned not in src
-    assert set(SQ.QUEUE_CATEGORIES) == {"collections", "winback", "real_decline", "cross_sell"}   # M7-3 adds one
+    assert set(SQ.QUEUE_CATEGORIES) == {"collections", "winback", "real_decline", "cross_sell",
+                                        "fair_followup"}                                   # M7-3, M7-4 add one each
     assert set(SQ.QUEUE_CATEGORIES) == {c.key for c in A.categories(A.SURFACE_SALES_QUEUE)}
 
 
@@ -779,7 +780,7 @@ def test_tab_before_c360_rest_byte_identical(built):
     assert with_sq.count(SQ_BUTTON) == 1 and with_sq.count('<div id="sq" class="panel"') == 1
     assert with_sq.replace(SQ_BUTTON, "", 1).replace(_sq_block(with_sq), "", 1) == without
     tabs = re.findall(r'<button class="tab" data-t="([a-z0-9]+)"', with_sq)
-    assert tabs[-4:] == ["sq", "c360", "opp", "ai"]
+    assert tabs[-5:] == ["sq", "c360", "opp", "fair", "ai"]
     assert "Bugün kimi aramalıyım?" in _sq_block(with_sq)
 
 

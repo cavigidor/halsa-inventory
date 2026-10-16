@@ -1,10 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-16 (M7-2 Günlük Satış merged to `main` @ `b2ca2ca`; M7-3 opportunity intelligence done on `claude/m7-3-opportunity-intelligence`, PR pending)._
+_Updated 2026-10-16 (M7-3 opportunity intelligence merged to `main` @ `976a112`; M7-4 Fuar Merkezi done on `claude/m7-4-fair-command-center`, PR pending)._
 
 ## Git
-- **`main`:** `b2ca2ca` (PR #20, M7-2 Günlük Satış). **This checkpoint:** branch
-  `claude/m7-3-opportunity-intelligence` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
+- **`main`:** `976a112` (PR #21, M7-3 opportunity intelligence). **This checkpoint:** branch
+  `claude/m7-4-fair-command-center` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
 - **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
   there to get M5 (see "Owner follow-ups" below).
 
@@ -17,7 +17,7 @@ docs only), M6-1 (framework), M6-2 (order source) and M6-3 (Hedef) are merged. *
 BLOCKED** (the `Evrak Detaylı Tahsilat Raporu` export is missing). The Kredi takip importer (part of M6-6) was pulled
 forward (D-038) and is merged. M6-5 (Trodat), M6-6 Gider/Gelir and M6-6 Bütçe are merged: every currently available M6 source is done; M6-4 stays
 BLOCKED and is not renumbered.
-**Milestone 7 — Sales Operating System: in progress.** M7-1 (searchable Customer 360) and M7-2 (Günlük Satış) are merged. M7-3 (cross-sell + opportunity / territory intelligence) is done (PR pending). M7-4 is not started.
+**Milestone 7 — Sales Operating System: in progress.** M7-1 (Customer 360), M7-2 (Günlük Satış) and M7-3 (cross-sell + opportunity / territory intelligence) are merged. M7-4 (Fuar Merkezi) is done (PR pending). M7-5 is not started.
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -993,7 +993,7 @@ Tests:
 **Regression:** M5 (actions, order, drawer, drafts, refresh), M7-1 Customer 360 semantics and all M6 importers are
 unchanged. DQ-1 to DQ-5 are not touched. Detailed Collections stays blocked.
 
-## M7-3 Cross-sell + opportunity / territory intelligence (done; PR pending)
+## M7-3 Cross-sell + opportunity / territory intelligence (merged, PR #21 @ `976a112`)
 Branch `claude/m7-3-opportunity-intelligence` from `main` @ `b2ca2ca`. Doc: `docs/m7_opportunity_intelligence.md`,
 decision D-044.
 
@@ -1042,11 +1042,63 @@ Tests:
 tuned; whether to tighten them is an owner decision.
 
 **Regression:** M5 top 15, existing M7-2 reason ids and scores, Customer 360 semantics and all M6 importers are
-unchanged. DQ-1 to DQ-5 are not touched. Detailed Collections stays blocked. M7-4 is not started.
+unchanged. DQ-1 to DQ-5 are not touched. Detailed Collections stays blocked.
+
+## M7-4 Fuar Merkezi (done; PR pending)
+Branch `claude/m7-4-fair-command-center` from `main` @ `976a112`. Doc: `docs/m7_fair_command_center.md`, decision
+D-045.
+
+**What it contains:**
+- **Historical FUAR model** (`services/fairs.py`): FUAR-labelled orders only, from the already-read sales frame.
+  - M6-2 label grammar reused; ETKİNLİK / SAHA / GENEL excluded.
+  - Order-document grain; edition = M6-2 `event_id`.
+  - Date-conflict orders kept out of date ranges; customer-conflict orders kept out of customer lists; missing amounts
+    counted.
+  - "Net Sipariş Tutarı (Nettutar)"; no conversion window, ROI, margin or attendance claim.
+- **Campaigns** (`services/fair_store.py`): SQLite tables `fair_campaigns`, `fair_customers` and `fair_history`
+  (safe migration).
+  - Reusable multi-edition campaigns; manual 9-stage funnel plus declined / removed.
+  - Next-action date and ≤ 500-character note; archive, never delete.
+  - Optional exact ERP link (year + stem + sequence).
+- **Rules** (`services/fair_center.py`):
+  - Exact Customer 360 codes only; bulk add ≤ 200.
+  - Trusted KAPALI blocked; a duplicate master gives a warning only.
+  - Read-only candidate segments (historical FUAR, active, winback, real decline, cross-sell, collections) that never
+    auto-enroll anyone.
+  - ERP FUAR orders are shown as evidence, with an explicit "mark as Sipariş" button; there is no silent
+    synchronization.
+- **Günlük Satış:** `fair_followup` reason (sales queue only) from due next-action dates.
+  - Fixed score 55, confidence high (the task exists).
+  - Sequence: collections → winback → fair → rest. "Fuar Takibi" filter; `fair_invite` default draft (explicit click).
+  - Completing the queue task never changes the funnel stage.
+- **Customer 360:** read-only campaign membership in the fair / event card.
+- **Fuar Merkezi tab** and `/api/fairs/*` (typed; mutations require `X-StockAgent: 1`; no AI, no Excel read per request).
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (node + jsdom + Chromium) | `AI_PROVIDER=disabled REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 python -m pytest -q` | **954 passed, 7 skipped, 1 xfailed** (52 new: 47 unit/API tests in `tests/test_m7_fairs.py`, 5 Playwright tests covering the 18 scenarios in `tests/test_m7_fair_browser.py`; existing M7 tests updated only for the new tab, filter and source) |
+
+**Real-data read-only check** (Mac VM, 5 Oct 2026 exports; aggregates only):
+
+| Item | Result |
+|---|---|
+| FUAR editions / years / stems | 88 / 2020–2026 / 34 |
+| FUAR orders / lines / customers | 2,924 / 40,899 / 1,584 |
+| Data quality | 0 unusable dates · 4 customer conflicts · 0 missing amounts · 0 label conflicts |
+| Segments | historical FUAR 1,584 · active 1,937 · winback 569 · decline 217 · cross-sell 1,516 · collections 5 |
+| Isolated temp-DB smoke | fair task score 55 appears; completing it keeps the stage; temp DB deleted |
+| Performance | FUAR model ≈ 0.5 s; requests 1–10 ms |
+| AI calls / sources | 0 / unchanged |
+
+**Regression:** M5 top 15, existing M7-2 reasons, M7-3 cross-sell results and thresholds, and Customer 360 search /
+identity are unchanged. Detailed Collections stays blocked. M7-5 is not started.
 
 ## Immediate next task
-Review and merge the M7-3 PR. Next large checkpoint (not started): M7-4 January Fair Command Center. Still blocked
-or open:
+Review and merge the M7-4 PR. Next large checkpoint (not started): M7-5 lightweight CRM / follow-up workflow. Still
+blocked or open:
+- Fair taxonomy (ETKİNLİK / SAHA), post-fair conversion window, fair cost attribution, historical invitation and
+  attendance lists, `FAIR_TASK_SCORE` tuning.
 - Cross-sell threshold review (broad population on real data).
 - M6-4 needs the `Evrak Detaylı Tahsilat Raporu` export.
 - Bütçe: file of record (Ocak vs Taslak), whether the link to the Gider/Gelir draft is intended, the meaning of

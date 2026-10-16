@@ -53,7 +53,8 @@ def m_stock(path,df=None):
 def load_sales(path,df=None):
     df=read_sales_raw(path) if df is None else df.copy()
     df['_date']=pd.to_datetime(df['Tarih'],errors='coerce'); df['_yr']=df['_date'].dt.year
-    df['Nettutar']=num(df['Nettutar']).fillna(0); df['miktar']=num(df['miktar']).fillna(0)
+    _nt=num(df['Nettutar']); df['_amt_missing']=_nt.isna()   # M7-4: remember missing amounts (M5 still sums 0)
+    df['Nettutar']=_nt.fillna(0); df['miktar']=num(df['miktar']).fillna(0)
     df['_prof']=num(df['Net_Tutar_Maliyet_Dusulmus']).fillna(0) if 'Net_Tutar_Maliyet_Dusulmus' in df.columns else 0.0
     df['_ord']=df['sip_evrakno_seri'].astype(str)+'|'+df['sip_evrakno_sira'].astype(str)
     _pk=df['Pro_kodu'].astype(str).str.strip()
@@ -221,7 +222,7 @@ def m_collections(path,df=None):
     return rows, owed_map
 
 # ---------- oluştur ----------
-def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True,opp_panel=True):
+def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True):
     """sources/frames (M5-5): a frozen source selection and the already-read raw frames, so a controlled
     refresh builds from exactly what it validated. stats_out (dict): filled with build totals for verification."""
     today=today or dt.date.today()
@@ -301,7 +302,7 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     meta={'date':d_tr,'stock':os.path.basename(sp) if sp else '','sales':os.path.basename(ep) if ep else '',
           'aging':os.path.basename(ap) if ap else '','tiers':tier_counts,'total':total,'has_aging':has_aging,
           'asof':_asof_iso(sdf)}
-    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel,opp_panel=opp_panel))
+    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel,opp_panel=opp_panel,fair_panel=fair_panel))
     if stats_out is not None:
         stats_out.update({'asof':meta['asof'],'overdue_total':overdue_total,'overstock_value':over_val,
                           'tabs':list(modules.keys()),'products':total,'lapsed':len(lap),'low':len(low),
@@ -1133,8 +1134,17 @@ function hedefCard(h){
   (h.notes||[]).forEach(t=>c.append(el('p','c3-note',t)));
   return c;
 }
+function fairCampaigns(c,list){   // M7-4: read-only fair-campaign membership (edited in Fuar Merkezi)
+  if(!list||!list.length) return;
+  const box=el('div','c3-fair'); box.dataset.fair='1';
+  box.append(el('p','c3-note','Fuar kampanyaları (Fuar Merkezi\'nde düzenlenir)'));
+  c.append(box, table([['Kampanya'],['Durum'],['Aşama'],['Sonraki adım',0,1],['Not'],['ERP']],list.map(x=>[x.name+' · '+x.edition_year,
+    ({planned:'Planlandı',active:'Aktif',archived:'Arşiv'})[x.status]||x.status,x.stage_label,fmtDate(x.next_action_date),x.has_note?'var':'—',
+    x.erp_evidence?(x.erp_evidence+' ('+fmtNum(x.erp_fuar_orders)+')'):(x.linked_event?'bağlı fuarda sipariş yok':'ERP fuarı bağlı değil')])));
+}
 function eventsCard(e){
   const c=card('Fuar / etkinlik geçmişi'); c.dataset.sec='events';
+  fairCampaigns(c,e.campaigns);
   if(e.status!=='ok'){c.append(el('p','c3-note','Sipariş kaynağı verisi okunamadı.')); return c;}
   const ty=el('div','c3-types'); const ob=e.orders_by_type||{}, de=e.distinct_events_by_type||{};
   TYPES.forEach(([k,l])=>{const t=el('span','c3-type',l+': '+fmtNum(ob[k]||0)+' sipariş'+(k!=='general'?' · '+fmtNum(de[k]||0)+' etkinlik':'')); t.dataset.type=k; ty.append(t);});
@@ -1571,7 +1581,361 @@ def _opp_panel(meta):
     return btn,block
 
 
-def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,opp_panel=True):
+# ---------------- M7-4: Fuar Merkezi tab (manual fair campaigns + trusted historical FUAR facts) ----------------
+# Campaigns, funnel stages, notes and next-action dates are local user state (SQLite, /api/fairs/*); historical
+# editions are FUAR-tagged ERP orders only. Nothing is inferred or auto-enrolled; no AI; text via textContent only.
+_FAIR_CSS=r"""
+#fair .fm-state{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:8px 0 12px}
+#fair .fm-state.off,#fair .fm-state.err{border-color:#f3c4c4;background:#fdf3f3;color:#b42318;font-weight:600}
+#fair .fm-sec{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:0 0 12px;min-width:0}
+#fair .fm-sec h3{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;margin:0 0 8px}
+#fair .fm-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px}
+#fair .fm-btn{border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-size:12px;font-weight:600;padding:6px 11px;border-radius:8px;cursor:pointer}
+#fair .fm-btn.pri,#fair .fm-btn.on{background:var(--ink);border-color:var(--ink);color:#fff}
+#fair .fm-btn:disabled{opacity:.5;cursor:not-allowed}
+#fair select,#fair input[type=text],#fair input[type=date],#fair input[type=number],#fair textarea{border:1px solid var(--line);border-radius:6px;padding:5px 7px;font:inherit;font-size:13px;color:var(--ink);background:var(--card);max-width:100%}
+#fair textarea{width:100%;min-height:54px}
+#fair .fm-add-q{flex:1 1 320px;min-width:0}#fair .fm-f-q,#fair .fm-c-q,#fair .fm-h-q{flex:1 1 180px;min-width:0}
+#fair .fm-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:8px;margin:8px 0;border:1px dashed var(--line);border-radius:8px;padding:10px}
+#fair .fm-form label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}
+#fair .fm-note,#fair .fm-muted{font-size:12px;color:var(--muted);margin:4px 0}
+#fair .fm-err{font-size:12px;color:#b42318;font-weight:600;margin:4px 0}
+#fair .fm-head h4{font-size:17px;font-weight:800;margin:4px 0;overflow-wrap:anywhere}
+#fair .fm-funnel{display:flex;gap:6px;flex-wrap:wrap}
+#fair .fm-stage{border:1px solid var(--line);border-radius:8px;padding:6px 9px;background:var(--card);font:inherit;font-size:12px;cursor:pointer;text-align:left;color:var(--ink)}
+#fair .fm-stage b{display:block;font-size:16px;font-variant-numeric:tabular-nums}
+#fair .fm-stage.on{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+#fair .fm-stage.term{color:var(--muted)}
+#fair .fm-card{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:0 0 8px;min-width:0}
+#fair .fm-card.due{border-left:4px solid var(--gold)}
+#fair .fm-name{font-weight:800;overflow-wrap:anywhere}
+#fair .fm-code{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:12px;color:var(--muted)}
+#fair .fm-chip{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--muted)}
+#fair .fm-kapali{font-size:10px;font-weight:800;color:#fff;background:var(--crit);border-radius:4px;padding:1px 6px}
+#fair .fm-warn{background:var(--warn-bg);border:1px solid #f5d9a8;color:var(--warn);border-radius:8px;padding:6px 9px;font-size:12px;margin:6px 0}
+#fair .fm-erp{background:#eef6ff;border:1px solid #c7ddf7;color:#1d4ed8;border-radius:8px;padding:6px 9px;font-size:12px;margin:6px 0}
+#fair .fm-scroll{overflow-x:auto;max-width:100%}
+#fair table.fm-t{border-collapse:collapse;width:100%;font-size:13px}
+#fair table.fm-t th,#fair table.fm-t td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+#fair table.fm-t td.r,#fair table.fm-t th.r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+#fair table.fm-t td.t{min-width:140px;overflow-wrap:break-word}
+#fair tr.fm-click{cursor:pointer}#fair tr.fm-click:hover td{background:#f7f8fa}
+#fair .fm-hits{display:flex;flex-direction:column;gap:4px;margin:4px 0 8px}
+#fair .fm-hit{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);border-radius:8px;padding:6px 9px}
+#fair .fm-toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:20;background:var(--ink);color:#fff;border-radius:10px;padding:9px 14px;font-size:13px;max-width:calc(100% - 32px)}
+#fair [hidden]{display:none!important}
+@media(max-width:600px){#fair .fm-btn,#fair .fm-stage{min-height:36px}#fair .fm-toast{left:12px;right:12px;transform:none;max-width:none}}
+"""
+
+_FAIR_BODY="""
+<h2 class="sec">Fuar Merkezi</h2>
+<p class="note">Yaklaşan fuar için elle yönetilen davet / takip listesi ve ERP'de FUAR etiketli geçmiş siparişler. Aşamalar sizin girdiğiniz durumdur; satış verisinden çıkarılmaz ve hiçbir müşteri otomatik eklenmez. Yapay zekâ yalnızca Günlük Satış'ta "Taslak oluştur"a tıkladığınızda kullanılır.</p>
+<div class="fm-state" role="status" hidden></div>
+<section class="fm-sec" data-sec="campaign" hidden><h3>Fuar kampanyası</h3>
+<div class="fm-row"><select class="fm-camp-sel" aria-label="Kampanya"></select><button type="button" class="fm-btn pri fm-new">Yeni fuar oluştur</button></div>
+<div class="fm-form" hidden>
+<label>Fuar adı<input type="text" class="f-name" maxlength="120"></label>
+<label>Dönem yılı<input type="number" class="f-year" min="2000" max="2099"></label>
+<label>Başlangıç tarihi<input type="date" class="f-start"></label>
+<label>Bitiş tarihi (isteğe bağlı)<input type="date" class="f-end"></label>
+<label>ERP fuar kökü (isteğe bağlı, birebir)<input type="text" class="f-stem" maxlength="120"></label>
+<label>Sıra no (isteğe bağlı)<input type="number" class="f-seq" min="1" max="999"></label>
+<div class="fm-row"><button type="button" class="fm-btn pri f-save">Kaydet</button><button type="button" class="fm-btn f-cancel">Vazgeç</button></div>
+<p class="fm-err f-err" hidden></p>
+<p class="fm-note">ERP bağlantısı yalnızca dönem yılı + kök + sıra birebir eşleşirse kurulur; ada benzerlik kullanılmaz.</p>
+</div>
+<p class="fm-muted fm-empty" hidden>Henüz fuar kampanyası yok. "Yeni fuar oluştur" ile başlayın.</p>
+<div class="fm-head"></div></section>
+<section class="fm-sec" data-sec="funnel" hidden><h3>Huni</h3><div class="fm-funnel"></div><p class="fm-note fm-fnote"></p></section>
+<section class="fm-sec" data-sec="customers" hidden><h3>Kampanya müşterileri</h3>
+<div class="fm-row"><input type="text" class="fm-add-q" placeholder="Müşteri ekle: ad veya kod (Müşteri 360 araması)" aria-label="Müşteri ara"></div>
+<div class="fm-hits"></div>
+<div class="fm-row"><select class="fm-f-stage" aria-label="Aşama"></select><select class="fm-f-seg" aria-label="Segment"></select>
+<label class="fm-muted"><input type="checkbox" class="fm-f-due"> Yalnızca zamanı gelenler</label><input type="text" class="fm-f-q" placeholder="Listede ara" aria-label="Listede ara"></div>
+<p class="fm-note fm-cnote"></p><div class="fm-clist"></div></section>
+<section class="fm-sec" data-sec="candidates" hidden><h3>Aday keşfi (salt okunur)</h3>
+<div class="fm-row"><select class="fm-c-seg" aria-label="Aday segmenti"></select><label class="fm-muted"><input type="checkbox" class="fm-c-ff"> Önce geçmiş fuar müşterileri</label>
+<input type="text" class="fm-c-q" placeholder="Ad veya kod" aria-label="Aday ara"></div>
+<p class="fm-note fm-c-count"></p><div class="fm-c-list"></div>
+<div class="fm-row"><button type="button" class="fm-btn pri fm-c-add" disabled>Seçilenleri kampanyaya ekle</button></div><p class="fm-note fm-c-res"></p></section>
+<section class="fm-sec" data-sec="history" hidden><h3>Geçmiş fuarlar (ERP, yalnızca FUAR etiketli siparişler)</h3>
+<div class="fm-row"><select class="fm-h-year" aria-label="Yıl"></select><input type="text" class="fm-h-q" placeholder="Fuar etiketi ara" aria-label="Fuar ara"></div>
+<div class="fm-h-notes"></div><div class="fm-scroll fm-h-list"></div><div class="fm-h-detail"></div></section>
+<div class="fm-toast" role="status" aria-live="polite" hidden></div>
+"""
+
+_FAIR_JS=r"""
+(function(){
+'use strict';
+const root=document.getElementById('fair'), tabBtn=document.querySelector('.tab[data-t="fair"]');
+if(!root||!tabBtn) return;
+const POLL_MS=window.__FAIR_POLL_MS||2000, POLL_MAX=window.__FAIR_POLL_MAX||450, BULK_MAX=200;
+const H={'Content-Type':'application/json','X-StockAgent':'1'};   // local CSRF guard (D-020)
+const MSG={file:'Fuar Merkezi için panoyu http://127.0.0.1:8000/ üzerinden açın.',
+  offline:'Sunucu çalışmıyor. Terminalde uvicorn app:app --host 127.0.0.1 çalıştırıp http://127.0.0.1:8000 adresini açın. Diğer sekmeler normal çalışır.',
+  building:'Müşteri verisi hazırlanıyor…', fail:'Yüklenemedi', erp:"ERP'de bu fuara atfedilmiş sipariş bulundu.",
+  noCamp:'Önce bir kampanya seçin veya oluşturun.', archived:'Arşivlenmiş kampanya: yalnızca görüntüleme.'};
+const STATUS={planned:'Planlandı',active:'Aktif',archived:'Arşiv'};
+const SEG={historical_fuar:'Geçmiş fuar müşterisi',active:'Son 365 günde aktif',winback:'Geri Kazanım',real_decline:'Reel Satış Düşüşü',cross_sell:'Çapraz Satış',collections:'Tahsilat hassasiyeti'};
+const AY=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+const st={started:false,camps:[],stages:[],sel:null,amountLabel:'Net Sipariş Tutarı (Nettutar)',editing:false,armArchive:false,
+  f:{stage:'',seg:'',due:false,q:''},c:{seg:'historical_fuar',ff:false,q:'',picked:new Set()},h:{year:'',q:'',sel:null,picked:new Set()},seqs:{},timers:{}};
+const $=s=>root.querySelector(s);
+function el(tag,cls,text){const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=String(text); return e;}
+function show(n,on){n.hidden=!on;}
+function state(t,k){const n=$('.fm-state'); n.textContent=t||''; n.className='fm-state'+(k?' '+k:''); show(n,!!t);}
+function fmtDate(iso){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||'')); return m?(+m[3])+' '+AY[+m[2]-1]+' '+m[1]:'—';}
+function num(v){return (v==null||!Number.isFinite(Number(v)))?'—':Number(v).toLocaleString('tr-TR',{maximumFractionDigits:2});}
+function money(v){return (v==null||!Number.isFinite(Number(v)))?'—':'₺'+Number(v).toLocaleString('tr-TR',{maximumFractionDigits:0});}
+function btn(cls,label,fn){const b=el('button','fm-btn'+(cls?' '+cls:''),label); b.type='button'; b.addEventListener('click',fn); return b;}
+function toast(t){const n=$('.fm-toast'); n.textContent=t; show(n,true); clearTimeout(st.timers.toast); st.timers.toast=setTimeout(()=>show(n,false),5000);}
+async function api(path,opt){
+  let r; try{r=await fetch(path,opt||{headers:{'Accept':'application/json'}});}catch(e){const x=new Error('offline'); x.offline=true; throw x;}
+  let b=null; try{b=await r.json();}catch(e){b=null;}
+  if(!r.ok){const x=new Error('HTTP '+r.status); x.status=r.status; x.body=b; throw x;} return b;}
+function errText(e){if(e.offline) return MSG.offline; const d=e.body&&e.body.detail;
+  if(d&&typeof d==='object') return d.message||(MSG.fail+' (HTTP '+e.status+')');
+  if(Array.isArray(d)) return 'Geçersiz giriş.'; return (typeof d==='string'&&d)||(MSG.fail+' (HTTP '+e.status+')');}
+function table(cols,rows,onRow){const w=el('div','fm-scroll'), t=el('table','fm-t'), h=el('tr'); cols.forEach(([l,c])=>h.append(el('th',c||null,l)));
+  const th=el('thead'); th.append(h); t.append(th); const tb=el('tbody');
+  rows.forEach((r,i)=>{const tr=el('tr'); r.forEach((v,j)=>{const td=el('td',cols[j][1]||null); if(v instanceof Node) td.append(v); else td.textContent=v==null?'—':String(v); tr.append(td);});
+    if(onRow){tr.className='fm-click'; tr.addEventListener('click',ev=>{if(ev.target.closest('button,input')) return; onRow(i);});} tb.append(tr);});
+  t.append(tb); w.append(t); return w;}
+function camp(){return st.camps.find(c=>c.campaign_id===st.sel)||null;}
+function openC360(code){const t=document.querySelector('.tab[data-t="c360"]'); if(t) t.click();
+  if(window.StockAgentC360&&typeof window.StockAgentC360.open==='function') window.StockAgentC360.open(code);}
+
+function start(){
+  if(st.started) return; st.started=true;
+  if(location.protocol==='file:'){state(MSG.file,'off'); return;}   // same-origin API only; no request
+  loadCampaigns(); loadHistory();
+}
+// ---------------- campaigns ----------------
+async function loadCampaigns(keep){
+  let r; try{r=await api('/api/fairs/campaigns');}catch(e){state(errText(e),e.offline?'off':'err'); return;}
+  st.camps=r.items||[]; st.stages=r.stages||[]; st.amountLabel=r.amount_label||st.amountLabel;
+  if(!keep||!camp()){const open=st.camps.find(c=>c.status!=='archived'); st.sel=(camp()&&keep)?st.sel:(open?open.campaign_id:(st.camps[0]||{}).campaign_id||null);}
+  renderCampaign(); renderFunnel(); fillStageFilter(); loadCustomers(0); loadCandidates(0);
+}
+function renderCampaign(){
+  show($('[data-sec="campaign"]'),true);
+  const sel=$('.fm-camp-sel'); sel.replaceChildren();
+  st.camps.forEach(c=>{const o=el('option',null,c.name+' · '+c.edition_year+(c.status==='archived'?' (arşiv)':'')); o.value=String(c.campaign_id); sel.append(o);});
+  show(sel,st.camps.length>0); if(st.sel) sel.value=String(st.sel);
+  show($('.fm-empty'),!st.camps.length);
+  const head=$('.fm-head'); head.replaceChildren(); const c=camp(); if(!c) return;
+  const box=el('div','fm-headbox'); box.dataset.status=c.status;
+  box.append(el('h4',null,c.name));
+  const r1=el('div','fm-row'); r1.append(el('span','fm-chip',STATUS[c.status]||c.status), el('span','fm-muted','Dönem: '+c.edition_year+' · Fuar tarihi: '+fmtDate(c.start_date)+(c.end_date?' – '+fmtDate(c.end_date):'')));
+  box.append(r1);
+  const le=c.linked_event||{}, lp=el('p','fm-note fm-link');
+  if(!le.configured) lp.textContent='ERP fuar kimliği tanımlı değil (isteğe bağlı).';
+  else if(!le.found) lp.textContent='Tanımlı ERP fuar kimliği satış verisinde henüz yok.';
+  else lp.textContent='Bağlı ERP fuarı: '+(le.label||'')+' · '+num(le.orders)+' sipariş · '+num(le.customers)+' müşteri · '+st.amountLabel+': '+money(le.net_order_amount);
+  box.append(lp);
+  const acts=el('div','fm-row');
+  if(c.status!=='archived'){
+    acts.append(btn('fm-edit','Düzenle',()=>openForm(c)));
+    acts.append(btn('fm-status',c.status==='active'?'Planlandı yap':'Aktif yap',()=>saveCampaign(c.campaign_id,{status:c.status==='active'?'planned':'active'})));
+    acts.append(btn('fm-archive',st.armArchive?'Arşivlemeyi onayla':'Arşivle',()=>{if(!st.armArchive){st.armArchive=true; renderCampaign(); return;} st.armArchive=false; archive(c.campaign_id);}));
+  }else acts.append(el('span','fm-muted',MSG.archived));
+  box.append(acts); head.append(box);
+}
+function openForm(c){
+  st.editing=c?c.campaign_id:'new'; const f=$('.fm-form'); show(f,true); show($('.f-err'),false);
+  $('.f-name').value=c?c.name:''; $('.f-year').value=c?c.edition_year:''; $('.f-start').value=c?c.start_date:''; $('.f-end').value=c&&c.end_date?c.end_date:'';
+  $('.f-stem').value=c&&c.event_stem?c.event_stem:''; $('.f-seq').value=c&&c.event_sequence?c.event_sequence:''; $('.f-name').focus();
+}
+function formBody(){
+  const b={name:$('.f-name').value, edition_year:Number($('.f-year').value), start_date:$('.f-start').value||null};
+  const end=$('.f-end').value, stem=$('.f-stem').value, seq=$('.f-seq').value;
+  if(end) b.end_date=end; if(stem.trim()) b.event_stem=stem; if(seq) b.event_sequence=Number(seq); return b;
+}
+async function submitForm(){
+  const e=$('.f-err'), b=formBody();
+  if(!b.name.trim()||!b.edition_year||!b.start_date){e.textContent='Ad, dönem yılı ve başlangıç tarihi gerekli.'; show(e,true); return;}
+  if(b.end_date&&b.end_date<b.start_date){e.textContent='Bitiş tarihi başlangıçtan önce olamaz.'; show(e,true); return;}
+  try{
+    let r;
+    if(st.editing==='new') r=await api('/api/fairs/campaigns',{method:'POST',headers:H,body:JSON.stringify(b)});
+    else{const c=camp(); if(!b.event_stem&&c&&c.event_stem){b.clear_event_link=true;} if(!b.end_date&&c&&c.end_date) b.clear_end_date=true;
+      r=await api('/api/fairs/campaigns/'+st.editing,{method:'PUT',headers:H,body:JSON.stringify(b)});}
+    st.sel=r.campaign_id; st.editing=false; show($('.fm-form'),false); toast('Kampanya kaydedildi.'); loadCampaigns(true);
+  }catch(x){e.textContent=errText(x); show(e,true);}
+}
+async function saveCampaign(id,b){try{await api('/api/fairs/campaigns/'+id,{method:'PUT',headers:H,body:JSON.stringify(b)}); loadCampaigns(true);}catch(x){toast(errText(x));}}
+async function archive(id){try{await api('/api/fairs/campaigns/'+id+'/archive',{method:'POST',headers:H,body:'{}'}); toast('Kampanya arşivlendi.'); loadCampaigns(true);}catch(x){toast(errText(x));}}
+// ---------------- funnel ----------------
+function renderFunnel(){
+  const c=camp(), sec=$('[data-sec="funnel"]'); show(sec,!!c); if(!c) return;
+  const f=$('.fm-funnel'); f.replaceChildren(); const sc=c.stage_counts||{};
+  st.stages.forEach(s=>{const b=el('button','fm-stage'+(s.terminal?' term':'')+(st.f.stage===s.key?' on':'')); b.type='button'; b.dataset.k=s.key;
+    b.append(el('b',null,num(sc[s.key]||0)),document.createTextNode(s.label));
+    b.addEventListener('click',()=>{st.f.stage=st.f.stage===s.key?'':s.key; $('.fm-f-stage').value=st.f.stage; renderFunnel(); loadCustomers(0);}); f.append(b);});
+  $('.fm-fnote').textContent='Toplam '+num(c.total_customers)+' müşteri · zamanı gelen / gecikmiş görev: '+num(c.due_tasks)+'. Sayılar yalnızca girilen aşamalardan; satış verisinden çıkarılmaz.';
+}
+function fillStageFilter(){
+  const s=$('.fm-f-stage'); s.replaceChildren(); const a=el('option',null,'Tüm aşamalar'); a.value=''; s.append(a);
+  st.stages.forEach(x=>{const o=el('option',null,x.label); o.value=x.key; s.append(o);}); s.value=st.f.stage;
+  const g=$('.fm-f-seg'); g.replaceChildren(); const b=el('option',null,'Tüm segmentler'); b.value=''; g.append(b);
+  Object.keys(SEG).forEach(k=>{const o=el('option',null,SEG[k]); o.value=k; g.append(o);}); g.value=st.f.seg;
+}
+// ---------------- campaign customers ----------------
+function waitMsg(box,n,fn,key){box.replaceChildren(el('p','fm-muted',n<POLL_MAX?MSG.building:'Müşteri verisi hâlâ hazırlanıyor.'));
+  if(n<POLL_MAX){clearTimeout(st.timers[key]); st.timers[key]=setTimeout(()=>fn(n+1),POLL_MS);}}
+async function loadCustomers(n){
+  const c=camp(), sec=$('[data-sec="customers"]'); show(sec,!!c); if(!c) return;
+  const box=$('.fm-clist'), my=st.seqs.cust=(st.seqs.cust||0)+1;
+  const qs='stage='+encodeURIComponent(st.f.stage)+'&segment='+encodeURIComponent(st.f.seg)+'&due='+(st.f.due?'true':'false')+'&q='+encodeURIComponent(st.f.q)+'&limit=200';
+  let r; try{r=await api('/api/fairs/campaigns/'+c.campaign_id+'/customers?'+qs);}
+  catch(e){if(my!==st.seqs.cust) return; if(e.status===503&&e.body&&e.body.detail&&e.body.detail.state==='building'){waitMsg(box,n,loadCustomers,'cust'); return;}
+    box.replaceChildren(el('p','fm-err',errText(e))); return;}
+  if(my!==st.seqs.cust) return;
+  $('.fm-cnote').textContent=(r.note||'')+' '+num(r.total)+' müşteri'+(r.truncated?' (ilk '+r.limit+')':'')+'.';
+  box.replaceChildren(); (r.items||[]).forEach(it=>box.append(custCard(it,c)));
+  if(!(r.items||[]).length) box.append(el('p','fm-muted','Bu filtrede müşteri yok.'));
+  show($('.fm-add-q'),c.status!=='archived');
+}
+function custCard(it,c){
+  const k=el('div','fm-card'+(it.due?' due':'')); k.dataset.code=it.customer_code; k.dataset.stage=it.stage;
+  const top=el('div','fm-row'); top.append(el('span','fm-name',it.display_name), el('span','fm-code',it.customer_code));
+  if(it.closed===true) top.append(el('span','fm-kapali','KAPALI'));
+  (it.segments||[]).forEach(s=>top.append(el('span','fm-chip',SEG[s]||s)));
+  k.append(top);
+  (it.warnings||[]).forEach(w=>{const x=el('p','fm-warn',w.message); x.dataset.w=w.code; k.append(x);});
+  if(it.collection_first){const x=el('p','fm-warn fm-cf','Tahsilat önce: vadesi geçen alacak varsa önce tahsilat konuşulmalı.'); k.append(x);}
+  if(it.erp_fuar_orders){const x=el('div','fm-erp'); x.dataset.erp='1'; x.append(document.createTextNode(MSG.erp+' ('+num(it.erp_fuar_orders)+' sipariş) '));
+    if(it.stage!=='order'&&c.status!=='archived') x.append(btn('fm-mark','Aşamayı Sipariş olarak işaretle',()=>saveCust(c,it.customer_code,{stage:'order'})));
+    k.append(x);}
+  if(it.erp_mismatch==='stage_order_without_erp') k.append(el('p','fm-warn fm-mm','Aşama "Sipariş", ancak bağlı ERP fuarında bu müşteriye atfedilmiş sipariş yok. İkisi de gösteriliyor.'));
+  const ro=c.status==='archived';
+  const row=el('div','fm-row'), sel=el('select','fm-stage-sel'); sel.setAttribute('aria-label','Aşama');
+  st.stages.forEach(s=>{const o=el('option',null,s.label); o.value=s.key; sel.append(o);}); sel.value=it.stage; sel.disabled=ro;
+  const d=el('input','fm-next'); d.type='date'; d.value=it.next_action_date||''; d.setAttribute('aria-label','Sonraki adım tarihi'); d.disabled=ro;
+  row.append(el('span','fm-muted','Aşama'),sel,el('span','fm-muted','Sonraki adım'),d);
+  if(it.due) row.append(el('span','fm-chip fm-due','zamanı geldi'));
+  k.append(row);
+  const note=el('textarea','fm-notein'); note.maxLength=500; note.value=it.note||''; note.placeholder='Kısa yerel not (en fazla 500 karakter; yapay zekâya gönderilmez)'; note.disabled=ro; note.setAttribute('aria-label','Not');
+  k.append(note);
+  const acts=el('div','fm-row');
+  if(!ro) acts.append(btn('pri fm-save','Kaydet',()=>{const b={stage:sel.value};
+    if(d.value) b.next_action_date=d.value; else if(it.next_action_date) b.clear_next_action=true;
+    if(note.value.trim()) b.note=note.value; else if(it.note) b.clear_note=true; saveCust(c,it.customer_code,b,k);}));
+  acts.append(btn('fm-c360','Müşteri 360',()=>openC360(it.customer_code)));
+  k.append(acts);
+  const err=el('p','fm-err fm-cerr'); show(err,false); k.append(err);
+  return k;
+}
+async function saveCust(c,code,b,card){
+  try{await api('/api/fairs/campaigns/'+c.campaign_id+'/customers',{method:'PUT',headers:H,body:JSON.stringify({customer_code:code,...b})});
+    toast('Kaydedildi.'); loadCampaigns(true);}
+  catch(x){if(card){const e=card.querySelector('.fm-cerr'); e.textContent=errText(x); show(e,true);} else toast(errText(x));}
+}
+async function addCodes(codes,where){
+  const c=camp(); if(!c||c.status==='archived'){toast(MSG.noCamp); return null;}
+  try{const r=await api('/api/fairs/campaigns/'+c.campaign_id+'/customers',{method:'POST',headers:H,body:JSON.stringify({customer_codes:codes.slice(0,BULK_MAX)})});
+    const n=r.counts||{}, t='Eklendi: '+num(n.added)+' · zaten listede: '+num(n.already_present)+' · KAPALI engellendi: '+num(n.blocked_kapali)+' · geçersiz: '+num(n.invalid);
+    toast(t); if(where) where.textContent=t; loadCampaigns(true); return r;}
+  catch(x){toast(errText(x)); return null;}
+}
+async function searchAdd(q){
+  const box=$('.fm-hits'), my=st.seqs.search=(st.seqs.search||0)+1;
+  if(String(q).trim().length<2){box.replaceChildren(); return;}
+  let r; try{r=await api('/api/customer360/search?q='+encodeURIComponent(q)+'&limit=8');}catch(e){if(my===st.seqs.search) box.replaceChildren(el('p','fm-err',errText(e))); return;}
+  if(my!==st.seqs.search) return; box.replaceChildren();
+  (r.results||[]).forEach(h=>{const d=el('div','fm-hit'); d.dataset.code=h.customer_code; d.append(el('span','fm-name',h.display_name),el('span','fm-code',h.customer_code));
+    if(h.closed===true) d.append(el('span','fm-kapali','KAPALI'));
+    d.append(btn('fm-addone','Ekle',()=>addCodes([h.customer_code]))); box.append(d);});
+  if(!(r.results||[]).length) box.append(el('p','fm-muted','Sonuç yok.'));
+}
+// ---------------- candidates ----------------
+async function loadCandidates(n){
+  const sec=$('[data-sec="candidates"]'); show(sec,true);
+  const seg=$('.fm-c-seg'); if(!seg.options.length){Object.keys(SEG).forEach(k=>{const o=el('option',null,SEG[k]); o.value=k; seg.append(o);}); seg.value=st.c.seg;}
+  const c=camp(), box=$('.fm-c-list'), my=st.seqs.cand=(st.seqs.cand||0)+1;
+  const qs='segment='+encodeURIComponent(st.c.seg)+'&q='+encodeURIComponent(st.c.q)+'&fuar_first='+(st.c.ff?'true':'false')+'&limit=50'+(c?'&campaign_id='+c.campaign_id:'');
+  let r; try{r=await api('/api/fairs/candidates?'+qs);}
+  catch(e){if(my!==st.seqs.cand) return; if(e.status===503&&e.body&&e.body.detail&&e.body.detail.state==='building'){waitMsg(box,n,loadCandidates,'cand'); return;}
+    box.replaceChildren(el('p','fm-err',errText(e))); return;}
+  if(my!==st.seqs.cand) return;
+  st.c.picked.clear();
+  $('.fm-c-count').textContent='Bu segmentte '+num(r.total)+' müşteri var'+(r.truncated?' (ilk '+r.limit+' gösteriliyor)':'')+'. KAPALI olduğu için gösterilmeyen: '+num(r.kapali_excluded)+'. '+(r.note||'');
+  const rows=(r.items||[]).map(it=>{const cb=el('input'); cb.type='checkbox'; cb.className='fm-pick'; cb.dataset.code=it.customer_code; cb.disabled=!c||c.status==='archived'||it.in_campaign;
+    cb.addEventListener('change',()=>{cb.checked?st.c.picked.add(it.customer_code):st.c.picked.delete(it.customer_code); $('.fm-c-add').disabled=!st.c.picked.size;});
+    const nm=el('span'); nm.append(el('div','fm-name',it.display_name),el('div','fm-code',it.customer_code));
+    const tags=el('span'); (it.segments||[]).forEach(s=>tags.append(el('span','fm-chip',SEG[s]||s),document.createTextNode(' ')));
+    if(it.collection_first) tags.append(el('span','fm-chip fm-cf','Tahsilat önce'));
+    return [cb,nm,tags,it.queue_score==null?'—':num(it.queue_score),fmtDate(it.last_order_date),it.in_campaign?'listede':''];});
+  box.replaceChildren(table([['',''],['Müşteri','t'],['Segmentler','t'],['Günlük Satış skoru','r'],['Son sipariş','r'],['Kampanya','']],rows));
+  $('.fm-c-add').disabled=true; if(!c) $('.fm-c-res').textContent=MSG.noCamp;
+}
+// ---------------- history ----------------
+async function loadHistory(){
+  const sec=$('[data-sec="history"]'); show(sec,true);
+  let r; try{r=await api('/api/fairs/history?limit=200&q='+encodeURIComponent(st.h.q)+(st.h.year?'&year='+st.h.year:''));}
+  catch(e){$('.fm-h-list').replaceChildren(el('p','fm-err',errText(e))); return;}
+  const ys=$('.fm-h-year'); if(!ys.options.length){const a=el('option',null,'Tüm yıllar'); a.value=''; ys.append(a); (r.years||[]).forEach(y=>{const o=el('option',null,String(y)); o.value=String(y); ys.append(o);});}
+  const notes=$('.fm-h-notes'); notes.replaceChildren(); (r.notes||[]).concat([r.amount_note||'']).forEach(t=>notes.append(el('p','fm-note',t)));
+  const items=r.items||[];
+  $('.fm-h-list').replaceChildren(items.length?table([['Yıl','r'],['Fuar etiketi','t'],['Müşteri','r'],['Sipariş','r'],[r.amount_label,'r'],['Ürün','r']],
+    items.map(x=>[String(x.edition_year),x.label,num(x.customers),num(x.orders),money(x.net_order_amount),num(x.products)]),i=>loadEdition(items[i].event_id)):el('p','fm-muted','FUAR etiketli sipariş yok.'));
+  $('.fm-h-list').querySelectorAll('tbody tr').forEach((tr,i)=>{tr.dataset.event=items[i].event_id;});
+}
+async function loadEdition(id,n){
+  st.h.sel=id; const box=$('.fm-h-detail'), c=camp(), my=st.seqs.ed=(st.seqs.ed||0)+1;
+  let r; try{r=await api('/api/fairs/history/'+encodeURIComponent(id)+'?customer_limit=200'+(c?'&campaign_id='+c.campaign_id:''));}
+  catch(e){if(my!==st.seqs.ed) return; if(e.status===503&&e.body&&e.body.detail&&e.body.detail.state==='building'){waitMsg(box,n||0,k=>loadEdition(id,k),'ed'); return;}
+    box.replaceChildren(el('p','fm-err',errText(e))); return;}
+  if(my!==st.seqs.ed) return;
+  st.h.picked.clear(); box.replaceChildren(); box.dataset.event=id;
+  box.append(el('h4',null,r.label+' · '+r.edition_year+(r.sequence?' · sıra '+r.sequence:'')));
+  box.append(el('p','fm-note','Tarih aralığı: '+fmtDate(r.first_order_date)+' – '+fmtDate(r.last_order_date)+' · '+num(r.orders)+' sipariş belgesi · '+num(r.lines)+' satır · '+num(r.customers)+' müşteri · '+num(r.products)+' ürün · '+r.amount_label+': '+money(r.net_order_amount)));
+  box.append(el('p','fm-note fm-dq','Veri kalitesi: tarihi kullanılamayan sipariş '+num(r.date_unusable_orders)+' (tarih aralığına alınmadı) · müşterisi tutarsız sipariş '+num(r.customer_conflict_orders)+' (müşteri listesine alınmadı) · tutarı boş satır '+num(r.missing_amount_lines)+'.'));
+  const tops=(title,list)=>{box.append(el('p','fm-muted',title)); box.append(table([['Etiket','t'],[r.amount_label,'r'],['Miktar','r'],['Sipariş','r']],(list||[]).map(x=>[x.name?x.name+' ('+x.label+')':x.label,money(x.net_order_amount),num(x.quantity),num(x.orders)])));};
+  tops('En çok ürünler',r.top_products); tops('Ana gruplar (anagrup)',r.top_groups); tops('Kategoriler',r.top_categories);
+  box.append(el('p','fm-muted','Fuara atfedilmiş müşteriler — '+r.customer_sort+'. Bu müşterilerin bu fuara atfedilmiş siparişi var; katılım veya davet kaydı değildir.'));
+  const rows=(r.customer_rows||[]).map(x=>{const cb=el('input'); cb.type='checkbox'; cb.className='fm-hpick'; cb.dataset.code=x.customer_code;
+    cb.disabled=!c||c.status==='archived'||x.in_campaign||x.closed===true;
+    cb.addEventListener('change',()=>{cb.checked?st.h.picked.add(x.customer_code):st.h.picked.delete(x.customer_code); addB.disabled=!st.h.picked.size;});
+    const nm=el('span'); nm.append(el('div','fm-name',x.display_name),el('div','fm-code',x.customer_code)); if(x.closed===true) nm.append(el('span','fm-kapali','KAPALI'));
+    const b=btn('fm-c360','Müşteri 360',()=>openC360(x.customer_code));
+    return [cb,nm,num(x.orders),money(x.net_order_amount),num(x.quantity),fmtDate(x.first_order_date)+' – '+fmtDate(x.last_order_date),b];});
+  box.append(table([['',''],['Müşteri','t'],['Sipariş','r'],[r.amount_label,'r'],['Miktar','r'],['Tarih','r'],['','']],rows));
+  const res=el('p','fm-note fm-hres');
+  const addB=btn('pri fm-hadd','Seçilenleri kampanyaya ekle',async()=>{if(!st.h.picked.size) return; await addCodes([...st.h.picked],res); loadEdition(id);});
+  addB.disabled=true; box.append(addB,res); if(!c) res.textContent=MSG.noCamp;
+}
+// ---------------- wiring ----------------
+$('.fm-new').addEventListener('click',()=>openForm(null));
+$('.f-save').addEventListener('click',submitForm);
+$('.f-cancel').addEventListener('click',()=>{st.editing=false; show($('.fm-form'),false);});
+$('.fm-camp-sel').addEventListener('change',e=>{st.sel=Number(e.target.value); st.armArchive=false; renderCampaign(); renderFunnel(); loadCustomers(0); loadCandidates(0); if(st.h.sel) loadEdition(st.h.sel);});
+$('.fm-f-stage').addEventListener('change',e=>{st.f.stage=e.target.value; renderFunnel(); loadCustomers(0);});
+$('.fm-f-seg').addEventListener('change',e=>{st.f.seg=e.target.value; loadCustomers(0);});
+$('.fm-f-due').addEventListener('change',e=>{st.f.due=e.target.checked; loadCustomers(0);});
+$('.fm-f-q').addEventListener('input',e=>{clearTimeout(st.timers.fq); st.timers.fq=setTimeout(()=>{st.f.q=e.target.value; loadCustomers(0);},250);});
+$('.fm-add-q').addEventListener('input',e=>{clearTimeout(st.timers.aq); st.timers.aq=setTimeout(()=>searchAdd(e.target.value),250);});
+$('.fm-c-seg').addEventListener('change',e=>{st.c.seg=e.target.value; loadCandidates(0);});
+$('.fm-c-ff').addEventListener('change',e=>{st.c.ff=e.target.checked; loadCandidates(0);});
+$('.fm-c-q').addEventListener('input',e=>{clearTimeout(st.timers.cq); st.timers.cq=setTimeout(()=>{st.c.q=e.target.value; loadCandidates(0);},250);});
+$('.fm-c-add').addEventListener('click',async()=>{if(!st.c.picked.size) return; await addCodes([...st.c.picked],$('.fm-c-res')); loadCandidates(0);});
+$('.fm-h-year').addEventListener('change',e=>{st.h.year=e.target.value; loadHistory();});
+$('.fm-h-q').addEventListener('input',e=>{clearTimeout(st.timers.hq); st.timers.hq=setTimeout(()=>{st.h.q=e.target.value; loadHistory();},250);});
+tabBtn.addEventListener('click',start);   // lazy: nothing is fetched until the tab is opened
+})();
+"""
+
+def _fair_panel(meta):
+    """(tab button, panel block) for Fuar Merkezi, wrapped in markers like the other server-driven tabs."""
+    asof=html.escape(str(meta.get('asof') or ''),quote=True)
+    btn='<button class="tab" data-t="fair">Fuar Merkezi</button>'
+    block=('\n<!--FAIR-TAB-START-->\n<style>'+_FAIR_CSS+'</style>\n'
+           f'<div id="fair" class="panel" data-asof="{asof}">'+_FAIR_BODY+'</div>\n'
+           '<script>'+_FAIR_JS+'</script>\n<!--FAIR-TAB-END-->')
+    return btn,block
+
+
+def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True):
     blob=json.dumps(modules,ensure_ascii=False).replace('</','<\\/')
     tabs=['overview']+list(modules.keys())
     tabbtns=''.join(f'<button class="tab" data-t="{t}">{("Genel Bakış" if t=="overview" else modules[t]["title"])}'
@@ -1583,6 +1947,7 @@ def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,o
     c3_btn,c3_block=_c360_panel(meta) if c360_panel else ('','')
     sq_btn,sq_block=_sq_panel(meta) if sq_panel else ('','')
     op_btn,op_block=_opp_panel(meta) if opp_panel else ('','')
+    fm_btn,fm_block=_fair_panel(meta) if fair_panel else ('','')
     return f"""<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Şirket Panosu — {meta['date']}</title>
 <style>
@@ -1644,7 +2009,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <header><div class="eyebrow">Şirket Panosu</div>
 <h1>Şirket Panosu — {meta['date']}</h1>
 <div class="sub">{src} · {meta['total']:,} ürün</div></header>
-<div class="tabs">{tabbtns}{sq_btn}{c3_btn}{op_btn}{ai_btn}</div>
+<div class="tabs">{tabbtns}{sq_btn}{c3_btn}{op_btn}{fm_btn}{ai_btn}</div>
 <div id="overview" class="panel on">
 <h2 class="sec">Aktif Analizler</h2>
 <p class="note">İlk istediğiniz ikisi — <b>stok uyarıları</b> (azalan + fazla) ve <b>kayıp müşteriler</b> (geri kazanım) — çalışıyor. Gezinmek, aramak ve sıralamak için yukarıdaki sekmelere tıklayın. Her şey doğrudan tablolarınızdan hesaplanır: filtreleme, müşteri ve stok kodu üzerinden birleştirme ve aritmetik — hiçbir şey tahmin değil.</p>
@@ -1654,7 +2019,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <p class="note">Hazır olduğunuzda açabileceğimiz, tamamen gerçeğe dayalı diğer analizler — her biri yalnızca ilgili sayfanın <code>data</code> klasöründe olmasını ister, sonra kendi sekmesi olur. Yapay zekâ yok, bunlarla aynı.</p>
 <ul class="later">{laterlist}</ul>
 </div>
-<div id="panels"></div>{sq_block}{c3_block}{op_block}{ai_block}
+<div id="panels"></div>{sq_block}{c3_block}{op_block}{fm_block}{ai_block}
 <script>
 const DATA={blob};
 const fmtMoney=v=>'₺'+Math.round(v).toLocaleString('tr-TR');

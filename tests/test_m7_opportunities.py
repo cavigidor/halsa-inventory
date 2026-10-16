@@ -134,7 +134,7 @@ def pair(m, a, b):
 def _old_produce_all(inputs, limit=None):
     """The pre-M7-3 produce_all (verbatim algorithm) over the four pre-M7-3 sources."""
     acts = []
-    for s in [x for x in A._SOURCES if x.name != "cross_sell_anagrup"]:
+    for s in [x for x in A._SOURCES if x.name not in ("cross_sell_anagrup", "fair_campaign")]:
         for a in s.produce(inputs) or []:
             a.setdefault("source", s.name)
             acts.append(A.validate(a))
@@ -831,7 +831,7 @@ def test_tab_present_rest_byte_identical(built):
     import re
     w, wo = built
     assert w.count(OPP_BUTTON) == 1 and w.replace(OPP_BUTTON, "", 1).replace(_opp_block(w), "", 1) == wo
-    assert re.findall(r'<button class="tab" data-t="([a-z0-9]+)"', w)[-4:] == ["sq", "c360", "opp", "ai"]
+    assert re.findall(r'<button class="tab" data-t="([a-z0-9]+)"', w)[-5:] == ["sq", "c360", "opp", "fair", "ai"]
 
 
 def test_tab_script_safe(built):

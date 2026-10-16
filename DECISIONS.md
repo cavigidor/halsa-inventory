@@ -622,3 +622,36 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
      without re-weighting.
    - The final page has no quotas.
    - The conversation sequence becomes collections → winback → the rest by score (extends D-043; scores unchanged).
+
+### D-045 · 2026-10-16 · Fuar Merkezi: FUAR-only history; curated campaigns; manual funnel separate from ERP; due fair tasks (M7-4)
+1. **Historical fair truth = explicit FUAR attribution only:**
+   - orders whose `Srmmerk` label type is FUAR (M6-2 grammar and `event_id`), at order-document grain;
+   - ETKİNLİK and SAHA are excluded and there is no `is_fair` grouping (taxonomy open);
+   - no conversion window, so later GENEL orders are never attributed;
+   - no ROI (costs are not attributed to editions);
+   - amounts are labelled "Net Sipariş Tutarı (Nettutar)"; missing amounts are counted, never zero;
+   - date-conflict orders stay out of date ranges, and customer-conflict orders stay out of customer lists.
+2. **Historical invitations and attendance are unknown** until their source is recovered. A FUAR-tagged order means
+   "FUAR-attributed customer", never attendee, visitor or invitee. The historical funnel starts empty.
+3. **Upcoming fair lists are explicitly curated.**
+   - Campaigns are created by the user.
+   - Members are added by exact Customer 360 code (bulk add ≤ 200).
+   - Read-only segments (historical FUAR, active, winback, real decline, cross-sell, collections) never enroll anyone.
+   - Trusted master KAPALI is blocked; an unknown master status is never turned into KAPALI.
+4. **Funnel state is local, user-maintained operational state** (SQLite `fair_campaigns` / `fair_customers` /
+   `fair_history`), distinct from ERP attributed orders.
+   - A linked edition (exact year + stem + sequence, never fuzzy) shows ERP evidence and offers an explicit "mark as
+     Sipariş".
+   - A disagreement is shown, never synchronized.
+   - Campaign state survives source refreshes.
+5. **Due fair tasks enter Günlük Satış** from an explicit `next_action_date` (today or earlier) in a planned/active
+   campaign at a non-terminal stage.
+   - Category `fair_followup`, sales-queue surface only.
+   - Fixed operational score `FAIR_TASK_SCORE = 55` (no financial prioritization); confidence `high` for the task's
+     existence.
+   - Id facts = campaign, stage, date.
+   - Sequence: collections → winback → fair task → rest.
+   - Queue action state (complete / defer / dismiss) never changes the funnel stage, and stage changes never complete
+     the task.
+6. **Campaigns are reusable and multi-edition** (planned / active / archived; archive instead of delete), not
+   hard-coded to one January fair. No salesperson assignment, CRM inference, AI or new-buyer discovery.

@@ -29,9 +29,10 @@ from services import store as ST
 #: precedence, invoice-account mapping); `sales` reasons resolve directly to the canonical customer. The keys equal the
 #: categories registered with the `sales_queue` surface (services/actions.py, tested). M7-3 adds `cross_sell`.
 QUEUE_CATEGORIES: dict[str, str] = {"collections": "collection", "winback": "sales", "real_decline": "sales",
-                                    "cross_sell": "sales"}
-#: Conversation sequence (D-043, extended by D-044): collections first, then reactivation (winback), then the rest.
-SEQUENCE_RANK = {"collections": 0, "winback": 1}
+                                    "cross_sell": "sales", "fair_followup": "sales"}
+#: Conversation sequence (D-043, extended by D-044 and D-045): collections first, then reactivation (winback), then a
+#: due fair task, then the rest by score. Sequence only; scores never change.
+SEQUENCE_RANK = {"collections": 0, "winback": 1, "fair_followup": 2}
 FILTERS = ("all", "collection_first", *QUEUE_CATEGORIES)
 LEGACY_REP_PREFIX = "Temsilci:"   # M5 action fact from the sales file's cached lookup (DQ-5): never shown in M7
 DRAFT_PURPOSES = ("collection", "offer", "winback", "sales_followup", "fair_invite")
@@ -47,13 +48,24 @@ def _category_order() -> dict[str, int]:
     return {c.key: i for i, c in enumerate(A.categories())}
 
 
+def fair_task_actions(today: str | None = None) -> list[dict]:
+    """M7-4: due fair-campaign tasks as contract actions, from local SQLite state only (no Excel, no AI)."""
+    import datetime as dt
+    from services import action_sources as AS
+    from services import fair_store as FS
+    rows = FS.due_members(today or dt.date.today().isoformat())
+    return [A.validate(a) for a in AS.produce_fair_followup({"fair_tasks": rows})]
+
+
 def build_queue(ctx, snap, *, statuses: dict | None = None, limit: int | None = None, flt: str = "all",
-                upsert: bool = True) -> dict:
-    """Assemble the queue from the live context's private candidates and the matching Customer 360 snapshot."""
+                upsert: bool = True, today: str | None = None) -> dict:
+    """Assemble the queue from the live context's private candidates, the due fair tasks (M7-4) and the matching
+    Customer 360 snapshot."""
     candidates = getattr(ctx, "sales_queue_candidates", None)
     if candidates is None:
         raise QueueUnavailable("queue_candidates_unavailable",
                                "Günlük Satış adayları bu bağlamda yok; verileri yenileyin.")
+    candidates = tuple(candidates) + tuple(fair_task_actions(today))
     limit = max(1, min(int(C.MAX_DAILY_SALES_QUEUE if limit is None else limit), C.MAX_SALES_QUEUE_LIMIT))
     flt = flt if flt in FILTERS else "all"
     statuses = ST.get_statuses() if statuses is None else statuses
@@ -105,8 +117,9 @@ def build_queue(ctx, snap, *, statuses: dict | None = None, limit: int | None = 
             "_action": a})
     diag["visible_reasons"] = sum(len(v) for v in grouped.values())
 
-    def reason_key(r):   # sequence (collections, winback, rest), then score ↓, category order, action id
-        return (SEQUENCE_RANK.get(r["category"], 2), -r["score"], order.get(r["category"], 99), r["action_id"])
+    def reason_key(r):   # sequence (collections, winback, due fair task, rest), then score ↓, category order, id
+        return (SEQUENCE_RANK.get(r["category"], len(SEQUENCE_RANK)), -r["score"], order.get(r["category"], 99),
+                r["action_id"])
 
     cards = []
     for code, reasons in grouped.items():
