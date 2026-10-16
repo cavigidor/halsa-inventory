@@ -415,3 +415,24 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **Keys:** record keys are SHA-256 over type-tagged identity parts + occurrence.
 - **Business date:** never mtime. Filename dates only by opt-in.
 - **Not yet:** persistence, refresh integration and API exposure come with each source's own checkpoint.
+
+### D-036 · 2026-10-16 · Order activity/source attribution: separate types, order-document grain (M6-2)
+- **Decision:** `Srmmerk` is normalized at **order-document** grain (`sip_evrakno_seri` + `sip_evrakno_sira`) into one of
+  four canonical source types: `general` (`GENEL`), `fuar`, `etkinlik` and `saha`.
+  - `FUAR`, `ETKİNLİK` and `SAHA` stay separate. Only the spelling of the type token is canonicalized
+    (`ETKİNLİĞİ` → `etkinlik`, `SAHAÇALIŞMASI` → `saha`).
+  - There is no `is_fair` flag. Business grouping (which types count as fairs) and any conversion window are owner
+    policy, applied later as configuration.
+- **Grammar:** structural only, `<YYYY><stem><TYPE>[sequence]`.
+  - The year is the first four digits.
+  - The type is matched from the right, longest token first.
+  - The stem is opaque and exact.
+  - Unknown labels, or more than one label in an order, fail the import closed. They are never classed as general,
+    fair or other.
+- **Event and order identity:**
+  - Edition year (from the label) and order date (`Tarih`) are independent facts; neither corrects the other.
+  - Event identity is year + exact stem + type + sequence. Different stems are never merged.
+  - The order key is derived from series + number only, never from the label.
+- **Privacy:** labels and stems can be partner company names. They live only in in-memory records, never in summaries,
+  reports, logs or committed docs.
+- **Scope:** no amounts are imported (revenue basis is open), and the DQ-5 lookup columns are not imported.
