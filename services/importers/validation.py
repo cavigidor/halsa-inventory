@@ -43,6 +43,8 @@ def _shape(text: str) -> str:
 def _convert(f: FieldSpec, v: Any) -> tuple[Any, str | None, str | None]:
     """→ (value, invalid_code, note). Strict: no locale parsing, no guessing of serial dates."""
     t = f.type
+    if t == FieldType.ANY:
+        return v, None, None
     if t == FieldType.OPAQUE_ID:
         if isinstance(v, bool) or isinstance(v, (dt.date, dt.datetime)):
             return None, TYPE_MISMATCH, None
@@ -93,12 +95,13 @@ def _convert(f: FieldSpec, v: Any) -> tuple[Any, str | None, str | None]:
 
 def normalize_cell(f: FieldSpec, cell: CellRead, declared: Confidence) -> Normalized:
     """One cell → NormalizedValue. Excel errors and missing caches become `invalid` with a code,
-    never a plain None. Successful parsing keeps the declared confidence (never upgrades it)."""
-    kind = cell.kind
+    never a plain None. Successful parsing keeps the declared confidence (never upgrades it).
+    `external_ref` is carried through so a source can apply its own external-dependency policy."""
+    kind, ext = cell.kind, cell.external_ref
     if kind.is_error:
-        return Normalized(NormalizedValue(None, Confidence.INVALID, kind, cell.error))
+        return Normalized(NormalizedValue(None, Confidence.INVALID, kind, cell.error, ext))
     if kind == CellKind.FORMULA_MISSING_CACHE:
-        return Normalized(NormalizedValue(None, Confidence.INVALID, kind, MISSING_CACHE))
+        return Normalized(NormalizedValue(None, Confidence.INVALID, kind, MISSING_CACHE, ext))
     if kind == CellKind.EMPTY:
         return Normalized(NormalizedValue(None, declared, kind))
     v = cell.value
@@ -106,14 +109,14 @@ def normalize_cell(f: FieldSpec, cell: CellRead, declared: Confidence) -> Normal
         if f.trim:
             v = v.strip()
         if v == "":
-            return Normalized(NormalizedValue(None, declared, kind))
+            return Normalized(NormalizedValue(None, declared, kind, None, ext))
     value, invalid, note = _convert(f, v)
     if invalid:
-        return Normalized(NormalizedValue(None, Confidence.INVALID, kind, invalid))
+        return Normalized(NormalizedValue(None, Confidence.INVALID, kind, invalid, ext))
     conf = declared
     if note == "id_numeric_cell" and conf == Confidence.TRUSTED:
         conf = Confidence.UNVERIFIED  # cannot prove leading zeros survived
-    return Normalized(NormalizedValue(value, conf, kind), note)
+    return Normalized(NormalizedValue(value, conf, kind, None, ext), note)
 
 
 @dataclass

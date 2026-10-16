@@ -263,6 +263,7 @@ class NormalizedValue:
     confidence: Confidence
     kind: CellKind               # provenance: literal vs cached formula vs error vs missing cache
     error: str | None = None     # Excel error code (e.g. "#DIV/0!") or a validation code (e.g. "id_malformed")
+    external_ref: bool = False   # the formula references another workbook (its value is a cached result)
 
     @property
     def is_null(self) -> bool:
