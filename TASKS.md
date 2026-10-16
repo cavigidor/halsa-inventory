@@ -1,10 +1,10 @@
 # TASKS.md — active backlog
 
 Rules: one *Current* task at a time. Each task must be executable in one bounded session.
-Milestone 5 is complete. M6-0, M6-1 and M6-2 are done; M6-3 must not be started until it is moved to *Current*.
+Milestone 5 is complete. M6-0 to M6-3 are done; M6-4 must not be started until it is moved to *Current*.
 
 ## Current
-- [ ] **Review and merge the M6-2 PR** (`claude/m6-2-order-source-normalization`, order activity/source normalization).
+- [ ] **Review and merge the M6-3 PR** (`claude/m6-3-hedef-importer`, Hedef raporu importer).
 
 ## Next
 - [ ] **Owner: M5 check on the Mac** (`git pull`, refresh, open http://127.0.0.1:8000/, desktop + phone width).
@@ -15,13 +15,17 @@ Milestone 5 is complete. M6-0, M6-1 and M6-2 are done; M6-3 must not be started 
   `Evrak Detaylı Tahsilat Raporu` export, a CRM export if one exists, and the historical fair invitation/attendance
   lists; decide the fair taxonomy (ETKİNLİK / SAHA), business-line mapping, revenue basis, salesperson of record,
   Trodat mapping, Hedef/Bütçe file of record.
-- [ ] **M6-3 Hedef raporu importer** (stale `Haftalık Kaşe Adedi` / `Risk` / `Kredi`; needs the owner's answer on
-  which Hedef file is maintained). Start only when moved to *Current*.
+- [ ] **M6-4 Detailed collections** (needs the `Evrak Detaylı Tahsilat Raporu` export; `TAHSİLAT ÖNCELİKLİ` only
+  after threshold sign-off). Start only when moved to *Current*.
+- [ ] **Owner: Hedef file of record** (D-037). Candidates: the Feb 2026 `hedef raporu.xlsx`, a June 2026
+  `hedef raporu 27 haziran.xlsx` found in an old transfer folder, and the dated snapshots. Also the refresh
+  cadence. Until decided, Hedef is imported only from an explicit path.
 - [ ] **Owner: fair taxonomy and conversion window** (M6-2 keeps `fuar`, `etkinlik` and `saha` separate; D-036). The
   grouping and any follow-on window are configuration for M7.
 - [ ] **Identity whitespace policy (small, needs a decision):** 20 sales `Musterikod` and 19 `Pro_kodu` values carry a
   trailing space. Exact matching leaves one invoice account unmatched that matches after trimming. Decide whether
-  customer-code fields declare `trim=True` (a spec change, not fuzzy matching).
+  customer-code fields declare `trim=True` (a spec change, not fuzzy matching). M6-3 found 5 Hedef codes with
+  surrounding whitespace (kept exactly), and Hedef rep names padded with a trailing space.
 - [ ] **DQ-4: Stock coverage `#DIV/0!` rows are silently excluded.** In the stock export, `STOK Kontrol %` is
   `#DIV/0!` for 1,178 of 3,314 products (5 Oct 2026 data); `m_stock` coerces errors to NaN and requires coverage,
   so these products never appear in Azalan / Fazla Stok. Decide the rule (for example a separate "no coverage"

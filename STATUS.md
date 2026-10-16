@@ -1,10 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-16 (M6-1 merged to `main` @ `c24488c`; M6-2 order-source normalization done on `claude/m6-2-order-source-normalization`, PR pending)._
+_Updated 2026-10-16 (M6-2 merged to `main` @ `41f56e2`; M6-3 Hedef importer done on `claude/m6-3-hedef-importer`, PR pending)._
 
 ## Git
-- **`main`:** `c24488c` (PR #12, M6-1 importer framework). **This checkpoint:** branch
-  `claude/m6-2-order-source-normalization` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
+- **`main`:** `41f56e2` (PR #13, M6-2 order-source normalization). **This checkpoint:** branch
+  `claude/m6-3-hedef-importer` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
 - **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
   there to get M5 (see "Owner follow-ups" below).
 
@@ -13,8 +13,8 @@ _Updated 2026-10-16 (M6-1 merged to `main` @ `c24488c`; M6-2 order-source normal
 Two owner follow-ups remain that the sandboxes cannot do (they cannot reach `api.openai.com` or open a browser on
 the Mac): the visual check in the owner's own browser and one live WhatsApp draft tone check. Neither blocks M5.
 **Milestone 6 — Additional data sources / sales intelligence foundation: in progress.** M6-0 (source inventory,
-docs only) and M6-1 (importer framework, `services/importers/`) are merged; M6-2 (order activity/source normalization,
-`services/importers/sales_activity.py`) is done (PR pending). M6-3 is not started.
+docs only), M6-1 (importer framework) and M6-2 (order-source normalization) are merged; M6-3 (Hedef importer,
+`services/importers/hedef.py`) is done (PR pending). M6-4 is not started.
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -485,7 +485,7 @@ Tests:
   - Safety: the original was hash- and mtime-identical afterwards. The scratch copy was deleted and nothing
     was committed or sent to a provider.
 
-## M6-2 (done; PR pending) — order activity/source normalization
+## M6-2 (done; merged in PR #13 @ `41f56e2`) — order activity/source normalization
 Branch `claude/m6-2-order-source-normalization` from `main` @ `c24488c`. New source module
 `services/importers/sales_activity.py` on the M6-1 framework (doc: `docs/m6_order_source.md`, decision D-036). No
 generic framework change. No API, UI, action, persistence or M5 integration. No amounts and no DQ-5 lookup columns
@@ -552,7 +552,92 @@ Leak check: 0 of 6,906 labels, stems and codes appear in the safe summary; no pa
 **M5 regression:** no M5 file changed. The live path does not import the new module (tested). M5 code is
 byte-identical to `main`, so M5 output on unchanged inputs is unchanged by construction.
 
+## M6-3 (done; PR pending) — Hedef raporu importer
+Branch `claude/m6-3-hedef-importer` from `main` @ `41f56e2`. New source module `services/importers/hedef.py` on the
+M6-1 framework (doc: `docs/m6_hedef.md`, decision D-037). No framework change. No API, UI, actions, scoring,
+persistence or M5 refresh dependency.
+
+**What it contains:**
+- **File selection:** an explicit path only. `find_hedef_candidates` lists files with their schema and never
+  selects one; the file of record is still open.
+- **Schemas:** exact variants `current_2026` (45 columns) and `legacy_snapshot` (56). A workbook must carry every
+  header of exactly one variant, otherwise the import fails closed.
+- **Field confidence:**
+  - identity `trusted`;
+  - location, sector, reps, discount tier and yearly metrics `unverified`;
+  - `Haftalık Kaşe Adedi`, `Risk` and `Kredi` always `stale`;
+  - visits `incomplete`;
+  - legacy placeholder/target columns `invalid` and never in the model.
+- **Identity:** `cari_kod` is an order customer, matched exactly against `liste.KODU`. It is never trimmed, and
+  duplicates are fatal. The account key is variant-independent.
+- **Snapshot date:** declared, or an opt-in `DD-MM-YYYY` filename date; otherwise unknown. Never mtime or today.
+- **Optional technical checks:** sales reconciliation (by D-003 customer; the invoice-account comparison is a
+  labelled diagnostic) and assignment drift (exact plus labelled whitespace-insensitive).
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (node + jsdom + Chromium) | `AI_PROVIDER=disabled REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 python -m pytest -q` | **472 passed, 7 skipped, 1 xfailed** (58 new in `tests/test_m6_hedef.py`; the other 414 unchanged) |
+
+Mutation checks: each of these fails tests:
+- capacity marked trusted;
+- no duplicate check;
+- invoice-account substitution in the reconciliation;
+- loose schema matching;
+- the variant included in the account key.
+
+**Real-data read-only check** (Mac VM, throwaway clone, only aggregates printed; all 5 Hedef workbooks and the
+sales workbook hash- and mtime-identical before and after; scratch deleted):
+
+| File (schema) | Accounts (unique) | Master match: matched / unmatched / duplicate master | Snapshot date |
+|---|---|---|---|
+| Feb 2026 `hedef raporu.xlsx` (current_2026) | 18,314 (18,314) | 18,297 / 10 / 7 | unknown (none declared) |
+| Dec 2025 dated snapshot (legacy_snapshot) | 18,218 (18,218) | 18,201 / 10 / 7 | 2025-12-31 (filename, opt-in) |
+| Nov 2025 snapshot (legacy_snapshot) | 18,168 (18,168) | 18,150 / 11 / 7 | unknown (month-name filename; not declared) |
+| Jan 2026 file in an old transfer folder (current_2026) | 18,245 | 18,228 / 10 / 7 | unknown |
+| June 2026 file in an old transfer folder (current_2026) | 18,567 | 18,555 / 5 / 7 | unknown |
+
+**Current file (Feb 2026), field by field:**
+- Formulas/errors: 0 (as in M6-0).
+- Codes with surrounding whitespace: 5, kept exactly.
+- Weekly capacity filled 11,775 (64 %), non-zero 1,645 (9 %).
+- Risk filled 18,236, Kredi 18,232 (99.6 %).
+- Visits non-zero 676 (3.7 %).
+- City 17,866, district 17,732, sector 12,762 (70 %).
+- `Temsilci` 17,288, `Müşteri Temsilcisi` 16,944.
+- Master presence: 18,304 of 18,314 = 99.95 % (M6-0: 99.96 %).
+
+**Legacy snapshots:** they parse with their own schema. No 2026 fields are synthesized and placeholders stay out
+of the model.
+
+**Reconciliation, 2025** (technical identity check against existing sales `Nettutar`):
+- Comparable 2,232 accounts, as in M6-0.
+- Exact by D-003 customer: 1,972 = 88.35 % (M6-0: 89.4 %). By invoice account (diagnostic): 1,508 = 67.6 %
+  (M6-0: 68.2 %). D-003 is confirmed again.
+- 172 mismatches; 88 have no sales; 8 sales customers have no comparable Hedef value.
+- The roughly 1-point gap to M6-0 is not explained by tolerance (0.5–5 TL changes the result by one account) or
+  by code whitespace. M6-0's exact method was not recorded.
+- Sales coverage: 6,427 of 6,754 sales customers are in Hedef (95.2 %; M6-0: 95 %).
+
+**Assignment drift:**
+- Exact text agreement between Hedef `Temsilci` and `liste.TEMSİLCİ` is about 0 %, because 15,313 Hedef rep
+  values carry a trailing space.
+- Ignoring surrounding whitespace: 13,370 of 17,275 comparable = 77.4 %. Over all accounts that is 73.0 %, which
+  is the M6-0 figure.
+- `Temsilci` never equals `Müşteri Temsilcisi`.
+
+Leak check: 0 of about 19,400 codes, reps and locations appear in any summary.
+
+**M5 / M6-2 regression:** no M5 or M6-2 code changed (one unused test import removed); the live path does not
+import the module (tested).
+
 ## Immediate next task
-Review and merge the M6-2 PR. Owner decisions remain open (`docs/m6_source_inventory.md` §16), notably the fair
-taxonomy (do ETKİNLİK / SAHA count as fairs?) and the conversion window. Start **M6-3** (Hedef) only when it is moved
-to *Current*.
+Review and merge the M6-3 PR. Owner decisions:
+- Hedef file of record: Feb 2026 vs the June 2026 file found in an old transfer folder vs dated snapshots; refresh
+  cadence.
+- Salesperson of record.
+- Customer-code whitespace policy.
+- Fair taxonomy.
+
+Start **M6-4** (detailed collections) only when it is moved to *Current*; it needs the `Evrak Detaylı Tahsilat
+Raporu` export.
