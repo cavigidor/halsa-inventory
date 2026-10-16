@@ -1,10 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-16 (M6-5 merged to `main` @ `e7fb7cc`; M6-6 Gider/Gelir importer done on `claude/m6-6-gider-gelir-importer`, PR pending)._
+_Updated 2026-10-16 (M6-6 Gider/Gelir merged to `main` @ `9dbd229`; M6-6 Bütçe importer done on `claude/m6-6-butce-importer`, PR pending)._
 
 ## Git
-- **`main`:** `e7fb7cc` (PR #16, M6-5 Trodat importer). **This checkpoint:** branch
-  `claude/m6-6-gider-gelir-importer` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
+- **`main`:** `9dbd229` (PR #17, M6-6 Gider/Gelir importer). **This checkpoint:** branch
+  `claude/m6-6-butce-importer` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
 - **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
   there to get M5 (see "Owner follow-ups" below).
 
@@ -15,7 +15,7 @@ the Mac): the visual check in the owner's own browser and one live WhatsApp draf
 **Milestone 6 — Additional data sources / sales intelligence foundation: in progress.** M6-0 (source inventory,
 docs only), M6-1 (framework), M6-2 (order source) and M6-3 (Hedef) are merged. **M6-4 (detailed collections) is
 BLOCKED** (the `Evrak Detaylı Tahsilat Raporu` export is missing). The Kredi takip importer (part of M6-6) was pulled
-forward (D-038) and is merged. M6-5 (Trodat) is merged. M6-6 Gider/Gelir is done (PR pending). Bütçe is not started.
+forward (D-038) and is merged. M6-5 (Trodat) and M6-6 Gider/Gelir are merged. M6-6 Bütçe is done (PR pending). M7 is not started.
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -743,7 +743,7 @@ before and after; scratch deleted):
 
 **Regression:** M5, M6-2, M6-3 and Kredi are unchanged; nothing live imports the module (tested).
 
-## M6-6 Gider/Gelir (done; PR pending) — owner financial source
+## M6-6 Gider/Gelir (done; merged in PR #17 @ `9dbd229`) — owner financial source
 Branch `claude/m6-6-gider-gelir-importer` from `main` @ `e7fb7cc`. New source module `services/importers/gider_gelir.py`
 on the M6-1 framework (doc: `docs/m6_gider_gelir.md`, decision D-040). No framework change. No dashboard, analytics, AI,
 API, persistence or refresh dependency.
@@ -817,10 +817,73 @@ mtime-identical before and after; scratch deleted):
 
 **Regression:** M5, M6-2, M6-3, Kredi and Trodat are unchanged; nothing live imports the module (tested).
 
+## M6-6 Bütçe (done; PR pending) — owner planning source, cell-level validity
+Branch `claude/m6-6-butce-importer` from `main` @ `9dbd229`. New source module `services/importers/butce.py` on the
+M6-1 framework (doc: `docs/m6_butce.md`, decision D-041). Two small, backward-compatible framework additions:
+`FieldType.ANY` (validated-only mixed regions) and `NormalizedValue.external_ref`. No dashboard, analytics, AI, API,
+persistence or refresh dependency.
+
+**Structure, verified read-only** (it corrects the M6-0 notes):
+- **Sales blocks:** sheet `2026` covers A1:ED141 and holds **seven stacked sales blocks**. Each block has 18 year ×
+  Forecast/GERCEK segments and 12 month rows plus Total. Every segment has an amount column (`YTL`/`TL`) and two
+  **rate** columns (`$ kur`/`€ kur`); their order flips between Forecast and GERCEK.
+- **Other areas:** an expense area (19 groups × Finance/Other/Total) and five `BÜTÇE ÖZET` panels (senaryo 1/2).
+- **Where the errors are:** the 61 `#REF!` are in the cumulative-deviation column BG. Row 5 labels that column
+  "Other" above block 1, which explains the M6-0 note. The 2025 `#DIV/0!` sit in a derived growth row.
+- **External link:** two formulas in row 1 reference `2026_gider_gelir_TASLAK.xlsx`. `Sayfa1` is scratch.
+
+**What it contains:**
+- **Audience and files:** owner only, explicit path only; candidates are listed, never selected.
+- **Cell-level validity:**
+  - Valid cells are `unverified`.
+  - Excel errors, missing caches, non-numeric values and externally dependent cells are `invalid`, isolated and
+    excluded from usable coverage.
+  - Only structural drift fails the import: anchors, headers, titles, panels, year.
+- **No repairs:** no recalculation, no gap filling, and the linked workbook is never opened.
+- **Coverage:** a coverage map across all 18,894 cells (8 normalized regions plus validated-only regions).
+- **Source status:** `complete | partially_usable | unusable`, never authoritative.
+- **Checks:** source checks are warnings or info only — Total = Σ months, block roll-ups, rate copies, expense
+  totals.
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (node + jsdom + Chromium) | `AI_PROVIDER=disabled REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 python -m pytest -q` | **710 passed, 7 skipped, 1 xfailed** (70 new in `tests/test_m6_butce.py`, 2 new framework tests; the other 638 unchanged) |
+
+Gider/Gelir `test_67` now checks that the two sources stay unreconciled, instead of checking that `butce.py` is absent.
+
+Mutation checks: each of these fails tests:
+- external cells made usable;
+- errors turned into zero;
+- invalid cells made fatal;
+- a shared audience;
+- the leak check removed;
+- blanks turned into zero;
+- values `trusted`;
+- the group-title check removed;
+- a non-structural part in the key.
+
+**Real-data read-only check** (Mac VM, aggregates only; both workbooks hash- and mtime-identical before and after;
+scratch deleted):
+
+| | `BUTCE_2026 Ocak.xlsx` | `BUTCE_2026 Taslak.xlsx` |
+|---|---|---|
+| Result | **staged**, `partially_usable` | **staged**, `partially_usable` (same schema) |
+| Usable / candidate value cells | 2,790 / 2,975 (182 blank) | 2,783 / 2,975 (189 blank) |
+| Coverage | 0.9989 | 0.9989 |
+| Invalid facts | 3 (linked row, `#REF!`) | 3 (linked row, cached values kept aside) |
+| Errors in validated regions | 67 (61 deviation `#REF!`, 3 `#REF!` + 1 `#DIV/0!` growth, 2 `#DIV/0!` derived) | 64 |
+| `#REF!` / `#DIV/0!` overall | 67 / 3 | 64 / 0 |
+| External link / formula cells | 1 / 2 | 1 / 2 |
+| Leak check | 0 | 0 |
+
+**Regression:** M5, M6-2, M6-3, Kredi, Trodat and Gider/Gelir are unchanged; nothing live imports the module (tested).
+
 ## Immediate next task
-Review and merge the M6-6 Gider/Gelir PR. Still blocked or open:
+Review and merge the M6-6 Bütçe PR. Still blocked or open:
 - M6-4 needs the `Evrak Detaylı Tahsilat Raporu` export.
-- Bütçe is its own checkpoint (file of record, `#REF!`, external links).
+- Bütçe: file of record (Ocak vs Taslak), whether the link to the Gider/Gelir draft is intended, the meaning of
+  `<y> expenses`, and the historical columns of the group blocks.
 - Gider/Gelir: the management mapping of the four native lines, the accounting basis, and the file of record.
 - Trodat SKU mapping and units; file of record for Hedef, Kredi and Trodat.
 - Salesperson of record, whitespace policy, fair taxonomy, revenue basis, collection thresholds.

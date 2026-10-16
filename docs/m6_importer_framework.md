@@ -66,7 +66,9 @@ SourceSpec(
 - **No header search.** If the declared row doesn't hold the required headers, the import fails
   (`header_missing`).
 - **Types:** `string`, `opaque_id`, `integer`, `decimal`, `date`, `boolean`. Typing is strict: no
-  locale number parsing and no guessing of serial dates.
+  locale number parsing and no guessing of serial dates. `any` (added in M6-6 Bütçe) keeps the raw cell value
+  without conversion, for validated-only regions with mixed content; errors, missing caches and external
+  references are still classified.
 - **Policies per field:**
   - `required` / `nullable`;
   - `missing_cache` (error | warning; the default comes from the spec);
@@ -127,7 +129,9 @@ leading zeros can't be verified.
   - Also detected from formula text: `[1]Sheet!A1` and `[Book.xlsx]` references count, structured
     table references don't. Formula references are counted (`external_formula_ref`).
   - Linked files are never opened.
-  - Severity comes from `spec.external_links` (warning by default; a Bütçe spec would use error).
+  - Severity comes from `spec.external_links` (warning by default; Gider/Gelir uses error).
+  - Every `NormalizedValue` carries `external_ref` (added in M6-6 Bütçe), so a source can apply a cell-level policy.
+    Bütçe keeps the import going and marks each dependent cell `invalid`.
 
 ## Identifiers and entity resolution
 

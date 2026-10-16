@@ -186,6 +186,11 @@ It is not put into salesperson workflows without a specific business need.
 > Kredi depends on none of these. The numbering is unchanged: M6-4 stays open and blocked, and the rest of M6-6
 > (gider/gelir, bütçe) is not started. Details: `docs/m6_kredi.md`.
 
+> **Status (2026-10-16):** M6-6 Gider/Gelir is done (D-040, `docs/m6_gider_gelir.md`). M6-6 Bütçe is done with
+> cell-level validation (D-041, `docs/m6_butce.md`): valid cells are `unverified`, error and externally dependent
+> cells are `invalid` and isolated, and the Ocak vs Taslak file of record is open. All runnable M6 sources are
+> imported. M6-4 (detailed collections) stays blocked by the missing export.
+
 ## 4. M7 — Sales Operating System
 
 After M6 normalizes the required data, turn the deterministic analyses into a practical sales workflow.
