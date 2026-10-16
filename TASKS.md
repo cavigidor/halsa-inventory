@@ -1,12 +1,21 @@
 # TASKS.md — active backlog
 
 Rules: one *Current* task at a time. Each task must be executable in one bounded session.
-Milestone 5 is complete. M6-0 to M6-3, Kredi, M6-5 (Trodat), M6-6 Gider/Gelir and M6-6 Bütçe are done. M6-4 is BLOCKED (missing export). M7 is not started.
+Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 (Customer 360) is done; M7-2 is not started.
 
 ## Current
-- [ ] **Review and merge the M6-6 Bütçe PR** (`claude/m6-6-butce-importer`).
+- [ ] **Review and merge the M7-1 Customer 360 PR** (`claude/m7-1-customer-360`).
 
-## Next
+## Next (M7, large checkpoints; start each only when moved to *Current*)
+- [ ] **M7-2 — Expanded deterministic daily sales queue / opportunity engine** on top of Customer 360.
+- [ ] **M7-3 — Cross-sell + potential / territory intelligence.**
+- [ ] **M7-4 — January Fair Command Center.**
+- [ ] **M7-5 — Lightweight CRM / follow-up workflow.**
+- [ ] **M7-6 — Owner / management views + integration / polish.**
+- [ ] **Owner (optional): Customer 360 Hedef.** To show Hedef context, set `HEDEF_PATH` (and optionally
+  `HEDEF_SNAPSHOT_DATE`) to one explicitly chosen file. That is not a file-of-record decision.
+
+## Next (owner decisions, open data-quality items, blocked work)
 - [ ] **Owner: M5 check on the Mac** (`git pull`, refresh, open http://127.0.0.1:8000/, desktop + phone width).
   Steps in STATUS.md "Owner follow-ups".
 - [ ] **Owner: one live WhatsApp draft tone check** (at most one paid call, never sent). If the tone needs work,

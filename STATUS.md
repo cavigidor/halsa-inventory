@@ -1,10 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-16 (M6-6 Gider/Gelir merged to `main` @ `9dbd229`; M6-6 Bütçe importer done on `claude/m6-6-butce-importer`, PR pending)._
+_Updated 2026-10-16 (M6-6 Bütçe merged to `main` @ `422fe28`; M7-1 Customer 360 done on `claude/m7-1-customer-360`, PR pending)._
 
 ## Git
-- **`main`:** `9dbd229` (PR #17, M6-6 Gider/Gelir importer). **This checkpoint:** branch
-  `claude/m6-6-butce-importer` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
+- **`main`:** `422fe28` (PR #18, M6-6 Bütçe importer). **This checkpoint:** branch
+  `claude/m7-1-customer-360` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
 - **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
   there to get M5 (see "Owner follow-ups" below).
 
@@ -15,7 +15,9 @@ the Mac): the visual check in the owner's own browser and one live WhatsApp draf
 **Milestone 6 — Additional data sources / sales intelligence foundation: in progress.** M6-0 (source inventory,
 docs only), M6-1 (framework), M6-2 (order source) and M6-3 (Hedef) are merged. **M6-4 (detailed collections) is
 BLOCKED** (the `Evrak Detaylı Tahsilat Raporu` export is missing). The Kredi takip importer (part of M6-6) was pulled
-forward (D-038) and is merged. M6-5 (Trodat) and M6-6 Gider/Gelir are merged. M6-6 Bütçe is done (PR pending). M7 is not started.
+forward (D-038) and is merged. M6-5 (Trodat), M6-6 Gider/Gelir and M6-6 Bütçe are merged: every currently available M6 source is done; M6-4 stays
+BLOCKED and is not renumbered.
+**Milestone 7 — Sales Operating System: started.** M7-1 (searchable Customer 360) is done (PR pending). M7-2 is not started.
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -817,7 +819,7 @@ mtime-identical before and after; scratch deleted):
 
 **Regression:** M5, M6-2, M6-3, Kredi and Trodat are unchanged; nothing live imports the module (tested).
 
-## M6-6 Bütçe (done; PR pending) — owner planning source, cell-level validity
+## M6-6 Bütçe (done; merged in PR #18 @ `422fe28`) — owner planning source, cell-level validity
 Branch `claude/m6-6-butce-importer` from `main` @ `9dbd229`. New source module `services/importers/butce.py` on the
 M6-1 framework (doc: `docs/m6_butce.md`, decision D-041). Two small, backward-compatible framework additions:
 `FieldType.ANY` (validated-only mixed regions) and `NormalizedValue.external_ref`. No dashboard, analytics, AI, API,
@@ -879,8 +881,71 @@ scratch deleted):
 
 **Regression:** M5, M6-2, M6-3, Kredi, Trodat and Gider/Gelir are unchanged; nothing live imports the module (tested).
 
+## M7-1 Customer 360 (done; PR pending) — searchable, deterministic, read-only
+Branch `claude/m7-1-customer-360` from `main` @ `422fe28`. Doc: `docs/m7_customer_360.md`, decision D-042.
+
+**What it contains:**
+- **Repository:** `services/customer360.py` is a separate full-customer repository, not the agent context.
+  - Built from the live context's exact sources: the sales basename inside `DATA_FOLDER`, that workbook's `liste`,
+    and the context's aging file.
+  - Plus the M6-2 event importer and Hedef only from `HEDEF_PATH`.
+  - Cached per source signature. A changed signature drops the snapshot at once and rebuilds; a sales max date ≠
+    the live `as_of_data_date` is refused (`source_date_mismatch`).
+  - In the app it builds in the background (startup warm-up after the context); requests get 503 `building` until
+    ready.
+- **API:** `GET /api/customer360/status`, `GET /api/customer360/search`, `GET /api/customer360/{code}`.
+  Read-only, Pydantic schemas, never AI, never mutates state, no paths in errors.
+- **UI:** a "Müşteri 360" tab (lazy, `textContent` only, a `file://` message, phone layout).
+  - Search with KAPALI badges.
+  - Seven cards: Kimlik / Satış geçmişi / Ürünler-kategoriler / Cari-alacak / Hedef / Fuar-etkinlik / Aksiyonlar ve
+    geçmiş.
+  - Data-quality badges and source status.
+- **Rules:**
+  - D-003 identity exactly, no trimming.
+  - Master attributes from `liste` (DQ-5-safe; M5 `cust_attrs` unchanged); duplicate master codes never resolved.
+  - "Net Sipariş Tutarı (Nettutar)" label (revenue basis open); no margin.
+  - Invoice-account receivables with a shared-account warning and no allocation.
+  - Hedef stale/incomplete badges, no penetration or credit logic.
+  - fuar / etkinlik / saha kept separate.
+  - Existing actions and memory shown read-only.
+- **Small, additive changes elsewhere:**
+  - `store.get_entity_actions` (read-only).
+  - `dashboard_builder` gains `_c360_panel` (a marked block; the rest is byte-identical).
+  - `app.py` wiring and routes.
+  - One M5 browser test skips the new server-driven tab in its "every tab has a table" loop.
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (node + jsdom + Chromium) | `AI_PROVIDER=disabled REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 python -m pytest -q` | **769 passed, 7 skipped, 1 xfailed** (59 new: 54 in `tests/test_m7_customer360.py`, 5 Playwright in `tests/test_m7_browser.py`; the other 710 unchanged) |
+
+**Real-data read-only check** (Mac VM, Python 3.12 venv, 5 Oct 2026 exports; aggregates only):
+
+| Item | Result |
+|---|---|
+| Customers / orders / lines | 6,754 / 38,215 / 182,121 |
+| Invoice accounts | 5,485; 712 customers with several accounts; 173 shared accounts |
+| Fallback customers | 27 |
+| Master resolution | 6,718 matched · 30 unmatched · 6 duplicate (7 duplicate codes) |
+| KAPALI known | 95 |
+| Aging accounts | 824 (779 linked) |
+| Customers with event orders | 1,635 (3,051 event orders) |
+| Hedef smoke (one explicit file, not authoritative) | 6,427 matched (95.2 %) |
+| Build | 74.5 s (sales read 23 s, M6-2 event import 49 s; 85 s with Hedef), peak ≈ 820 MB |
+| Detail / search | ≈ 3 ms in process; 41 ms / 14 ms over HTTP |
+
+**Real server smoke:**
+- Ready 109 s after start; search, detail and 404 all behave.
+- 0 AI calls.
+- The log holds only the structural build line and access lines.
+- All source workbooks hash- and mtime-identical; scratch deleted.
+
+**Regression:** M5 (actions, order, drawer, drafts, refresh) and all M6 importers are unchanged. Detailed
+Collections stays blocked. M7-2 is not started.
+
 ## Immediate next task
-Review and merge the M6-6 Bütçe PR. Still blocked or open:
+Review and merge the M7-1 Customer 360 PR. Next large checkpoint (not started): M7-2 daily sales queue / opportunity
+engine. Still blocked or open:
 - M6-4 needs the `Evrak Detaylı Tahsilat Raporu` export.
 - Bütçe: file of record (Ocak vs Taslak), whether the link to the Gider/Gelir draft is intended, the meaning of
   `<y> expenses`, and the historical columns of the group blocks.

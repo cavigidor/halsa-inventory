@@ -17,6 +17,7 @@ from services import scenarios as SCN
 from services import actions as A
 from services import refresh as RF
 from services import evidence as EV
+from services import customer360 as C360
 from services import action_sources  # noqa: F401  (registers the built-in deterministic sources)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -27,6 +28,9 @@ DASHBOARD_PATH = os.environ.get("DASHBOARD_PATH", os.path.join(ROOT, "dashboard.
 INFLATION = C.MANUAL_INFLATION_RATE
 WARMUP_CONTEXT = os.environ.get("WARMUP_CONTEXT", "true").lower() != "false"
 GUARD_HEADER, GUARD_VALUE = "x-stockagent", "1"
+# M7-1 Customer 360: Hedef only from an explicitly configured file (no automatic Feb/June/other selection).
+HEDEF_PATH = os.environ.get("HEDEF_PATH") or None
+HEDEF_SNAPSHOT_DATE = os.environ.get("HEDEF_SNAPSHOT_DATE") or None
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 app = FastAPI(title="AI Aksiyon Merkezi API", version="0.4")
@@ -43,13 +47,17 @@ async def _require_guard_header(request: Request, call_next):
     return await call_next(request)
 
 
-def _warm_up(repo):
-    """Build the deterministic context in the background so the first request is not a long wait."""
+def _warm_up(repo, c360=None):
+    """Build the deterministic context in the background so the first request is not a long wait.
+    M7-1: then start the Customer 360 build (deterministic, no AI) for the same live sources."""
     try:
         repo.context()
         log.info("warm-up: context ready")
     except Exception as e:  # recorded on repo.last_error; requests still report it
         log.warning("warm-up failed: %s", type(e).__name__)
+        return
+    if c360 is not None:
+        c360.state()
 
 
 @app.on_event("startup")
@@ -58,8 +66,11 @@ def _startup():
     app.state.repo = ContextRepository(data_folder=DATA_FOLDER, inflation_rate=INFLATION)
     app.state.provider = get_provider()
     app.state.agent = BusinessActionAgent(app.state.provider)
+    app.state.c360 = C360.Customer360Repository(DATA_FOLDER, app.state.repo, hedef_path=HEDEF_PATH,
+                                                hedef_snapshot=HEDEF_SNAPSHOT_DATE, background=True)
     if WARMUP_CONTEXT:
-        threading.Thread(target=_warm_up, args=(app.state.repo,), name="context-warmup", daemon=True).start()
+        threading.Thread(target=_warm_up, args=(app.state.repo, app.state.c360), name="context-warmup",
+                         daemon=True).start()
     log.info("startup: provider=%s model=%s available=%s data=%s",
              app.state.provider.name, getattr(app.state.provider, "model", None),
              app.state.provider.is_available(), DATA_FOLDER)
@@ -71,6 +82,9 @@ def get_repo() -> ContextRepository:
 
 def get_agent() -> BusinessActionAgent:
     return app.state.agent
+
+def get_c360() -> C360.Customer360Repository:
+    return app.state.c360
 
 
 def _ctx_or_none(repo):
@@ -302,6 +316,48 @@ def agent_product_analyze(product_code: str, repo: ContextRepository = Depends(g
                              best_buyers=data["best_buyers"], recommendation=data["recommendation"],
                              confidence=data["confidence"], evidence=data["evidence"],
                              ai_warnings=data.get("warnings", []))
+
+
+# ---------------- M7-1 Customer 360 (deterministic, read-only; never calls the AI provider) ----------------
+# A separate full-customer repository (services/customer360.py, D-042), rebuilt whenever the live context's sources
+# change. These GETs never mutate state and never reach the provider; errors carry fixed text, never paths.
+def _c360_snapshot(c360):
+    try:
+        return c360.snapshot()
+    except C360.Customer360NotReady as e:
+        raise HTTPException(503, {"state": e.state, "message": "Müşteri 360 hazırlanıyor…"})
+    except C360.Customer360Error as e:
+        raise HTTPException(503, {"state": "error", "error_code": e.code, "message": e.message})
+
+
+@app.get("/api/customer360/status", response_model=S.Customer360Status)
+def customer360_status(retry: bool = False, c360: C360.Customer360Repository = Depends(get_c360)):
+    if retry:
+        c360.retry()
+    return S.Customer360Status(**c360.state())
+
+
+@app.get("/api/customer360/search", response_model=S.Customer360Search)
+def customer360_search(q: str = "", limit: int = C360.SEARCH_DEFAULT,
+                       c360: C360.Customer360Repository = Depends(get_c360)):
+    snap = _c360_snapshot(c360)
+    limit = max(1, min(limit, C360.SEARCH_MAX))
+    hits, truncated = snap.search(q, limit)
+    return S.Customer360Search(query=q, limit=limit, min_chars=C360.SEARCH_MIN_CHARS, count=len(hits),
+                               truncated=truncated, as_of_data_date=snap.as_of.isoformat(), results=hits)
+
+
+@app.get("/api/customer360/{customer_code}", response_model=S.Customer360Detail)
+def customer360_detail(customer_code: str, c360: C360.Customer360Repository = Depends(get_c360),
+                       repo: ContextRepository = Depends(get_repo)):
+    snap = _c360_snapshot(c360)
+    det = C360.customer_detail(snap, customer_code, ctx=repo.current(),
+                               stored_actions=ST.get_entity_actions("customer", customer_code),
+                               memory=ST.get_memory("customer", customer_code),
+                               categories={c.key: c.label_tr for c in A.categories()})
+    if det is None:
+        raise HTTPException(404, f"Müşteri bulunamadı: {customer_code}")
+    return det
 
 
 # ---------------- draft message (copy-only; nothing is ever sent) ----------------

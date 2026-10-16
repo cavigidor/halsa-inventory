@@ -97,6 +97,14 @@ def get_statuses():
         return {r["action_key"]: dict(r) for r in c.execute("SELECT * FROM actions")}
 
 
+def get_entity_actions(entity_type, entity_id):
+    """Stored actions for one entity, newest first (read-only; M7-1 Customer 360 history)."""
+    with _conn() as c:
+        return [dict(r) for r in c.execute(
+            "SELECT * FROM actions WHERE entity_type=? AND entity_id=? ORDER BY generated_at DESC, action_key",
+            (entity_type, str(entity_id)))]
+
+
 def add_memory(entity_type, entity_id, kind, detail, next_followup=None):
     now = dt.datetime.now().isoformat(timespec="seconds")
     with _conn() as c:

@@ -20,7 +20,8 @@ data/*.xlsx (private, Mac only)
 dashboard_builder.py ── m_stock / m_collections / load_sales / m_lapsed / m_momentum /
    │                    m_margin / m_ordersize / m_overstock_move / m_risk
    │──► dashboard.html            (Layer 1: deterministic Turkish dashboard, in use; plus the
-   │                              server-driven "✨ AI Aksiyon Merkezi" tab from _ai_panel(), M5-2)
+   │                              server-driven "✨ AI Aksiyon Merkezi" tab from _ai_panel(), M5-2, and the
+   │                              server-driven "Müşteri 360" tab from _c360_panel(), M7-1)
    ▼
 services/context.py   build_context(): normalized, top-N "agent context"; the action queue comes from
    │                  registered sources (services/actions.py + action_sources.py), ranked by
@@ -38,6 +39,9 @@ services/ai/          AIProvider interface (base.py) · factory.py (only selecti
    ▼
 app.py                FastAPI (Layer 2 API). Deterministic endpoints never depend on AI.
 services/store.py     SQLite: action status, history, memory, ai_calls metadata (no content)
+services/customer360.py  M7-1 Customer 360: separate full-customer repository built from the live context's exact
+                      sources (sales + liste + aging + M6-2 events + optional explicit Hedef); cached per source
+                      signature; read-only GET /api/customer360/*; never AI (D-042)
 ```
 
 ## Important files
@@ -63,6 +67,7 @@ services/store.py     SQLite: action status, history, memory, ai_calls metadata 
 | `services/importers/kredi.py` | Kredi takip (pulled forward, D-038): owner-only company loan installments, amortizing only, fatal arithmetic identities, control-total row check (`docs/m6_kredi.md`); explicit file only; not used by M5 |
 | `services/importers/trodat.py` | M6-5: Trodat sales report → native model × variant × month (`reported_quantity`, unverified) via an explicit matrix spec; workbook totals checked; no Halsa SKU mapping (`docs/m6_trodat.md`, D-039); explicit file only; not used by M5 |
 | `services/importers/gider_gelir.py` | M6-6: Gider/Gelir (owner only) → expenses with native-line allocations, revenue by native line, unique ÖZET facts; ÖZET/Sheet1 duplicates are verification-only or excluded; no management mapping (`docs/m6_gider_gelir.md`, D-040); explicit file only; not used by M5 |
+| `services/customer360.py` | M7-1: Customer 360 repository (full customer population, not the agent context); exact live sources, signature cache, DQ-5-safe master attributes, invoice-account receivables (no allocation), optional explicit Hedef, M6-2 events; read-only, no AI (`docs/m7_customer_360.md`, D-042) |
 | `services/importers/butce.py` | M6-6: Bütçe (owner only) → cell-level facts (sales blocks by segment and month, rates, expense groups, BÜTÇE ÖZET panels) with validity and a coverage map; invalid and externally dependent cells are isolated, never repaired; source status `partially_usable`, never authoritative (`docs/m6_butce.md`, D-041); explicit file only; not used by M5 |
 | `tests/fixtures/xlsx_synth.py` | Runtime OOXML writer for synthetic workbooks with cached formulas, error cells and external links |
 | `tests/test_m5_browser.py` | Playwright smoke tests: real FastAPI + Chromium, synthetic data, disabled/mock AI |
@@ -103,7 +108,7 @@ services/store.py     SQLite: action status, history, memory, ai_calls metadata 
 | 4 | Live macro data (TCMB/TÜİK inflation, FX) | later |
 | 5 | "✨ AI Aksiyon Merkezi" tab: deterministic action queue first, AI on demand (design: `docs/m5_action_center.md`) | **complete** (M5-1 to M5-6: backend, read-only tab, action state, drafts + drawer, controlled refresh, browser verification) |
 | 6 | Additional data sources / sales intelligence foundation: validated importers for hedef raporu, detailed collections, Trodat sales, gider/gelir, kredi takip, bütçe (`docs/roadmap_m6_m7.md`) | in progress: M6-0 source inventory done (`docs/m6_source_inventory.md`, D-034); M6-1 importer framework done (`services/importers/`, D-035); M6-2 order-source normalization done (D-036); M6-3 Hedef importer done (D-037); M6-4 blocked (missing export), so the Kredi importer was pulled forward (D-038); M6-5 Trodat importer done (D-039); M6-6 Gider/Gelir done (D-040); M6-6 Bütçe done (D-041) |
-| 7 | Sales operating system: daily sales queue, customer 360, cross-sell, January fair command center, light CRM, new-buyer discovery | planned (D-021) |
+| 7 | Sales operating system: daily sales queue, customer 360, cross-sell, January fair command center, light CRM, new-buyer discovery | in progress: M7-1 searchable Customer 360 done (D-042); next M7-2 daily sales queue / opportunity engine |
 | — | Multi-user / remote deployment (auth, admin and salesperson roles, private deployment, backups) | future, out of scope for M5 (D-016) |
 
 ## Product principle (D-015)
