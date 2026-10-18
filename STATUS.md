@@ -3,7 +3,7 @@
 _Updated 2026-10-18 (M7 complete via PR #24 `de7eb43`; post-M7 local owner-readiness PR #25 `d67fb0b` merged; Kredi DURUM clarification and Mac acceptance pending)._
 
 ## Git
-- **`main`:** PR #24 (M7-6) squash merge `de7eb43` followed by repository tracking updates. M7-6 branch is merged; new implementation work requires its own checkpoint.
+- **`main`:** M7 completed in PR #24 (`de7eb43`); post-M7 local readiness merged in PR #25 (`d67fb0b`), followed by documentation checkpoints. No new feature milestone is active.
 - **Owner's Mac folder:** current checkout state was not inspected in this checkpoint. Previous notes reported an older checkout; verify `git status` before pulling, protect private `.env`, data and SQLite, and follow `docs/owner_launch_checklist.md`. Browser/real-data acceptance remains owner-local.
 
 ## Milestone
