@@ -4,7 +4,7 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-6 are merged; **Milestone 7 is COMPLETE** (PR #24, squash merge `de7eb43`; D-047). No new milestone is started.
 
 ## Current
-- No active implementation checkpoint. M7 is complete; Kredi `DURUM` meaning awaits the owner's clarification (expected 2026-10-19). No financial interpretation will be changed before confirmation.
+- [ ] **Post-M7 local owner-readiness checkpoint** (`readiness/post-m7-owner-preflight`): add optional owner/Hedef `.env.example` settings, read-only owner-file preflight with synthetic tests, and a safe local launch checklist. No financial/business rule changes; Kredi `DURUM` explanation remains pending (expected 2026-10-19). Merge only after CI passes.
 
 ## Next (after M7: owner decisions and follow-ups; start each only when moved to *Current*)
 - [ ] **Owner: cross-sell threshold review.** On real data the initial guards give a broad population (78 % of active
