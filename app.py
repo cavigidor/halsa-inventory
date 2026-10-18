@@ -26,6 +26,7 @@ from services import fair_store as FS
 from services import fair_center as FC
 from services import crm as CRM
 from services import owner_view as OV
+from services import accuracy as ACC
 from services import action_sources  # noqa: F401  (registers the built-in deterministic sources)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -53,6 +54,46 @@ async def _require_guard_header(request: Request, call_next):
         return JSONResponse(status_code=403,
                             content={"detail": "Missing header 'X-StockAgent: 1' (local CSRF guard)."})
     return await call_next(request)
+
+
+# ---- M8-ACCURACY: fail-closed factual-integrity gate in the shared response layer ----
+# Every route is classified in services/accuracy.ROUTES. A route bound to a metric answers with a neutral withheld
+# notice (HTTP 409, no data) unless the metric is VERIFIED; an unclassified route is withheld too. Endpoints that mix
+# operational records with analytics redact field by field (ACC.redact_*). A withheld request never reaches an
+# endpoint, a provider or the SQLite state.
+from starlette.routing import Match
+
+
+def _route_template(scope):
+    for route in app.router.routes:
+        match, _ = route.matches(scope)
+        if match == Match.FULL:
+            return getattr(route, "path", None)
+    return None
+
+
+def accuracy_gate():
+    """The gate for this request (production: services.accuracy.current_gate; no runtime switch exists)."""
+    return ACC.current_gate()
+
+
+@app.middleware("http")
+async def _accuracy_gate(request: Request, call_next):
+    method = "GET" if request.method == "HEAD" else request.method
+    tpl = _route_template(request.scope)
+    if tpl is None or method == "OPTIONS":
+        return await call_next(request)               # unknown path / method → the router answers 404 / 405
+    kind, ref = ACC.ROUTES.get((method, tpl), ("unclassified", None))
+    if kind == "metric":
+        d = accuracy_gate().decide(ref)
+    elif kind == "unclassified":
+        d = ACC.Decision(f"route:{method} {tpl}", "Sınıflandırılmamış uç", ACC.State.INVALID,
+                         ("Bu uç doğrulama kaydında sınıflandırılmadı.",), ("UNCLASSIFIED-ROUTE",))
+    else:
+        return await call_next(request)
+    if d.displayable:
+        return await call_next(request)
+    return JSONResponse(status_code=ACC.WITHHELD_HTTP_STATUS, content={"detail": d.notice()})
 
 
 # ---- M7-5: CRM validation errors never echo the submitted text (notes, outcomes, owner labels) ----
@@ -156,7 +197,21 @@ def dashboard():
         return HTMLResponse(status_code=404, content=(
             "<!doctype html><meta charset='utf-8'><p>dashboard.html bulunamadı. "
             "Önce panoyu oluşturun: <code>python dashboard_builder.py data</code></p>"))
+    # M8-ACCURACY: never serve a dashboard built before the factual-integrity gate (it embeds unverified rows).
+    if not _gated_dashboard(path):
+        return HTMLResponse(status_code=503, content=(
+            "<!doctype html><meta charset='utf-8'><p>Bu pano doğrulama kuralları uygulanmadan oluşturulmuş; "
+            "gösterilmiyor. Verileri yenileyin veya panoyu yeniden oluşturun.</p>"))
     return FileResponse(path, media_type="text/html")
+
+
+def _gated_dashboard(path):
+    marker = f'<meta name="stockagent-accuracy" content="{ACC.POLICY_VERSION}">'.encode()
+    try:
+        with open(path, "rb") as f:
+            return marker in f.read(4096)
+    except OSError:
+        return False
 
 
 @app.get("/api/health", response_model=S.Health)
@@ -202,6 +257,7 @@ def context_refresh(repo: ContextRepository = Depends(get_repo)):
     On success the verified context is installed in this server and dashboard.html is replaced atomically."""
     rep = RF.run_refresh(DATA_FOLDER, DASHBOARD_PATH, previous_context=repo.current(),
                          install=repo.replace_context, inflation_rate=INFLATION)
+    rep = ACC.redact_refresh_report(rep, accuracy_gate())          # M8-ACCURACY: no unverified totals in the report
     body = S.RefreshReport(**rep).model_dump()
     return JSONResponse(status_code=409 if rep["step"] == "busy" else 200, content=body)
 
@@ -518,10 +574,11 @@ def _stages():
 
 @app.get("/api/fairs/campaigns", response_model=S.FairCampaignList)
 def fairs_campaigns(repo: ContextRepository = Depends(get_repo)):
+    gate = accuracy_gate()
     ctx = repo.current()
     hist = getattr(ctx, "fairs", None) if ctx is not None else None
     return S.FairCampaignList(stages=_stages(), amount_label=FA.AMOUNT_LABEL,
-                              items=[FC.campaign_summary(c, hist) for c in FS.list_campaigns()])
+                              items=[ACC.redact_fair_campaign(FC.campaign_summary(c, hist), gate) for c in FS.list_campaigns()])
 
 
 @app.post("/api/fairs/campaigns", response_model=S.FairCampaignOut)
@@ -531,7 +588,8 @@ def fairs_campaign_create(body: S.FairCampaignCreate, repo: ContextRepository = 
                            end_date=body.end_date.isoformat() if body.end_date else None,
                            event_stem=body.event_stem, event_sequence=body.event_sequence, status=body.status)
     ctx = repo.current()
-    return FC.campaign_summary(c, getattr(ctx, "fairs", None) if ctx is not None else None)
+    return ACC.redact_fair_campaign(FC.campaign_summary(c, getattr(ctx, "fairs", None) if ctx is not None else None),
+                                     accuracy_gate())
 
 
 @app.get("/api/fairs/campaigns/{campaign_id}", response_model=S.FairCampaignOut)
@@ -541,7 +599,8 @@ def fairs_campaign(campaign_id: int, repo: ContextRepository = Depends(get_repo)
     except FC.FairError as e:
         _fair_error(e)
     ctx = repo.current()
-    return FC.campaign_summary(c, getattr(ctx, "fairs", None) if ctx is not None else None)
+    return ACC.redact_fair_campaign(FC.campaign_summary(c, getattr(ctx, "fairs", None) if ctx is not None else None),
+                                     accuracy_gate())
 
 
 @app.put("/api/fairs/campaigns/{campaign_id}", response_model=S.FairCampaignOut)
@@ -569,7 +628,8 @@ def fairs_campaign_update(campaign_id: int, body: S.FairCampaignUpdate, repo: Co
     except FS.FairStoreError as e:
         raise HTTPException(409 if e.code == "campaign_archived" else 422, {"error_code": e.code, "message": e.message})
     ctx = repo.current()
-    return FC.campaign_summary(c, getattr(ctx, "fairs", None) if ctx is not None else None)
+    return ACC.redact_fair_campaign(FC.campaign_summary(c, getattr(ctx, "fairs", None) if ctx is not None else None),
+                                     accuracy_gate())
 
 
 @app.post("/api/fairs/campaigns/{campaign_id}/archive", response_model=S.FairCampaignOut)
@@ -582,7 +642,8 @@ def fairs_campaign_archive(campaign_id: int, repo: ContextRepository = Depends(g
     except FS.FairStoreError as e:
         raise HTTPException(409, {"error_code": e.code, "message": e.message})
     ctx = repo.current()
-    return FC.campaign_summary(c, getattr(ctx, "fairs", None) if ctx is not None else None)
+    return ACC.redact_fair_campaign(FC.campaign_summary(c, getattr(ctx, "fairs", None) if ctx is not None else None),
+                                     accuracy_gate())
 
 
 @app.get("/api/fairs/campaigns/{campaign_id}/customers", response_model=S.FairCampaignCustomers)
@@ -595,8 +656,12 @@ def fairs_campaign_customers(campaign_id: int, stage: str | None = None, due: bo
     except FC.FairError as e:
         _fair_error(e)
     ctx, snap = _fair_ctx_snap(repo, c360)
+    gate = accuracy_gate()
+    # M8-ACCURACY: filtering by an analytic segment would reveal a withheld classification → ignored while withheld
+    seg = segment if (segment in FC.SEGMENT_KEYS and gate.displayable("fairs.segments")) else None
     res = FC.campaign_customers(c, ctx, snap, stage=stage if stage in FS.STAGE_LABELS else None, due=due,
-                                segment=segment if segment in FC.SEGMENT_KEYS else None, q=q, limit=limit)
+                                segment=seg, q=q, limit=limit)
+    res = {**res, "items": [ACC.redact_fair_member(it, gate) for it in res["items"]]}
     return S.FairCampaignCustomers(campaign_id=campaign_id, **res)
 
 
@@ -642,7 +707,7 @@ def fairs_campaign_update_customer(campaign_id: int, body: S.FairCustomerUpdate,
     row = next((r for r in rows if r["customer_code"] == body.customer_code), None)
     if row is None:
         raise HTTPException(404, "Müşteri bulunamadı.")
-    return row
+    return ACC.redact_fair_member(row, accuracy_gate())
 
 
 @app.get("/api/fairs/candidates", response_model=S.FairCandidates)
@@ -672,7 +737,7 @@ def _crm_error(e: "CRM.CrmError"):
 
 @app.get("/api/crm/summary", response_model=S.CrmSummary)
 def crm_summary(c360: C360.Customer360Repository = Depends(get_c360)):
-    return S.CrmSummary(**CRM.summary(_crm_snap(c360)))
+    return S.CrmSummary(**ACC.redact_crm_summary(CRM.summary(_crm_snap(c360)), accuracy_gate()))
 
 
 @app.get("/api/crm/followups", response_model=S.CrmFollowupList)
@@ -778,13 +843,21 @@ def owner_overview(repo: ContextRepository = Depends(get_repo), c360: C360.Custo
     owner.ensure_loaded()
     entries = owner.snapshot()
     today = dt.date.today()
+    gate = accuracy_gate()
     ctx, ops, crm, core, stores, hedef = _owner_live(repo, c360)
+    # M8-ACCURACY: owner financial sections and analytic counts are withheld field by field; source / system status
+    # and the known-issues list stay visible.
     return S.OwnerOverview(
         today=today.isoformat(), audience_note=OV.OWNER_AUDIENCE_NOTE,
-        reload={"inflight": owner.inflight, "generation": owner.generation}, operations=ops,
-        kredi=OV.kredi_section(owner, entries["kredi"], today), gider_gelir=OV.gider_gelir_section(owner, entries["gider_gelir"]),
-        butce=OV.butce_section(owner, entries["butce"]), system=_owner_system(owner, entries, core, stores, hedef),
-        known_issues=OV.known_issues(getattr(repo.current(), "data_quality", None), ops, crm))
+        reload={"inflight": owner.inflight, "generation": owner.generation},
+        operations=ACC.redact_operations(ops, gate),
+        kredi=ACC.redact_owner_section(OV.kredi_section(owner, entries["kredi"], today), "owner.kredi", gate),
+        gider_gelir=ACC.redact_owner_section(OV.gider_gelir_section(owner, entries["gider_gelir"]), "owner.gider_gelir",
+                                             gate),
+        butce=ACC.redact_owner_section(OV.butce_section(owner, entries["butce"]), "owner.butce", gate),
+        system=_owner_system(owner, entries, core, stores, hedef),
+        known_issues=ACC.redact_known_issues(OV.known_issues(getattr(repo.current(), "data_quality", None), ops, crm),
+                                             gate) + ACC.accuracy_known_issues())
 
 
 @app.get("/api/owner/status", response_model=S.OwnerStatus)
@@ -796,7 +869,9 @@ def owner_status(repo: ContextRepository = Depends(get_repo), c360: C360.Custome
     return S.OwnerStatus(audience_note=OV.OWNER_AUDIENCE_NOTE,
                          reload={"inflight": owner.inflight, "generation": owner.generation},
                          system=_owner_system(owner, entries, core, stores, hedef),
-                         known_issues=OV.known_issues(getattr(repo.current(), "data_quality", None), ops, crm))
+                         known_issues=ACC.redact_known_issues(
+                             OV.known_issues(getattr(repo.current(), "data_quality", None), ops, crm), accuracy_gate())
+                         + ACC.accuracy_known_issues())
 
 
 @app.post("/api/owner/reload", response_model=S.OwnerReloadResponse)

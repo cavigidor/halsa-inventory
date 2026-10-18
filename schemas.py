@@ -7,6 +7,18 @@ Priority = Literal["critical", "high", "medium", "low"]
 Confidence = Literal["high", "medium", "low"]
 
 # ---------- generic ----------
+class WithheldNotice(BaseModel):
+    """M8-ACCURACY: the neutral notice that replaces a withheld (not VERIFIED) output. No numbers, no data."""
+    model_config = ConfigDict(extra="forbid")
+    error_code: Literal["accuracy_withheld"] = "accuracy_withheld"
+    state: Literal["withheld"] = "withheld"
+    metric: str
+    title: str
+    verification: Literal["not_verified", "invalid"]
+    message: str
+    reasons: List[str] = []
+
+
 class Health(BaseModel):
     status: str = "ok"
     ai_available: bool
@@ -719,9 +731,9 @@ class CrmSummary(BaseModel):
     unknown_note: str
     today: str
     total_customers: int
-    active_customers: int
+    active_customers: Optional[int] = None                    # None while withheld (M8-ACCURACY)
     customers_with_structured_contact: int
-    active_customers_with_structured_contact: int
+    active_customers_with_structured_contact: Optional[int] = None
     structured_interactions: int
     legacy_memory_rows: int
     current_followups: int
@@ -729,6 +741,7 @@ class CrmSummary(BaseModel):
     due_today: int
     upcoming_7d: int
     orphan_customer_records: int
+    withheld: List[WithheldNotice] = []
     ai_used: Literal[False] = False
 
 
@@ -1051,7 +1064,10 @@ class FairCampaignUpdate(BaseModel):
 
 class FairLinkedEvent(BaseModel):
     configured: bool
-    found: bool
+    found: Optional[bool] = None        # None while the ERP fair history is withheld (M8-ACCURACY)
+    withheld: bool = False
+    message: Optional[str] = None
+    reasons: List[str] = []
     event_id: Optional[str] = None
     label: Optional[str] = None
     orders: Optional[int] = None
@@ -1107,8 +1123,8 @@ class FairCampaignCustomer(BaseModel):
     note: Optional[str] = None           # local only; never logged, never sent to AI
     has_note: bool
     segments: List[str]
-    collection_first: bool
-    erp_fuar_orders: int
+    collection_first: Optional[bool] = None     # None / [] / None while withheld (M8-ACCURACY)
+    erp_fuar_orders: Optional[int] = None
     erp_evidence: Optional[str] = None
     erp_mismatch: Optional[Literal["erp_order_stage_differs", "stage_order_without_erp"]] = None
     updated_at: Optional[str] = None
@@ -1248,6 +1264,7 @@ class OwnerKredi(OwnerSourceHead):
     horizon_note: str
     overdue_note: str
     principal_note: str
+    withheld: Optional[WithheldNotice] = None
     today: str
     data: Optional[KrediData] = None
 
@@ -1296,6 +1313,7 @@ class OwnerGiderGelir(OwnerSourceHead):
     mapping_note: str
     reconciliation_note: str
     data: Optional[GiderGelirData] = None
+    withheld: Optional[WithheldNotice] = None
 
 
 class ButceHealth(_OwnerOut):
@@ -1328,6 +1346,7 @@ class ButceHealth(_OwnerOut):
 class OwnerButce(OwnerSourceHead):
     warning: str
     data: Optional[ButceHealth] = None
+    withheld: Optional[WithheldNotice] = None
 
 
 class OwnerOperations(_OwnerOut):
@@ -1349,6 +1368,7 @@ class OwnerOperations(_OwnerOut):
     cross_sell_active_customers: Optional[int] = None
     cross_sell_share: Optional[float] = None
     cross_sell_note: Optional[str] = None
+    withheld: Optional[WithheldNotice] = None
 
 
 class OwnerCoreSources(_OwnerOut):
