@@ -50,6 +50,8 @@ class AgentContext(dict):
     sales_queue_candidates = None
     sales_queue_rows = None
     opportunities = None
+    fairs = None              # M7-4: historical FUAR index (services/fairs.FairHistory), from the frame read here
+    reason_index = None       # M7-4: {category: {entity_id: max score}} over ALL uncut customer candidates
 
 
 def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sources=None, frames=None):
@@ -178,6 +180,17 @@ def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sour
                                          cross_sell=ctx.opportunities)
     ctx["actions"] = A.action_center(candidates)[:C.MAX_DAILY_ACTIONS]
     ctx.sales_queue_candidates = sales_queue_reservoir(candidates)
+    # M7-4: historical FUAR index (FUAR-attributed orders only) and a compact reason index for fair candidate
+    # segments; both from data already in memory, both private (never serialized).
+    from services import fairs as FA
+    ctx.fairs = FA.build_fair_history(sdf, asof_d)
+    idx = {}
+    for a in candidates:
+        if a.get("entity_type") == "customer":
+            d = idx.setdefault(a["category"], {})
+            e = str(a["entity_id"])
+            d[e] = max(d.get(e, 0.0), float(a["score"]))
+    ctx.reason_index = idx
     qcodes = {str(a["entity_id"]) for a in ctx.sales_queue_candidates}
     ctx.sales_queue_rows = {"collections": [r for r in coll_scored if str(r["code"]) in qcodes],
                             "winback": [r for r in lap if str(r["code"]) in qcodes],

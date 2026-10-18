@@ -656,7 +656,8 @@ def _rows(frame: pd.DataFrame, code: str) -> list[dict]:
 
 def customer_detail(snap: Customer360Snapshot, code: str, *, ctx: dict | None = None,
                     stored_actions: list[dict] | None = None, memory: list[dict] | None = None,
-                    categories: dict[str, str] | None = None, opportunities=None) -> dict | None:
+                    categories: dict[str, str] | None = None, opportunities=None,
+                    fair_campaigns: list[dict] | None = None) -> dict | None:
     """`opportunities` (M7-3): the live context's cross-sell model, passed only when it belongs to the same sources
     as this snapshot; otherwise the section reports `unavailable`. Nothing here recomputes it."""
     base = snap.customers.get(code)
@@ -779,7 +780,8 @@ def customer_detail(snap: Customer360Snapshot, code: str, *, ctx: dict | None = 
               "distinct_events_by_type": dict(ev["distinct_events_by_type"]) if ev else {},
               "recent": list(ev["recent"][:RECENT_EVENTS]) if ev else [],
               "recent_limit": RECENT_EVENTS, "confidence": "trusted" if snap.events_status == "ok" else CONF_UNAVAILABLE,
-              "note": "Fuar, etkinlik ve saha ayrı tutulur; dönüşüm penceresi veya fuar sonrası atıf hesaplanmaz."}
+              "note": "Fuar, etkinlik ve saha ayrı tutulur; dönüşüm penceresi veya fuar sonrası atıf hesaplanmaz.",
+              "campaigns": list(fair_campaigns or [])}     # M7-4: read-only fair-campaign membership
     if snap.events_status != "ok":
         warnings.append({"code": "events_unavailable", "message": "Sipariş kaynağı (Srmmerk) verisi okunamadı."})
 
