@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-18 (M7 complete via PR #24 `de7eb43`; post-M7 local owner-readiness PR #25 `d67fb0b` merged; Kredi DURUM clarification and Mac acceptance pending)._
+_Updated 2026-10-18 (M7 complete; post-M7 readiness complete; M8-P0 father-first production plan PR #26 merged at `c34a504`, CI green; M8-CP1 authentication now Current; Kredi DURUM and owner decisions remain unresolved)._
 
 ## Git
 - **`main`:** M7 completed in PR #24 (`de7eb43`); post-M7 local readiness merged in PR #25 (`d67fb0b`), followed by documentation checkpoints. No new feature milestone is active.
@@ -1223,3 +1223,23 @@ suppress missing-data warnings or combine unapproved financial categories.
 source selection, snapshot freshness and backup/restart verification must happen on the owner's machine.
 M6-4 detailed collections remains blocked by the missing export, and DQ-1/2/4/5 and other owner decisions stay open.
 The owner expects a clarification of Kredi `DURUM` on 2026-10-19.
+
+## M8-P0 father-first production planning — merged 2026-10-18 (PR #26 `c34a504`)
+
+User requirement: US-based owner performs all technical/business maintenance and uploads monthly staff-produced ERP
+reports; father in Türkiye should only access an easy Turkish dashboard through a private HTTPS bookmark. Owner +
+father are the ONLY first-release users; salesperson permissions are a later explicit milestone. Full agreed
+feature scope remains intact. Existing M7 features stay unchanged and must be preserved.
+
+Planning docs: `docs/m8_father_first_launch.md` (8 implementation checkpoints and launch gates) and
+`docs/m8_owner_questions_tr.md` (22 Turkish decision questions). D-048 captures the owner direction. Original
+father voice recording/transcripts are not verified in repository sources, so literal voice-message coverage is
+not yet confirmed. No live deployment, sensitive data migration, or financial-rule change occurred in this PR.
+
+Verified CI: `1058 passed, 7 skipped, 1 xfailed` on PR #26 head `79e14d3` (run `39172057856`).
+The xfail remains the known owner-approval-dependent DQ-1 margin test.
+
+**Current:** M8-CP1 security-first owner/father authorization. No public network exposure before authenticated
+route-level protection. Kredi `DURUM` answer expected 2026-10-19; never assume Kapalı is paid. Other business
+decisions and source gaps, including M6-4 detailed collections, are still open. Actual hosted/local Mac
+real-data smoke, privacy/transfer approval, and father remote usability have NOT been verified.
