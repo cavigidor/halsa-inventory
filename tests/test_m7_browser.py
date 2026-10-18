@@ -151,11 +151,11 @@ def test_c360_tab_search_detail_sections_no_ai(browser, tmp_path):
         # detail
         search_open(page, "910.00.0001", "910.00.0001")
         secs = page.eval_on_selector_all("#c360 .c3-card", "els => els.map(e => e.dataset.sec)")
-        assert secs == ["identity", "sales", "products", "opportunities", "receivables", "hedef", "events",
-                        "activity"]                                         # M7-3 adds Fırsatlar
+        assert secs == ["identity", "sales", "products", "opportunities", "receivables", "hedef", "events", "crm",
+                        "activity"]                                         # M7-3 Fırsatlar, M7-5 CRM / Takip
         titles = page.eval_on_selector_all("#c360 .c3-card h4", "els => els.map(e => e.textContent)")
         assert titles == ["Kimlik", "Satış geçmişi", "Ürünler / kategoriler", "Fırsatlar", "Cari / alacak",
-                          "Hedef bilgileri", "Fuar / etkinlik geçmişi", "Aksiyonlar ve geçmiş"]
+                          "Hedef bilgileri", "Fuar / etkinlik geçmişi", "CRM / Takip", "Aksiyonlar ve geçmiş"]
         assert "Net Sipariş Tutarı (Nettutar)" in page.inner_text('#c360 [data-sec="sales"]')
         confs = set(page.eval_on_selector_all("#c360 .c3-badge", "els => els.map(e => e.dataset.conf)"))
         assert {"trusted", "unverified", "unavailable"} <= confs

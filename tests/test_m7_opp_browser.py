@@ -139,7 +139,7 @@ def test_tab_summary_pairs_territory_hostile_labels(browser, tmp_path):
         page.goto(srv["base"] + "/")
         # (1) tab exists after Müşteri 360; nothing fetched before it opens
         tabs = page.eval_on_selector_all(".tab", "els => els.map(e => e.dataset.t)")
-        assert tabs[-5:] == ["sq", "c360", "opp", "fair", "ai"] and page.inner_text('.tab[data-t="opp"]') == "Fırsatlar"
+        assert tabs[-6:] == ["sq", "c360", "opp", "fair", "crm", "ai"] and page.inner_text('.tab[data-t="opp"]') == "Fırsatlar"
         assert not any("/api/opportunities" in u for _, u in page.requests)
         open_opp(page, srv["base"])
         # (2) model summary
@@ -224,6 +224,7 @@ def test_daily_sales_cross_sell_deep_link_and_kapali(browser, tmp_path):
         assert page.query_selector(f'#sq .sq-card[data-code="{O[30]}"]') is None
         # winback before cross-sell (sequence), collections first
         page.click('#sq .sq-f[data-k="winback"]')
+        page.wait_for_selector('#sq .sq-f.on[data-k="winback"]')              # filtered list rendered, not 'all'
         page.wait_for_selector(f'#sq .sq-card[data-code="{O[27]}"]')
         page.click(f'#sq .sq-card[data-code="{O[27]}"] .sq-toggle')
         cats = page.eval_on_selector_all(f'#sq .sq-card[data-code="{O[27]}"] .sq-r', "els => els.map(e => e.dataset.cat)")

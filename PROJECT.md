@@ -24,7 +24,8 @@ dashboard_builder.py ── m_stock / m_collections / load_sales / m_lapsed / m_
    │                              server-driven "Günlük Satış" tab from _sq_panel(), M7-2, and the
    │                              server-driven "Müşteri 360" tab from _c360_panel(), M7-1, and the
    │                              server-driven "Fırsatlar" tab from _opp_panel(), M7-3, and the
-   │                              server-driven "Fuar Merkezi" tab from _fair_panel(), M7-4)
+   │                              server-driven "Fuar Merkezi" tab from _fair_panel(), M7-4, and the
+   │                              server-driven "Takip / CRM" tab from _crm_panel(), M7-5)
    ▼
 services/context.py   build_context(): normalized, top-N "agent context"; the action queue comes from
    │                  registered sources (services/actions.py + action_sources.py), ranked by
@@ -54,6 +55,9 @@ services/opportunities.py  M7-3: cross-sell association model at anagrup level f
 services/fairs.py / fair_store.py / fair_center.py  M7-4 Fuar Merkezi: FUAR-only historical index from the
                       already-read sales frame (private) + local SQLite fair campaigns (manual funnel, notes,
                       next-action dates) + read-only candidate segments; GET/POST/PUT /api/fairs/*; never AI (D-045)
+services/crm_store.py / crm.py  M7-5 lightweight CRM: append-only interactions (memory kind crm_contact) + one
+                      current follow-up per customer (crm_followups); coverage always incomplete, no person
+                      metrics; due follow-ups → Günlük Satış "Takip Zamanı"; GET/POST/PUT /api/crm/*; never AI (D-046)
 ```
 
 ## Important files
@@ -85,6 +89,8 @@ services/fairs.py / fair_store.py / fair_center.py  M7-4 Fuar Merkezi: FUAR-only
 | `services/fairs.py` | M7-4: historical FUAR editions (M6-2 label grammar, FUAR only, order grain, Nettutar label, data-quality counts; no conversion window / ROI / attendance) (`docs/m7_fair_command_center.md`, D-045) |
 | `services/fair_store.py` | M7-4: SQLite fair campaigns, members (manual funnel stage, next-action date, note) and audit history; parameterized SQL, no logging |
 | `services/fair_center.py` | M7-4: campaign views, KAPALI-safe manual curation, read-only candidate segments, ERP evidence vs funnel, Customer 360 campaign context |
+| `services/crm_store.py` | M7-5: SQLite CRM storage — safe `memory` column migration, append-only `crm_contact` interactions, `crm_followups` (one current follow-up per customer); parameterized SQL, no logging (`docs/m7_lightweight_crm.md`, D-046) |
+| `services/crm.py` | M7-5: CRM rules and views — validation against Customer 360, KAPALI follow-up rule, incomplete coverage, counts-only summary, due lists, orphan counting, request-time `crm_followup` task rows |
 | `services/importers/butce.py` | M6-6: Bütçe (owner only) → cell-level facts (sales blocks by segment and month, rates, expense groups, BÜTÇE ÖZET panels) with validity and a coverage map; invalid and externally dependent cells are isolated, never repaired; source status `partially_usable`, never authoritative (`docs/m6_butce.md`, D-041); explicit file only; not used by M5 |
 | `tests/fixtures/xlsx_synth.py` | Runtime OOXML writer for synthetic workbooks with cached formulas, error cells and external links |
 | `tests/test_m5_browser.py` | Playwright smoke tests: real FastAPI + Chromium, synthetic data, disabled/mock AI |
@@ -125,7 +131,7 @@ services/fairs.py / fair_store.py / fair_center.py  M7-4 Fuar Merkezi: FUAR-only
 | 4 | Live macro data (TCMB/TÜİK inflation, FX) | later |
 | 5 | "✨ AI Aksiyon Merkezi" tab: deterministic action queue first, AI on demand (design: `docs/m5_action_center.md`) | **complete** (M5-1 to M5-6: backend, read-only tab, action state, drafts + drawer, controlled refresh, browser verification) |
 | 6 | Additional data sources / sales intelligence foundation: validated importers for hedef raporu, detailed collections, Trodat sales, gider/gelir, kredi takip, bütçe (`docs/roadmap_m6_m7.md`) | in progress: M6-0 source inventory done (`docs/m6_source_inventory.md`, D-034); M6-1 importer framework done (`services/importers/`, D-035); M6-2 order-source normalization done (D-036); M6-3 Hedef importer done (D-037); M6-4 blocked (missing export), so the Kredi importer was pulled forward (D-038); M6-5 Trodat importer done (D-039); M6-6 Gider/Gelir done (D-040); M6-6 Bütçe done (D-041) |
-| 7 | Sales operating system: daily sales queue, customer 360, cross-sell, January fair command center, light CRM, new-buyer discovery | in progress: M7-1 Customer 360 (D-042), M7-2 Günlük Satış (D-043), M7-3 cross-sell + opportunity / territory intelligence (D-044) and M7-4 Fuar Merkezi (D-045) done; next M7-5 lightweight CRM / follow-up |
+| 7 | Sales operating system: daily sales queue, customer 360, cross-sell, January fair command center, light CRM, new-buyer discovery | in progress: M7-1 Customer 360 (D-042), M7-2 Günlük Satış (D-043), M7-3 cross-sell + opportunity / territory intelligence (D-044) and M7-4 Fuar Merkezi (D-045) and M7-5 lightweight CRM / follow-up (D-046) done; next M7-6 owner / management views + polish |
 | — | Multi-user / remote deployment (auth, admin and salesperson roles, private deployment, backups) | future, out of scope for M5 (D-016) |
 
 ## Product principle (D-015)

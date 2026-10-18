@@ -165,7 +165,7 @@ def test_campaign_workflow(browser, tmp_path):
         page = open_page(browser)
         page.goto(srv["base"] + "/")
         tabs = page.eval_on_selector_all(".tab", "els => els.map(e => e.dataset.t)")
-        assert tabs[-5:] == ["sq", "c360", "opp", "fair", "ai"] and page.inner_text('.tab[data-t="fair"]') == "Fuar Merkezi"
+        assert tabs[-6:] == ["sq", "c360", "opp", "fair", "crm", "ai"] and page.inner_text('.tab[data-t="fair"]') == "Fuar Merkezi"
         assert not any("/api/fairs" in u for _, u, _ in page.requests)                          # (1) lazy
         open_fair(page, srv["base"])
         assert page.is_visible("#fair .fm-empty") and "Henüz fuar kampanyası yok" in page.inner_text("#fair .fm-empty")
@@ -266,6 +266,7 @@ def test_daily_sales_fair_filter_and_draft(browser, tmp_path):
         page.click('.tab[data-t="sq"]')
         page.wait_for_selector("#sq .sq-card")
         page.click('#sq .sq-f[data-k="fair_followup"]')
+        page.wait_for_selector('#sq .sq-f.on[data-k="fair_followup"]')        # filtered list rendered, not 'all'
         page.wait_for_selector(f'#sq .sq-card[data-code="{P[17]}"]')
         codes = page.eval_on_selector_all("#sq .sq-card", "els => els.map(e => e.dataset.code)")
         assert codes == [P[17]]                                                                 # (13) P18: no date

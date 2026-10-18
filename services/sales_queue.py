@@ -29,10 +29,12 @@ from services import store as ST
 #: precedence, invoice-account mapping); `sales` reasons resolve directly to the canonical customer. The keys equal the
 #: categories registered with the `sales_queue` surface (services/actions.py, tested). M7-3 adds `cross_sell`.
 QUEUE_CATEGORIES: dict[str, str] = {"collections": "collection", "winback": "sales", "real_decline": "sales",
-                                    "cross_sell": "sales", "fair_followup": "sales"}
-#: Conversation sequence (D-043, extended by D-044 and D-045): collections first, then reactivation (winback), then a
-#: due fair task, then the rest by score. Sequence only; scores never change.
-SEQUENCE_RANK = {"collections": 0, "winback": 1, "fair_followup": 2}
+                                    "cross_sell": "sales", "fair_followup": "sales", "crm_followup": "sales"}
+#: Conversation sequence (D-043, extended by D-044, D-045 and D-046): collections first, then a due explicit CRM
+#: follow-up, then reactivation (winback), then a due fair task, then the rest by score. Sequence only; scores never
+#: change. A reason may override its kind with `queue_kind` ("operational": a CRM collection / service follow-up,
+#: resolved to the customer and kept for KAPALI customers; it never makes the card collection-first).
+SEQUENCE_RANK = {"collections": 0, "crm_followup": 1, "winback": 2, "fair_followup": 3}
 FILTERS = ("all", "collection_first", *QUEUE_CATEGORIES)
 LEGACY_REP_PREFIX = "Temsilci:"   # M5 action fact from the sales file's cached lookup (DQ-5): never shown in M7
 DRAFT_PURPOSES = ("collection", "offer", "winback", "sales_followup", "fair_invite")
@@ -57,6 +59,13 @@ def fair_task_actions(today: str | None = None) -> list[dict]:
     return [A.validate(a) for a in AS.produce_fair_followup({"fair_tasks": rows})]
 
 
+def crm_task_actions(today: str | None = None) -> list[dict]:
+    """M7-5: due explicit CRM follow-ups as contract actions, from local SQLite state only (no Excel, no AI)."""
+    from services import action_sources as AS
+    from services import crm as CRM
+    return [A.validate(a) for a in AS.produce_crm_followup({"crm_tasks": CRM.due_task_rows(today)})]
+
+
 def build_queue(ctx, snap, *, statuses: dict | None = None, limit: int | None = None, flt: str = "all",
                 upsert: bool = True, today: str | None = None) -> dict:
     """Assemble the queue from the live context's private candidates, the due fair tasks (M7-4) and the matching
@@ -65,7 +74,7 @@ def build_queue(ctx, snap, *, statuses: dict | None = None, limit: int | None = 
     if candidates is None:
         raise QueueUnavailable("queue_candidates_unavailable",
                                "Günlük Satış adayları bu bağlamda yok; verileri yenileyin.")
-    candidates = tuple(candidates) + tuple(fair_task_actions(today))
+    candidates = tuple(candidates) + tuple(fair_task_actions(today)) + tuple(crm_task_actions(today))
     limit = max(1, min(int(C.MAX_DAILY_SALES_QUEUE if limit is None else limit), C.MAX_SALES_QUEUE_LIMIT))
     flt = flt if flt in FILTERS else "all"
     statuses = ST.get_statuses() if statuses is None else statuses
@@ -82,6 +91,7 @@ def build_queue(ctx, snap, *, statuses: dict | None = None, limit: int | None = 
         if kind is None or a.get("entity_type") != "customer":
             diag["other_categories_ignored"] += 1
             continue
+        kind = a.get("queue_kind") or kind
         diag["candidate_reasons_by_category"][a["category"]] += 1
         row = statuses.get(a["action_id"], {"status": "open"})
         if ST.is_hidden(row):
@@ -110,7 +120,8 @@ def build_queue(ctx, snap, *, statuses: dict | None = None, limit: int | None = 
             "action_id": a["action_id"], "source": a.get("source"), "category": a["category"],
             "category_label": cat.label_tr if cat else a["category"], "kind": kind,
             "reason": a.get("reason"), "score": float(a["score"]), "priority": a.get("priority"),
-            "confidence": a.get("confidence"), "draft_purpose": cat.draft_purpose if cat else None,
+            "confidence": a.get("confidence"),
+            "draft_purpose": a["draft_purpose"] if "draft_purpose" in a else (cat.draft_purpose if cat else None),
             "status": row.get("status", "open"), "defer_until": row.get("defer_until"),
             "scope": scope, "account_code": entity if kind == "collection" else None,
             "facts": [f for f in a.get("facts", []) if not str(f).startswith(LEGACY_REP_PREFIX)],
@@ -125,7 +136,7 @@ def build_queue(ctx, snap, *, statuses: dict | None = None, limit: int | None = 
     for code, reasons in grouped.items():
         reasons.sort(key=reason_key)
         collections = [r for r in reasons if r["kind"] == "collection"]
-        primary = reasons[0]          # collections → winback → highest score (sequence only)
+        primary = reasons[0]          # collections → CRM follow-up → winback → fair → highest score (sequence)
         queue_score = max(r["score"] for r in reasons)
         c = snap.customers[code]
         e = snap.master_entry(code)
@@ -143,14 +154,18 @@ def build_queue(ctx, snap, *, statuses: dict | None = None, limit: int | None = 
                              "message": "Tahsilat fatura hesabı düzeyindedir; Müşteri 360'ta hesap ayrıntısı var."})
         ordered = reasons
         purposes = ["collection"] if closed is True else list(DRAFT_PURPOSES)
-        default_purpose = "collection" if (collections or closed is True) else (primary["draft_purpose"]
-                                                                               or "sales_followup")
+        present = [r["draft_purpose"] for r in ordered if r["draft_purpose"]]
+        # M7-5: a CRM service / other follow-up has no fitting draft purpose; never offer a misclassified draft.
+        available = ("collection" in present) if closed is True else bool(present)
+        default_purpose = "collection" if (collections or closed is True) else (present[0] if present
+                                                                               else "sales_followup")
         cards.append({"customer_code": code, "display_name": c["display_name"],
                       "last_order_date": c["last_order_date"], "closed": closed, "master_status": mstatus,
                       "queue_score": queue_score, "priority": C.band(queue_score),
                       "collection_first": bool(collections), "primary_action_id": primary["action_id"],
                       "reasons": ordered, "warnings": warnings, "customer360_available": True,
-                      "draft": {"default_purpose": default_purpose, "allowed_purposes": purposes,
+                      "draft": {"available": available, "default_purpose": default_purpose,
+                                "allowed_purposes": purposes,
                                 "collection_target": collections[0]["account_code"] if collections else None,
                                 "sales_target": code}})
     cards.sort(key=lambda k: (-k["queue_score"], not k["collection_first"], k["customer_code"]))

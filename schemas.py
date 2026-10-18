@@ -555,6 +555,183 @@ class C360Opportunities(BaseModel):
     notes: List[str] = []
 
 
+# ---------- M7-5 lightweight CRM (local, explicit; never AI) ----------
+CrmChannel = Literal["phone", "whatsapp", "email", "visit", "other"]
+CrmPurpose = Literal["sales_followup", "collection", "service", "other"]
+
+
+class CrmInteractionOut(BaseModel):
+    id: int
+    occurred_on: Optional[str] = None
+    channel: Optional[str] = None
+    channel_label: Optional[str] = None
+    purpose: Optional[str] = None
+    purpose_label: Optional[str] = None
+    outcome: Optional[str] = None
+    next_action: Optional[str] = None
+    next_followup: Optional[str] = None
+    owner_label: Optional[str] = None    # manual, non-authoritative workflow text
+    note: Optional[str] = None           # local only; never logged, never sent to AI
+    recorded_at: Optional[str] = None
+
+
+class CrmFollowupOut(BaseModel):
+    purpose: str
+    purpose_label: str
+    due_date: str
+    due_state: Optional[Literal["overdue", "today", "upcoming", "later"]] = None
+    next_action: Optional[str] = None
+    owner_label: Optional[str] = None
+    updated_at: Optional[str] = None
+    suppressed_kapali: bool = False
+
+
+class CrmLegacyItem(BaseModel):
+    ts: Optional[str] = None
+    kind: Optional[str] = None
+    detail: Optional[str] = None
+    next_followup: Optional[str] = None
+
+
+class CrmLegacy(BaseModel):
+    count: int
+    label: str
+    items: List[CrmLegacyItem]
+
+
+class CrmCustomer(BaseModel):
+    customer_code: str
+    coverage_status: Literal["incomplete"] = "incomplete"
+    coverage_label: str
+    coverage_note: str
+    unknown_note: str
+    closed: Optional[bool] = None
+    master_status: str
+    warnings: List[Dict[str, str]] = []
+    allowed_followup_purposes: List[str]
+    structured_interactions: int
+    last_interaction: Optional[CrmInteractionOut] = None
+    followup: Optional[CrmFollowupOut] = None
+    interactions: List[CrmInteractionOut]
+    legacy: CrmLegacy
+    ai_used: Literal[False] = False
+
+
+class CrmFollowupSet(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    purpose: CrmPurpose
+    due_date: dt.date
+    next_action: Optional[str] = Field(default=None, max_length=160)
+    owner_label: Optional[str] = Field(default=None, max_length=80)
+
+    @model_validator(mode="after")
+    def _bounds(self):
+        if not (dt.date(2000, 1, 1) <= self.due_date <= dt.date(2099, 12, 31)):
+            raise ValueError("due_date out of range")
+        return self
+
+
+class CrmFollowupUpdate(BaseModel):
+    """PUT body: either `clear: true`, or a full current follow-up definition (one per customer)."""
+    model_config = ConfigDict(extra="forbid")
+    clear: bool = False
+    purpose: Optional[CrmPurpose] = None
+    due_date: Optional[dt.date] = None
+    next_action: Optional[str] = Field(default=None, max_length=160)
+    owner_label: Optional[str] = Field(default=None, max_length=80)
+
+    @model_validator(mode="after")
+    def _check(self):
+        if not self.clear:
+            if self.purpose is None or self.due_date is None:
+                raise ValueError("purpose and due_date are required unless clear is true")
+            if not (dt.date(2000, 1, 1) <= self.due_date <= dt.date(2099, 12, 31)):
+                raise ValueError("due_date out of range")
+        return self
+
+
+class CrmInteractionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    occurred_on: dt.date
+    channel: CrmChannel
+    purpose: Optional[CrmPurpose] = None
+    outcome: Optional[str] = Field(default=None, max_length=120)
+    next_action: Optional[str] = Field(default=None, max_length=160)
+    owner_label: Optional[str] = Field(default=None, max_length=80)
+    note: Optional[str] = Field(default=None, max_length=500)
+    followup: Optional[CrmFollowupSet] = None     # explicit; never inferred from the outcome
+
+    @model_validator(mode="after")
+    def _check(self):
+        if self.occurred_on < dt.date(2000, 1, 1):
+            raise ValueError("occurred_on out of range")
+        return self
+
+
+class CrmFollowupRow(CrmFollowupOut):
+    customer_code: str
+    display_name: str
+    closed: Optional[bool] = None
+    master_status: str
+    warnings: List[Dict[str, str]] = []
+
+
+class CrmFollowupList(BaseModel):
+    mode: Literal["due", "today", "upcoming", "all"]
+    today: str
+    days: int
+    total: int
+    limit: int
+    truncated: bool
+    orphan_followups: int
+    items: List[CrmFollowupRow]
+    coverage_status: Literal["incomplete"] = "incomplete"
+    coverage_note: str
+    ai_used: Literal[False] = False
+
+
+class CrmRecentItem(BaseModel):
+    id: int
+    customer_code: str
+    display_name: str
+    occurred_on: Optional[str] = None
+    channel: Optional[str] = None
+    channel_label: Optional[str] = None
+    purpose_label: Optional[str] = None
+    outcome: Optional[str] = None
+    has_next_action: bool
+
+
+class CrmRecent(BaseModel):
+    limit: int
+    items: List[CrmRecentItem]
+    note: str
+    coverage_note: str
+    ai_used: Literal[False] = False
+
+
+class CrmSummary(BaseModel):
+    """Counts only: system coverage and workload. Never per person / owner / salesperson (D-024)."""
+    model_config = ConfigDict(extra="forbid")
+    coverage_status: Literal["incomplete"] = "incomplete"
+    coverage_label: str
+    coverage_note: str
+    unknown_note: str
+    today: str
+    total_customers: int
+    active_customers: int
+    customers_with_structured_contact: int
+    active_customers_with_structured_contact: int
+    structured_interactions: int
+    legacy_memory_rows: int
+    current_followups: int
+    overdue: int
+    due_today: int
+    upcoming_7d: int
+    orphan_customer_records: int
+    ai_used: Literal[False] = False
+
+
 class Customer360Detail(BaseModel):
     customer_code: str
     as_of_data_date: str
@@ -568,6 +745,7 @@ class Customer360Detail(BaseModel):
     receivables: C360Receivables
     hedef: C360Hedef
     events: C360Events
+    crm: Optional[CrmCustomer] = None    # M7-5: CRM / Takip (local, explicit)
     activity: C360Activity
     warnings: List[C360Warning]
     ai_used: Literal[False] = False
@@ -607,7 +785,7 @@ class SalesQueueReason(BaseModel):
     source: Optional[str] = None
     category: str
     category_label: str
-    kind: Literal["collection", "sales"]
+    kind: Literal["collection", "sales", "operational"]
     reason: Optional[str] = None
     score: float
     priority: Optional[Priority] = None
@@ -626,6 +804,7 @@ class SalesQueueWarning(BaseModel):
 
 
 class SalesQueueDraft(BaseModel):
+    available: bool = True               # M7-5: False when no reason has a fitting draft purpose
     default_purpose: str
     allowed_purposes: List[str]
     collection_target: Optional[str] = None

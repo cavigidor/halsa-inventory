@@ -1,10 +1,10 @@
 # TASKS.md — active backlog
 
 Rules: one *Current* task at a time. Each task must be executable in one bounded session.
-Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1, M7-2 and M7-3 are merged; M7-4 (Fuar Merkezi) is done (PR pending); M7-5 is not started.
+Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-4 are merged; M7-5 (lightweight CRM / follow-up) is done (PR pending); M7-6 is not started.
 
 ## Current
-- [ ] **Review and merge the M7-4 Fuar Merkezi PR** (`claude/m7-4-fair-command-center`).
+- [ ] **Review and merge the M7-5 lightweight CRM PR** (`claude/m7-5-lightweight-crm`).
 
 ## Next (M7, large checkpoints; start each only when moved to *Current*)
 - [ ] **Owner: cross-sell threshold review.** On real data the initial guards give a broad population (78 % of active
@@ -14,7 +14,9 @@ Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi,
   exact ERP stem once the orders exist). Curate the invite list explicitly; segments only filter.
 - [ ] **Owner: fair decisions:** ETKİNLİK / SAHA taxonomy, post-fair conversion window, fair cost attribution (for any
   future ROI), recovery of historical invitation / attendance lists, and whether `FAIR_TASK_SCORE` (55) fits.
-- [ ] **M7-5 — Lightweight CRM / follow-up workflow.**
+- [ ] **Owner: CRM decisions (D-046).** When (if ever) logging is standardized enough to drop "Eksik kayıt
+  olabilir"; whether a CRM export exists to import as legacy history; whether `CRM_FOLLOWUP_SCORE` (60) fits. Owner
+  labels stay free text until a salesperson-of-record decision.
 - [ ] **M7-6 — Owner / management views + integration / polish.**
 - [ ] **Owner (optional): Customer 360 Hedef.** To show Hedef context, set `HEDEF_PATH` (and optionally
   `HEDEF_SNAPSHOT_DATE`) to one explicitly chosen file. That is not a file-of-record decision.

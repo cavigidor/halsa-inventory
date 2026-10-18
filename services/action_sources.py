@@ -37,6 +37,11 @@ CAT_CROSS_SELL = A.Category("cross_sell", "Çapraz Satış", "#047857", "custome
 # M7-4 (D-045): a due task from an explicit fair campaign (user-maintained state, request time). Günlük Satış only.
 CAT_FAIR_FOLLOWUP = A.Category("fair_followup", "Fuar Takibi", "#1d4ed8", "customer", "fair_campaign",
                                "fair_invite", surfaces=(A.SURFACE_SALES_QUEUE,))
+# M7-5 (D-046): a due explicit CRM follow-up (request time, local SQLite). Günlük Satış only. The draft purpose depends
+# on the follow-up's purpose (collection / sales_followup; none for service / other), so the category has none.
+CAT_CRM_FOLLOWUP = A.Category("crm_followup", "Takip Zamanı", "#0f766e", "customer", "crm_followup", None,
+                              surfaces=(A.SURFACE_SALES_QUEUE,))
+CRM_DRAFT_PURPOSE = {"collection": "collection", "sales_followup": "sales_followup"}
 
 A.DEFAULT_REASONS.update({
     "collections": "Vadesi geçen alacak tahsilat öncelik eşiğini aştı.",
@@ -45,6 +50,7 @@ A.DEFAULT_REASONS.update({
     "real_decline": "Bu yılki ciro, enflasyondan arındırıldığında geçen yılın aynı döneminin altında.",
     "cross_sell": "Benzer aktif müşterilerde sık görülen bir ürün grubundan bu müşteri hiç alım yapmadı.",
     "fair_followup": "Fuar kampanyasında kayıtlı takip tarihi geldi.",
+    "crm_followup": "Planlanan müşteri takibi geldi/geçti.",
 })
 
 
@@ -181,6 +187,29 @@ def produce_fair_followup(inp):
     return out
 
 
+def produce_crm_followup(inp):
+    """M7-5: one action per due current CRM follow-up (rows from services/crm_store.due_followups, passed in at
+    REQUEST time by the sales queue). Facts = purpose, due date, next action (never the note or owner label), so the
+    id changes only when the definition changes. Fixed operational score; confidence "high" means the TASK was
+    entered explicitly, not that a sale is likely. collection / service purposes stay visible for KAPALI customers
+    (queue kind "operational"); sales / other are sales outreach (queue kind "sales")."""
+    from services import crm_store as CS
+    out = []
+    for r in inp.get("crm_tasks") or []:
+        label = CS.PURPOSE_LABELS.get(r["purpose"], r["purpose"])
+        nxt = (r.get("next_action") or "").strip()
+        facts = [f"Takip amacı: {label}", f"Takip tarihi: {r['due_date']}", f"Sonraki iş: {nxt or '—'}"]
+        reason = "Planlanan müşteri takibi geldi/geçti." + (f" Sonraki iş: {nxt}." if nxt else "")
+        reason += " Bu, kullanıcının girdiği bir takip tarihidir; satış olasılığı veya müşteri değeri anlamına gelmez."
+        a = A.make_action(source=CAT_CRM_FOLLOWUP.source, category="crm_followup", entity_type="customer",
+                          entity_id=r["customer_code"], title=f"TAKİP — {label}", reason=reason, facts=facts,
+                          drivers={"purpose": r["purpose"]}, score=C.CRM_FOLLOWUP_SCORE, confidence="high")
+        a["queue_kind"] = "operational" if r["purpose"] in ("collection", "service") else "sales"
+        a["draft_purpose"] = CRM_DRAFT_PURPOSE.get(r["purpose"])
+        out.append(a)
+    return out
+
+
 # Registration order = M1 order (tie-break for equal scores); M7 sources are registered last. Idempotent on re-import.
 _BUILTINS = (
     A.ActionSource(CAT_COLLECTIONS.source, (CAT_COLLECTIONS,), produce_collections),
@@ -189,6 +218,7 @@ _BUILTINS = (
     A.ActionSource(CAT_REAL_DECLINE.source, (CAT_REAL_DECLINE,), produce_real_decline),
     A.ActionSource(CAT_CROSS_SELL.source, (CAT_CROSS_SELL,), produce_cross_sell),
     A.ActionSource(CAT_FAIR_FOLLOWUP.source, (CAT_FAIR_FOLLOWUP,), produce_fair_followup),
+    A.ActionSource(CAT_CRM_FOLLOWUP.source, (CAT_CRM_FOLLOWUP,), produce_crm_followup),
 )
 for _s in _BUILTINS:
     if all(x.name != _s.name for x in A.sources()):

@@ -258,7 +258,10 @@ milestone (D-016).
 >   historical intelligence from ERP attribution (no conversion window, ROI or attendance claims) plus reusable,
 >   manually curated fair campaigns with a manual funnel; due fair tasks in Günlük Satış (fixed score 55);
 >   read-only candidate segments that never auto-enroll.
-> - **M7-5 — Lightweight CRM / follow-up workflow.**
+> - **M7-5 — Lightweight CRM / follow-up workflow: done** (D-046, `docs/m7_lightweight_crm.md`). Append-only
+>   structured interactions plus one explicit current follow-up per customer; coverage always "Eksik kayıt olabilir"
+>   (D-024), no person metrics, nothing inferred; due follow-ups in Günlük Satış as "Takip Zamanı" (fixed score 60);
+>   KAPALI follow-ups only for collection / service; no CRM content to AI.
 > - **M7-6 — Owner / management views + integration / polish.**
 
 ## 5. Sales organization and CRM data quality (D-024)
