@@ -222,7 +222,7 @@ def m_collections(path,df=None):
     return rows, owed_map
 
 # ---------- oluştur ----------
-def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True):
+def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True):
     """sources/frames (M5-5): a frozen source selection and the already-read raw frames, so a controlled
     refresh builds from exactly what it validated. stats_out (dict): filled with build totals for verification."""
     today=today or dt.date.today()
@@ -302,7 +302,7 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     meta={'date':d_tr,'stock':os.path.basename(sp) if sp else '','sales':os.path.basename(ep) if ep else '',
           'aging':os.path.basename(ap) if ap else '','tiers':tier_counts,'total':total,'has_aging':has_aging,
           'asof':_asof_iso(sdf)}
-    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel,opp_panel=opp_panel,fair_panel=fair_panel))
+    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel,opp_panel=opp_panel,fair_panel=fair_panel,crm_panel=crm_panel))
     if stats_out is not None:
         stats_out.update({'asof':meta['asof'],'overdue_total':overdue_total,'overstock_value':over_val,
                           'tabs':list(modules.keys()),'products':total,'lapsed':len(lap),'low':len(low),
@@ -899,6 +899,9 @@ _C360_CSS=r"""
 #c360 .c3-types{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px}
 #c360 .c3-type{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:3px 10px}
 #c360 .c3-list{list-style:none;padding:0;margin:0}
+#c360 .c3-crmacts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+#c360 .c3-crmgo{border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-size:12px;font-weight:600;padding:6px 11px;border-radius:8px;cursor:pointer;min-height:34px}
+#c360 [data-sec="crm"] .v,#c360 [data-sec="crm"] li,#c360 .c3-crmcov{overflow-wrap:anywhere}
 #c360 .c3-list li{padding:5px 0;border-bottom:1px solid var(--line);font-size:13px}
 #c360 [hidden]{display:none!important}
 #c360 .c3-hit,#c360 .c3-name,#c360 .c3-warns li,#c360 .c3-state,#c360 .c3-kv .v,#c360 .c3-note{overflow-wrap:anywhere}
@@ -1041,7 +1044,7 @@ function renderDetail(x){
   const g=el('div','c3-grid'); d.append(g);
   g.append(identityCard(x), salesCard(x.sales||{}), productsCard(x.products||{}), opportunitiesCard(x.opportunities||{}),
            receivablesCard(x.receivables||{}),
-           hedefCard(x.hedef||{}), eventsCard(x.events||{}), activityCard(x.activity||{}));
+           hedefCard(x.hedef||{}), eventsCard(x.events||{}), crmCard(x.crm, x.customer_code), activityCard(x.activity||{}));
 }
 function identityCard(x){
   const c=card('Kimlik'), id=x.identity||{}, m=x.master||{};
@@ -1152,6 +1155,25 @@ function eventsCard(e){
   c.append(table([['Tarih',0,1],['Tür'],['Dönem yılı',1],['Etkinlik']],(e.recent||[]).map(r=>[fmtDate(r.order_date),
     (TYPES.find(t=>t[0]===r.source_type)||[0,r.source_type])[1],r.edition_year==null?'—':String(r.edition_year),r.event_name||'—'])));
   c.append(el('p','c3-note',e.note||''));
+  return c;
+}
+function crmCard(m,code){   // M7-5: read-only CRM summary; explicit writes happen in the Takip / CRM tab
+  const c=card('CRM / Takip'); c.dataset.sec='crm';
+  const go=(label,cls)=>{const b=el('button','c3-crmgo '+cls,label); b.type='button';
+    b.addEventListener('click',()=>{if(window.StockAgentCRM&&typeof window.StockAgentCRM.open==='function') window.StockAgentCRM.open(code);}); return b;};
+  if(!m){c.append(el('p','c3-note','CRM bilgisi şu anda kullanılamıyor.')); return c;}
+  const w=el('p','c3-note c3-crmcov',(m.coverage_label||'Eksik kayıt olabilir')+': '+(m.coverage_note||'')); w.dataset.cov=m.coverage_status||''; c.append(w);
+  (m.warnings||[]).forEach(x=>c.append(el('p','c3-note',x.message)));
+  const li=m.last_interaction, fu=m.followup;
+  c.append(kv('Son yapılandırılmış temas',li?fmtDate(li.occurred_on)+' · '+(li.channel_label||''):'kayıt yok (bilinmiyor)'));
+  c.append(kv('Son sonuç',li&&li.outcome?li.outcome:'—'));
+  c.append(kv('Sonraki iş',fu&&fu.next_action?fu.next_action:'—'));
+  c.append(kv('Sonraki takip',fu?fmtDate(fu.due_date)+' · '+(fu.purpose_label||''):'—'));
+  if(fu&&fu.owner_label) c.append(kv('Sorumlu etiketi (elle)',fu.owner_label));
+  const ul=el('ul','c3-list'); (m.interactions||[]).slice(0,5).forEach(i=>ul.append(el('li',null,fmtDate(i.occurred_on)+' · '+(i.channel_label||'')+(i.outcome?' · '+i.outcome:''))));
+  if((m.interactions||[]).length) c.append(el('p','c3-note','Son yapılandırılmış etkileşimler'),ul);
+  if(m.legacy&&m.legacy.count) c.append(el('p','c3-note','Eski (yapılandırılmamış) notlar: '+fmtNum(m.legacy.count)+' — "Aksiyonlar ve geçmiş" kartında.'));
+  const row=el('div','c3-crmacts'); row.append(go('Etkileşim kaydet','c3-crmlog'),go('Takip planla','c3-crmplan')); c.append(row);
   return c;
 }
 function activityCard(a){
@@ -1345,8 +1367,9 @@ function card(it){
   c.append(chips);
   const acts=el('div','sq-acts'), code=it.customer_code;
   acts.append(btn('sq-toggle','Gerekçeler ('+reasons.length+')',()=>{st.open.has(code)?st.open.delete(code):st.open.add(code); replace(code);}),
-              btn('sq-c360','Müşteri 360',()=>openC360(code)),
-              btn('sq-drafto','Mesaj taslağı',()=>{const d=st.draft[code]; if(d) d.open=!d.open; else st.draft[code]={open:true,purpose:it.draft.default_purpose,channel:'whatsapp'}; replace(code);}));
+              btn('sq-c360','Müşteri 360',()=>openC360(code)));
+  if(!it.draft||it.draft.available!==false)   // M7-5: no draft when no reason has a fitting purpose (CRM service / other)
+    acts.append(btn('sq-drafto','Mesaj taslağı',()=>{const d=st.draft[code]; if(d) d.open=!d.open; else st.draft[code]={open:true,purpose:it.draft.default_purpose,channel:'whatsapp'}; replace(code);}));
   c.append(acts);
   if(st.open.has(code)){const box=el('div','sq-reasons'); reasons.forEach(r=>box.append(reasonRow(r,code))); c.append(box);}
   if(st.draft[code]&&st.draft[code].open) c.append(draftPanel(it));
@@ -1936,7 +1959,254 @@ def _fair_panel(meta):
     return btn,block
 
 
-def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True):
+# ---------------- M7-5: Takip / CRM tab (lightweight, explicit customer follow-up) ----------------
+# Local CRM state via /api/crm/* (append-only interactions + one current follow-up per customer). Coverage is always
+# shown as incomplete (D-024); no person/owner aggregation anywhere; nothing is inferred; no AI; textContent only.
+_CRM_CSS=r"""
+#crm .cr-cov{background:var(--warn-bg);border:1px solid #f5d9a8;color:var(--warn);border-radius:10px;padding:10px 13px;margin:6px 0 12px;font-size:13px}
+#crm .cr-cov b{display:inline-block;margin-right:6px}
+#crm .cr-state{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:8px 0 12px}
+#crm .cr-state.off,#crm .cr-state.err{border-color:#f3c4c4;background:#fdf3f3;color:#b42318;font-weight:600}
+#crm .cr-sec{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:0 0 12px;min-width:0}
+#crm .cr-sec h3{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;margin:0 0 8px}
+#crm .cr-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,140px),1fr));gap:8px}
+#crm .cr-tile{border:1px solid var(--line);border-radius:8px;padding:7px 9px;min-width:0}
+#crm .cr-tile .n{font-size:18px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+#crm .cr-tile .l{font-size:12px;color:var(--muted)}
+#crm .cr-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px}
+#crm .cr-btn{border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-size:12px;font-weight:600;padding:6px 11px;border-radius:8px;cursor:pointer}
+#crm .cr-btn.pri{background:var(--ink);border-color:var(--ink);color:#fff}
+#crm .cr-btn:disabled{opacity:.5;cursor:not-allowed}
+#crm select,#crm input[type=text],#crm input[type=date],#crm textarea{border:1px solid var(--line);border-radius:6px;padding:5px 7px;font:inherit;font-size:13px;color:var(--ink);background:var(--card);max-width:100%;min-width:0}
+#crm textarea{width:100%;min-height:54px}
+#crm .cr-q{flex:1 1 320px}
+#crm .cr-card{border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin:0 0 8px;min-width:0}
+#crm .cr-card.overdue{border-left:4px solid var(--crit)}#crm .cr-card.today{border-left:4px solid var(--gold)}
+#crm .cr-name{font-weight:800;overflow-wrap:anywhere}
+#crm .cr-code{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:12px;color:var(--muted)}
+#crm .cr-chip{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--muted);white-space:nowrap}
+#crm .cr-chip.overdue{color:#b42318;border-color:#f3c4c4}#crm .cr-chip.today{color:var(--warn);border-color:#f5d9a8}
+#crm .cr-kapali{font-size:10px;font-weight:800;color:#fff;background:var(--crit);border-radius:4px;padding:1px 6px}
+#crm .cr-warn{background:var(--warn-bg);border:1px solid #f5d9a8;color:var(--warn);border-radius:8px;padding:6px 9px;font-size:12px;margin:6px 0}
+#crm .cr-note,#crm .cr-muted{font-size:12px;color:var(--muted);margin:4px 0}
+#crm .cr-err{font-size:12px;color:#b42318;font-weight:600;margin:4px 0}
+#crm .cr-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:8px;border:1px dashed var(--line);border-radius:8px;padding:10px;margin:8px 0}
+#crm .cr-form label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted);min-width:0}
+#crm .cr-form .wide{grid-column:1/-1}
+#crm .cr-tl{list-style:none;padding:0;margin:0}
+#crm .cr-tl li{border-bottom:1px solid var(--line);padding:7px 0;font-size:13px}
+#crm .cr-hits{display:flex;flex-direction:column;gap:4px;margin:4px 0 8px}
+#crm .cr-hit{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid var(--line);border-radius:8px;padding:6px 9px;background:var(--card);font:inherit;text-align:left;cursor:pointer;color:var(--ink)}
+#crm .cr-toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:20;background:var(--ink);color:#fff;border-radius:10px;padding:9px 14px;font-size:13px;max-width:calc(100% - 32px)}
+#crm [hidden]{display:none!important}
+#crm h4,#crm .cr-note,#crm .cr-muted,#crm .cr-warn,#crm .cr-err,#crm .cr-tl li,#crm .cr-card,#crm .cr-cov{overflow-wrap:anywhere}
+@media(max-width:600px){#crm .cr-btn{min-height:36px}#crm .cr-toast{left:12px;right:12px;transform:none;max-width:none}}
+"""
+
+_CRM_BODY="""
+<h2 class="sec">Takip / CRM</h2>
+<div class="cr-cov" role="note"><b>Eksik kayıt olabilir.</b><span class="cr-covtext">CRM kayıtları henüz tüm müşteri temaslarını kapsamıyor. Bu veriler çalışan performansı karşılaştırmak için kullanılmaz.</span></div>
+<p class="note">Bir müşteriyle en son ne konuşuldu, sonuç ne, sıradaki iş ne ve ne zaman tekrar takip edilecek? Kayıtlar ve takip tarihleri yalnızca sizin girdiğiniz bilgilerdir; sistem sonraki tarih veya iş önermez. Yapay zekâ kullanılmaz.</p>
+<div class="cr-state" role="status" hidden></div>
+<section class="cr-sec" data-sec="summary" hidden><h3>Kapsam ve iş yükü (yalnızca sayılar)</h3><div class="cr-tiles"></div><p class="cr-note cr-unknown"></p></section>
+<section class="cr-sec" data-sec="due" hidden><h3>Zamanı gelen / gecikmiş takipler</h3><div class="cr-due"></div></section>
+<section class="cr-sec" data-sec="upcoming" hidden><h3>Yaklaşan takipler (7 gün)</h3><div class="cr-up"></div></section>
+<section class="cr-sec" data-sec="customer" hidden><h3>Müşteri ara / kayıt</h3>
+<div class="cr-row"><input type="text" class="cr-q" placeholder="Ad veya kod (Müşteri 360 araması)" aria-label="Müşteri ara"></div>
+<div class="cr-hits"></div><div class="cr-panel"></div></section>
+<section class="cr-sec" data-sec="recent" hidden><h3>Son etkileşimler</h3><p class="cr-note">Notlar burada gösterilmez; müşteriyi açınca görünür.</p><div class="cr-recent"></div></section>
+<div class="cr-toast" role="status" aria-live="polite" hidden></div>
+"""
+
+_CRM_JS=r"""
+(function(){
+'use strict';
+const root=document.getElementById('crm'), tabBtn=document.querySelector('.tab[data-t="crm"]');
+if(!root||!tabBtn) return;
+const POLL_MS=window.__CRM_POLL_MS||2000, POLL_MAX=window.__CRM_POLL_MAX||450;
+const H={'Content-Type':'application/json','X-StockAgent':'1'};   // local CSRF guard (D-020)
+const MSG={file:'Takip / CRM için panoyu http://127.0.0.1:8000/ üzerinden açın.',
+  offline:'Sunucu çalışmıyor. Terminalde uvicorn app:app --host 127.0.0.1 çalıştırıp http://127.0.0.1:8000 adresini açın. Diğer sekmeler normal çalışır.',
+  building:'Müşteri verisi hazırlanıyor…', fail:'Yüklenemedi', none:'Henüz yapılandırılmış CRM kaydı yok.'};
+const CH=[['phone','Telefon'],['whatsapp','WhatsApp'],['email','E-posta'],['visit','Ziyaret'],['other','Diğer']];
+const PU=[['sales_followup','Satış takibi'],['collection','Tahsilat'],['service','Hizmet / destek'],['other','Diğer']];
+const DUE={overdue:'Gecikmiş',today:'Bugün',upcoming:'Yaklaşan',later:'İleri tarih'};
+const AY=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+const st={started:false,code:null,seq:{},timers:{}};
+const $=s=>root.querySelector(s);
+function el(tag,cls,text){const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=String(text); return e;}
+function show(n,on){n.hidden=!on;}
+function state(t,k){const n=$('.cr-state'); n.textContent=t||''; n.className='cr-state'+(k?' '+k:''); show(n,!!t);}
+function fmtDate(iso){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||'')); return m?(+m[3])+' '+AY[+m[2]-1]+' '+m[1]:'—';}
+function num(v){return (v==null||!Number.isFinite(Number(v)))?'—':Number(v).toLocaleString('tr-TR');}
+function localToday(){const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function btn(cls,label,fn){const b=el('button','cr-btn'+(cls?' '+cls:''),label); b.type='button'; b.addEventListener('click',fn); return b;}
+function toast(t){const n=$('.cr-toast'); n.textContent=t; show(n,true); clearTimeout(st.timers.t); st.timers.t=setTimeout(()=>show(n,false),5000);}
+function sel(opts,val,cls,empty){const s=el('select',cls); if(empty!=null){const o=el('option',null,empty); o.value=''; s.append(o);}
+  opts.forEach(([k,l])=>{const o=el('option',null,l); o.value=k; s.append(o);}); s.value=val||''; if(s.selectedIndex<0&&s.options.length) s.selectedIndex=0; return s;}
+function input(type,cls,max){const i=el('input',cls); i.type=type; if(max) i.maxLength=max; return i;}
+async function api(path,opt){
+  let r; try{r=await fetch(path,opt||{headers:{'Accept':'application/json'}});}catch(e){const x=new Error('offline'); x.offline=true; throw x;}
+  let b=null; try{b=await r.json();}catch(e){b=null;}
+  if(!r.ok){const x=new Error('HTTP '+r.status); x.status=r.status; x.body=b; throw x;} return b;}
+function errText(e){if(e.offline) return MSG.offline; const d=e.body&&e.body.detail;
+  if(d&&typeof d==='object'&&!Array.isArray(d)) return d.message||(MSG.fail+' (HTTP '+e.status+')');
+  if(Array.isArray(d)) return 'Geçersiz giriş (alan uzunluğu veya tarih).'; return (typeof d==='string'&&d)||(MSG.fail+' (HTTP '+e.status+')');}
+function building(e){return e.status===503&&e.body&&e.body.detail&&e.body.detail.state==='building';}
+function openC360(code){const t=document.querySelector('.tab[data-t="c360"]'); if(t) t.click();
+  if(window.StockAgentC360&&typeof window.StockAgentC360.open==='function') window.StockAgentC360.open(code);}
+
+function start(){
+  if(st.started) return; st.started=true;
+  if(location.protocol==='file:'){state(MSG.file,'off'); return;}   // same-origin API only; no request
+  refresh(0);
+}
+async function refresh(n){
+  let s; try{s=await api('/api/crm/summary');}
+  catch(e){if(building(e)){state(n<POLL_MAX?MSG.building:'Müşteri verisi hâlâ hazırlanıyor.','wait'); if(n<POLL_MAX) setTimeout(()=>refresh(n+1),POLL_MS); return;}
+    state(errText(e),e.offline?'off':'err'); return;}
+  state(''); renderSummary(s); loadList('due','.cr-due','[data-sec="due"]'); loadList('upcoming','.cr-up','[data-sec="upcoming"]'); loadRecent();
+  show($('[data-sec="customer"]'),true); if(st.code) loadCustomer(st.code);
+}
+function renderSummary(s){
+  show($('[data-sec="summary"]'),true); const t=$('.cr-tiles'); t.replaceChildren();
+  [['total_customers','Müşteri 360 müşterisi'],['customers_with_structured_contact','Yapılandırılmış kaydı olan müşteri'],
+   ['active_customers_with_structured_contact','Aktif müşterilerden kaydı olan'],['current_followups','Güncel takip'],
+   ['overdue','Gecikmiş'],['due_today','Bugün'],['upcoming_7d','7 gün içinde']].forEach(([k,l])=>{const d=el('div','cr-tile'); d.dataset.k=k;
+    d.append(el('div','n',num(s[k])),el('div','l',l)); t.append(d);});
+  $('.cr-unknown').textContent=(s.unknown_note||'')+' Bu sayılar sistem kapsamını ve iş yükünü gösterir; kişi bazında sayım yapılmaz.'+(s.orphan_customer_records?' Güncel veride bulunmayan '+num(s.orphan_customer_records)+' müşteri kodunun CRM kaydı saklanıyor (gösterilmez).':'');
+}
+async function loadList(mode,boxSel,secSel){
+  show($(secSel),true); const box=$(boxSel);
+  let r; try{r=await api('/api/crm/followups?mode='+mode+'&days=7&limit=100');}catch(e){box.replaceChildren(el('p','cr-err',errText(e))); return;}
+  box.replaceChildren(); (r.items||[]).forEach(it=>box.append(fuCard(it)));
+  if(!(r.items||[]).length) box.append(el('p','cr-muted',mode==='due'?'Zamanı gelen takip yok.':'Yaklaşan takip yok.'));
+  if(r.truncated) box.append(el('p','cr-muted','İlk '+r.limit+' gösteriliyor (toplam '+r.total+').'));
+}
+function fuCard(it){
+  const c=el('div','cr-card '+(it.due_state||'')); c.dataset.code=it.customer_code; c.dataset.due=it.due_state||'';
+  const top=el('div','cr-row'); top.append(el('span','cr-name',it.display_name),el('span','cr-code',it.customer_code));
+  if(it.closed===true) top.append(el('span','cr-kapali','KAPALI'));
+  top.append(el('span','cr-chip '+(it.due_state||''),(DUE[it.due_state]||'')+' · '+fmtDate(it.due_date)), el('span','cr-chip',it.purpose_label));
+  c.append(top);
+  if(it.next_action) c.append(el('p','cr-note cr-next','Sonraki iş: '+it.next_action));
+  if(it.owner_label) c.append(el('p','cr-muted cr-owner','Sorumlu (elle girilen etiket): '+it.owner_label));
+  if(it.suppressed_kapali) c.append(el('p','cr-warn','Müşteri KAPALI: satış takibi Günlük Satış\'a alınmaz (kayıt silinmedi).'));
+  (it.warnings||[]).forEach(w=>c.append(el('p','cr-warn',w.message)));
+  const a=el('div','cr-row'); a.append(btn('cr-open','Aç / kaydet',()=>openCustomer(it.customer_code)),btn('cr-c360','Müşteri 360',()=>openC360(it.customer_code)));
+  c.append(a); return c;
+}
+async function loadRecent(){
+  show($('[data-sec="recent"]'),true); const box=$('.cr-recent');
+  let r; try{r=await api('/api/crm/recent?limit=50');}catch(e){box.replaceChildren(el('p','cr-err',errText(e))); return;}
+  const ul=el('ul','cr-tl');
+  (r.items||[]).forEach(x=>{const li=el('li'); li.dataset.code=x.customer_code;
+    li.append(el('b',null,fmtDate(x.occurred_on)+' · '),document.createTextNode(x.display_name+' ('+x.customer_code+') · '+(x.channel_label||'')+(x.outcome?' · '+x.outcome:'')+(x.has_next_action?' · sonraki iş var':'')+' '));
+    li.append(btn('cr-open','Aç',()=>openCustomer(x.customer_code))); ul.append(li);});
+  box.replaceChildren(ul); if(!(r.items||[]).length) box.replaceChildren(el('p','cr-muted',MSG.none+' Kayıt olmaması temas olmadığı anlamına gelmez.'));
+}
+async function search(q){
+  const box=$('.cr-hits'), my=st.seq.s=(st.seq.s||0)+1;
+  if(String(q).trim().length<2){box.replaceChildren(); return;}
+  let r; try{r=await api('/api/customer360/search?q='+encodeURIComponent(q)+'&limit=8');}catch(e){if(my===st.seq.s) box.replaceChildren(el('p','cr-err',errText(e))); return;}
+  if(my!==st.seq.s) return; box.replaceChildren();
+  (r.results||[]).forEach(h=>{const b=el('button','cr-hit'); b.type='button'; b.dataset.code=h.customer_code;
+    b.append(el('span','cr-name',h.display_name),el('span','cr-code',h.customer_code)); if(h.closed===true) b.append(el('span','cr-kapali','KAPALI'));
+    b.addEventListener('click',()=>{box.replaceChildren(); openCustomer(h.customer_code);}); box.append(b);});
+  if(!(r.results||[]).length) box.append(el('p','cr-muted','Sonuç yok.'));
+}
+function openCustomer(code){st.code=code; show($('[data-sec="customer"]'),true); loadCustomer(code); $('[data-sec="customer"]').scrollIntoView({block:'start'});}
+async function loadCustomer(code){
+  const p=$('.cr-panel'), my=st.seq.c=(st.seq.c||0)+1;
+  let x; try{x=await api('/api/crm/customers/'+encodeURIComponent(code));}catch(e){if(my===st.seq.c) p.replaceChildren(el('p','cr-err',errText(e))); return;}
+  if(my!==st.seq.c) return; renderCustomer(x);
+}
+function renderCustomer(x){
+  const p=$('.cr-panel'); p.replaceChildren(); p.dataset.code=x.customer_code;
+  let name=x.customer_code; const head=el('div','cr-row cr-head'); const h=el('h4',null,'');
+  api('/api/customer360/search?q='+encodeURIComponent(x.customer_code)+'&limit=1').then(r=>{const hit=(r.results||[]).find(z=>z.customer_code===x.customer_code); if(hit){h.textContent=hit.display_name;}}).catch(()=>{});
+  h.textContent=name; head.append(h,el('span','cr-code',x.customer_code)); if(x.closed===true) head.append(el('span','cr-kapali','KAPALI'));
+  head.append(btn('cr-c360','Müşteri 360',()=>openC360(x.customer_code))); p.append(head);
+  p.append(el('p','cr-muted',(x.coverage_label||'')+': '+(x.coverage_note||'')));
+  (x.warnings||[]).forEach(w=>{const n=el('p','cr-warn',w.message); n.dataset.w=w.code; p.append(n);});
+  // current follow-up
+  const fu=x.followup, fb=el('div','cr-card cr-fu'); fb.dataset.state=fu?(fu.due_state||''):'none';
+  if(fu){fb.append(el('div','cr-name','Güncel takip: '+fmtDate(fu.due_date)+' · '+fu.purpose_label+' · '+(DUE[fu.due_state]||'')));
+    if(fu.next_action) fb.append(el('p','cr-note cr-next','Sonraki iş: '+fu.next_action));
+    if(fu.owner_label) fb.append(el('p','cr-muted cr-owner','Sorumlu (elle girilen etiket): '+fu.owner_label));
+    fb.append(btn('cr-clear','Takibi temizle',()=>putFollowup(x.customer_code,{clear:true})));}
+  else fb.append(el('p','cr-muted','Güncel takip yok. Tarih yalnızca siz girerseniz oluşur.'));
+  p.append(fb);
+  // interaction form
+  const f=el('div','cr-form cr-iform'); f.append(el('div','wide cr-name','Etkileşim kaydet'));
+  const dt=input('date','ci-date'); dt.value=localToday(); dt.max=localToday();
+  const ch=sel(CH,'phone','ci-channel'), pu=sel(PU,'','ci-purpose','(seçilmedi)');
+  const oc=input('text','ci-outcome',120), na=input('text','ci-next',160), ow=input('text','ci-owner',80);
+  const nt=el('textarea','ci-note'); nt.maxLength=500;
+  oc.placeholder='Örn. Görüşüldü'; na.placeholder='Örn. Yeni fiyat listesini gönder'; ow.placeholder='İsteğe bağlı'; nt.placeholder='Kısa yerel not (en fazla 500; yapay zekâya gönderilmez)';
+  const lab=(t,n,cls)=>{const l=el('label',cls||null,t); l.append(n); return l;};
+  f.append(lab('Temas tarihi',dt),lab('Kanal',ch),lab('Amaç (isteğe bağlı)',pu),lab('Sonuç (en fazla 120)',oc,'wide'),lab('Sonraki iş (en fazla 160)',na,'wide'),
+           lab('Sorumlu etiketi (isteğe bağlı, en fazla 80)',ow),lab('Not',nt,'wide'));
+  const setFu=input('checkbox','ci-setfu'); const fuDate=input('date','ci-fudate'), fuPu=sel(PU.filter(([k])=>(x.allowed_followup_purposes||[]).includes(k)),'','ci-fupurpose');
+  const fr=el('div','wide cr-row'); const l2=el('label','cr-muted'); l2.append(setFu,document.createTextNode(' Aynı kayıtla sonraki takibi de planla (tarih sizin seçiminiz)')); fr.append(l2,fuDate,fuPu); f.append(fr);
+  const ierr=el('p','cr-err wide ci-err'); show(ierr,false);
+  f.append(btn('pri ci-save wide','Etkileşimi kaydet',async()=>{
+    const b={occurred_on:dt.value,channel:ch.value}; if(pu.value) b.purpose=pu.value; if(oc.value.trim()) b.outcome=oc.value; if(na.value.trim()) b.next_action=na.value;
+    if(ow.value.trim()) b.owner_label=ow.value; if(nt.value.trim()) b.note=nt.value;
+    if(setFu.checked){if(!fuDate.value){ierr.textContent='Takip tarihi seçin.'; show(ierr,true); return;}
+      b.followup={purpose:fuPu.value,due_date:fuDate.value}; if(na.value.trim()) b.followup.next_action=na.value; if(ow.value.trim()) b.followup.owner_label=ow.value;}
+    try{const r=await api('/api/crm/customers/'+encodeURIComponent(x.customer_code)+'/interactions',{method:'POST',headers:H,body:JSON.stringify(b)});
+      toast('Etkileşim kaydedildi.'); renderCustomer(r); refreshLists();}catch(e){ierr.textContent=errText(e); show(ierr,true);}}), ierr);
+  p.append(f);
+  // follow-up form
+  const g=el('div','cr-form cr-fform'); g.append(el('div','wide cr-name','Takip planla'));
+  const gd=input('date','cf-date'), gp=sel(PU.filter(([k])=>(x.allowed_followup_purposes||[]).includes(k)),fu?fu.purpose:'','cf-purpose');
+  const gn=input('text','cf-next',160), go=input('text','cf-owner',80);
+  if(fu){gd.value=fu.due_date; gn.value=fu.next_action||''; go.value=fu.owner_label||'';}
+  g.append(lab('Takip tarihi',gd),lab('Amaç',gp),lab('Sonraki iş (en fazla 160)',gn,'wide'),lab('Sorumlu etiketi (isteğe bağlı)',go));
+  if(x.closed===true) g.append(el('p','cr-note wide','KAPALI müşteri: yalnızca tahsilat veya hizmet takibi planlanabilir.'));
+  const ferr=el('p','cr-err wide cf-err'); show(ferr,false);
+  g.append(btn('pri cf-save wide','Takibi kaydet',()=>{if(!gd.value){ferr.textContent='Takip tarihi seçin.'; show(ferr,true); return;}
+    const b={purpose:gp.value,due_date:gd.value}; if(gn.value.trim()) b.next_action=gn.value; if(go.value.trim()) b.owner_label=go.value; putFollowup(x.customer_code,b,ferr);}), ferr);
+  p.append(g);
+  // timeline
+  p.append(el('div','cr-name','Yapılandırılmış etkileşimler ('+num(x.structured_interactions)+')'));
+  const ul=el('ul','cr-tl cr-timeline');
+  (x.interactions||[]).forEach(i=>{const li=el('li'); li.dataset.id=i.id;
+    li.append(el('b',null,fmtDate(i.occurred_on)+' · '+(i.channel_label||'')+(i.purpose_label?' · '+i.purpose_label:'')));
+    if(i.outcome) li.append(el('div',null,'Sonuç: '+i.outcome)); if(i.next_action) li.append(el('div',null,'Sonraki iş: '+i.next_action));
+    if(i.next_followup) li.append(el('div','cr-muted','Planlanan takip: '+fmtDate(i.next_followup)));
+    if(i.owner_label) li.append(el('div','cr-muted','Sorumlu etiketi: '+i.owner_label)); if(i.note) li.append(el('div','cr-muted cr-noteview','Not: '+i.note));
+    ul.append(li);});
+  if(!(x.interactions||[]).length) ul.append(el('li','cr-muted',MSG.none+' '+(x.unknown_note||'')));
+  p.append(ul);
+  const lg=x.legacy||{}; if(lg.count){p.append(el('div','cr-name',(lg.label||'Eski notlar')+' ('+num(lg.count)+')'));
+    const ul2=el('ul','cr-tl cr-legacy'); (lg.items||[]).forEach(m=>ul2.append(el('li',null,fmtDate(m.ts)+' · '+(m.kind||'')+' · '+(m.detail||'')))); p.append(ul2);}
+}
+async function putFollowup(code,b,errEl){
+  try{const r=await api('/api/crm/customers/'+encodeURIComponent(code)+'/followup',{method:'PUT',headers:H,body:JSON.stringify(b)});
+    toast(b.clear?'Takip temizlendi.':'Takip kaydedildi.'); renderCustomer(r); refreshLists();}
+  catch(e){if(errEl){errEl.textContent=errText(e); show(errEl,true);} else toast(errText(e));}
+}
+async function refreshLists(){try{renderSummary(await api('/api/crm/summary'));}catch(e){} loadList('due','.cr-due','[data-sec="due"]'); loadList('upcoming','.cr-up','[data-sec="upcoming"]'); loadRecent();}
+$('.cr-q').addEventListener('input',e=>{clearTimeout(st.timers.q); st.timers.q=setTimeout(()=>search(e.target.value),250);});
+// Customer 360 / other tabs: open this tab on one customer (explicit writes stay here)
+window.StockAgentCRM={open:function(code){st.code=String(code); tabBtn.click(); if(st.started&&location.protocol!=='file:') loadCustomer(st.code);}};
+tabBtn.addEventListener('click',start);   // lazy: nothing is fetched until the tab is opened
+})();
+"""
+
+def _crm_panel(meta):
+    """(tab button, panel block) for Takip / CRM, wrapped in markers like the other server-driven tabs."""
+    asof=html.escape(str(meta.get('asof') or ''),quote=True)
+    btn='<button class="tab" data-t="crm">Takip / CRM</button>'
+    block=('\n<!--CRM-TAB-START-->\n<style>'+_CRM_CSS+'</style>\n'
+           f'<div id="crm" class="panel" data-asof="{asof}">'+_CRM_BODY+'</div>\n'
+           '<script>'+_CRM_JS+'</script>\n<!--CRM-TAB-END-->')
+    return btn,block
+
+
+def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True):
     blob=json.dumps(modules,ensure_ascii=False).replace('</','<\\/')
     tabs=['overview']+list(modules.keys())
     tabbtns=''.join(f'<button class="tab" data-t="{t}">{("Genel Bakış" if t=="overview" else modules[t]["title"])}'
@@ -1949,6 +2219,7 @@ def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,o
     sq_btn,sq_block=_sq_panel(meta) if sq_panel else ('','')
     op_btn,op_block=_opp_panel(meta) if opp_panel else ('','')
     fm_btn,fm_block=_fair_panel(meta) if fair_panel else ('','')
+    cr_btn,cr_block=_crm_panel(meta) if crm_panel else ('','')
     return f"""<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Şirket Panosu — {meta['date']}</title>
 <style>
@@ -2010,7 +2281,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <header><div class="eyebrow">Şirket Panosu</div>
 <h1>Şirket Panosu — {meta['date']}</h1>
 <div class="sub">{src} · {meta['total']:,} ürün</div></header>
-<div class="tabs">{tabbtns}{sq_btn}{c3_btn}{op_btn}{fm_btn}{ai_btn}</div>
+<div class="tabs">{tabbtns}{sq_btn}{c3_btn}{op_btn}{fm_btn}{cr_btn}{ai_btn}</div>
 <div id="overview" class="panel on">
 <h2 class="sec">Aktif Analizler</h2>
 <p class="note">İlk istediğiniz ikisi — <b>stok uyarıları</b> (azalan + fazla) ve <b>kayıp müşteriler</b> (geri kazanım) — çalışıyor. Gezinmek, aramak ve sıralamak için yukarıdaki sekmelere tıklayın. Her şey doğrudan tablolarınızdan hesaplanır: filtreleme, müşteri ve stok kodu üzerinden birleştirme ve aritmetik — hiçbir şey tahmin değil.</p>
@@ -2020,7 +2291,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <p class="note">Hazır olduğunuzda açabileceğimiz, tamamen gerçeğe dayalı diğer analizler — her biri yalnızca ilgili sayfanın <code>data</code> klasöründe olmasını ister, sonra kendi sekmesi olur. Yapay zekâ yok, bunlarla aynı.</p>
 <ul class="later">{laterlist}</ul>
 </div>
-<div id="panels"></div>{sq_block}{c3_block}{op_block}{fm_block}{ai_block}
+<div id="panels"></div>{sq_block}{c3_block}{op_block}{fm_block}{cr_block}{ai_block}
 <script>
 const DATA={blob};
 const fmtMoney=v=>'₺'+Math.round(v).toLocaleString('tr-TR');

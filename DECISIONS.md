@@ -655,3 +655,32 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
      the task.
 6. **Campaigns are reusable and multi-edition** (planned / active / archived; archive instead of delete), not
    hard-coded to one January fair. No salesperson assignment, CRM inference, AI or new-buyer discovery.
+
+### D-046 · 2026-10-17 · Lightweight CRM: append-only interactions, one explicit current follow-up, incomplete coverage, no person metrics (M7-5)
+1. **Two concepts, existing storage:**
+   - append-only interaction history in the existing `memory` table (fixed kind `crm_contact` + nullable columns
+     `occurred_on`, `channel`, `purpose`, `outcome`, `next_action`, `owner_label`; safe `ALTER ADD COLUMN`
+     migration); old rows are never edited, a correction is a new entry; older memory rows stay readable as legacy
+     history and are not counted as coverage;
+   - one current follow-up per canonical customer in `crm_followups` (replace or clear explicitly), never derived from
+     old `next_followup` values.
+2. **Closed vocabularies and limits:** channel phone / whatsapp / email / visit / other; purpose sales_followup /
+   collection / service / other; outcome ≤ 120, next action ≤ 160, note ≤ 500, owner label ≤ 80; contact dates may be
+   backdated, never in the future; exact Customer 360 codes only (D-003). Validation errors never echo the text.
+3. **Coverage is always `incomplete` ("Eksik kayıt olabilir")** until the owner states that logging is standardized
+   (D-024). Missing records mean unknown activity, never "not contacted"; there is no "uncontacted customer" task.
+4. **No salesperson / person metrics:** the owner label is manual, non-authoritative free text; it is never
+   aggregated, ranked, filtered on or used as a task fact. The summary is counts only.
+5. **Nothing is inferred:** no next date or next action from an outcome. Only an explicit current follow-up with
+   `due_date ≤ today` creates a Günlük Satış task.
+6. **Günlük Satış task `crm_followup` ("Takip Zamanı"):** request-time from SQLite, sales-queue surface only (never the
+   M5 action center or the build-time reservoir); fixed `CRM_FOLLOWUP_SCORE = 60`, confidence high; id facts = purpose,
+   due date, next action (no note, no owner label); sequence collections → crm_followup → winback → fair_followup →
+   rest by score; collection / service follow-ups are `operational`; drafts: collection → collection, sales_followup →
+   sales follow-up, service / other → none. Queue action state never erases the follow-up.
+7. **KAPALI:** history may always be recorded; a follow-up for a trusted-KAPALI customer only for collection or
+   service; duplicate masters never invent KAPALI; a customer that later becomes KAPALI has its sales follow-up
+   suppressed from the queue while the state is kept.
+8. **Separation:** no CRM content is ever sent to AI (`get_memory` excludes `crm_contact` rows); fair funnel state and
+   CRM state stay separate; `Dijital Pazarlama Raporu_2025.xlsx` is not imported; orphan CRM rows are counted, never
+   reassigned or deleted; CRM state survives refreshes; no Excel read per request.

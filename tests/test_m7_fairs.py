@@ -733,7 +733,7 @@ def test_tab_present_rest_byte_identical(built):
     import re
     w, wo = built
     assert w.count(FAIR_BUTTON) == 1 and w.replace(FAIR_BUTTON, "", 1).replace(_block(w), "", 1) == wo
-    assert re.findall(r'<button class="tab" data-t="([a-z0-9]+)"', w)[-5:] == ["sq", "c360", "opp", "fair", "ai"]
+    assert re.findall(r'<button class="tab" data-t="([a-z0-9]+)"', w)[-6:] == ["sq", "c360", "opp", "fair", "crm", "ai"]
 
 
 def test_tab_script_safe(built):

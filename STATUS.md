@@ -1,10 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-16 (M7-3 opportunity intelligence merged to `main` @ `976a112`; M7-4 Fuar Merkezi done on `claude/m7-4-fair-command-center`, PR pending)._
+_Updated 2026-10-17 (M7-4 Fuar Merkezi merged to `main` @ `ccbae63`; M7-5 lightweight CRM done on `claude/m7-5-lightweight-crm`, PR pending)._
 
 ## Git
-- **`main`:** `976a112` (PR #21, M7-3 opportunity intelligence). **This checkpoint:** branch
-  `claude/m7-4-fair-command-center` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
+- **`main`:** `ccbae63` (PR #22, M7-4 Fuar Merkezi). **This checkpoint:** branch
+  `claude/m7-5-lightweight-crm` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
 - **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
   there to get M5 (see "Owner follow-ups" below).
 
@@ -17,7 +17,7 @@ docs only), M6-1 (framework), M6-2 (order source) and M6-3 (Hedef) are merged. *
 BLOCKED** (the `Evrak Detaylı Tahsilat Raporu` export is missing). The Kredi takip importer (part of M6-6) was pulled
 forward (D-038) and is merged. M6-5 (Trodat), M6-6 Gider/Gelir and M6-6 Bütçe are merged: every currently available M6 source is done; M6-4 stays
 BLOCKED and is not renumbered.
-**Milestone 7 — Sales Operating System: in progress.** M7-1 (Customer 360), M7-2 (Günlük Satış) and M7-3 (cross-sell + opportunity / territory intelligence) are merged. M7-4 (Fuar Merkezi) is done (PR pending). M7-5 is not started.
+**Milestone 7 — Sales Operating System: in progress.** M7-1 (Customer 360), M7-2 (Günlük Satış), M7-3 (cross-sell + opportunity / territory intelligence) and M7-4 (Fuar Merkezi) are merged. M7-5 (lightweight CRM / follow-up) is done (PR pending). M7-6 is not started.
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -1044,7 +1044,7 @@ tuned; whether to tighten them is an owner decision.
 **Regression:** M5 top 15, existing M7-2 reason ids and scores, Customer 360 semantics and all M6 importers are
 unchanged. DQ-1 to DQ-5 are not touched. Detailed Collections stays blocked.
 
-## M7-4 Fuar Merkezi (done; PR pending)
+## M7-4 Fuar Merkezi (merged, PR #22 @ `ccbae63`)
 Branch `claude/m7-4-fair-command-center` from `main` @ `976a112`. Doc: `docs/m7_fair_command_center.md`, decision
 D-045.
 
@@ -1092,11 +1092,56 @@ Tests:
 | AI calls / sources | 0 / unchanged |
 
 **Regression:** M5 top 15, existing M7-2 reasons, M7-3 cross-sell results and thresholds, and Customer 360 search /
-identity are unchanged. Detailed Collections stays blocked. M7-5 is not started.
+identity are unchanged. Detailed Collections stays blocked.
+
+## M7-5 Lightweight CRM / follow-up (done; PR pending)
+Branch `claude/m7-5-lightweight-crm` from `main` @ `ccbae63`. Doc: `docs/m7_lightweight_crm.md`, decision D-046.
+
+**What it contains:**
+- **Storage** (`services/crm_store.py`): append-only structured interactions in the existing `memory` table (kind
+  `crm_contact` + nullable columns, safe migration) and one current follow-up per customer in `crm_followups`.
+  Legacy memory rows stay readable and are not counted as coverage.
+- **Rules** (`services/crm.py`): closed channel / purpose lists and length limits; backdating allowed, no future
+  contact dates; exact Customer 360 codes; KAPALI follow-ups only for collection / service (history always allowed);
+  a later KAPALI suppresses the sales follow-up without deleting it; orphans counted, never shown or reassigned.
+- **Coverage:** always `incomplete` ("Eksik kayıt olabilir", D-024); counts-only summary; no person metrics; nothing
+  inferred (no next date / next action from an outcome, no "uncontacted" task).
+- **Günlük Satış:** request-time `crm_followup` reason ("Takip Zamanı", sales-queue surface only) from due follow-ups;
+  fixed score 60, confidence high; sequence collections → crm_followup → winback → fair_followup → rest; collection /
+  service follow-ups are operational; no draft for service / other. Completing the task keeps the follow-up.
+- **AI isolation:** `get_memory` excludes CRM rows, so no CRM content reaches an evidence packet; validation errors on
+  `/api/crm/*` never echo the submitted text.
+- **UI:** new "Takip / CRM" tab (coverage warning, due / upcoming lists, search + quick log, follow-up form, timeline,
+  legacy notes, recent feed without notes; file:// message) and a read-only "CRM / Takip" card in Customer 360.
+- `/api/crm/summary`, `/followups`, `/recent`, `/customers/{code}`, `POST …/interactions`, `PUT …/followup` (typed;
+  writes require `X-StockAgent: 1`; no AI, no Excel read per request).
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (node + jsdom + Chromium) | `AI_PROVIDER=disabled REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 python -m pytest -q` | **1001 passed, 7 skipped, 1 xfailed** (47 new: 42 unit/API tests in `tests/test_m7_crm.py`, 5 Playwright tests covering the 18 scenarios in `tests/test_m7_crm_browser.py`; existing M7 tests updated only for the new tab, filter and source) |
+
+**Real-data read-only check** (Mac VM, 5 Oct 2026 exports; isolated temp DB; aggregates only):
+
+| Item | Result |
+|---|---|
+| Customers / trusted KAPALI / open / duplicate master | 6,754 / 95 / 6,623 / 6 |
+| Structured CRM records currently available to M7-5 | **0** (no CRM export; coverage incomplete, D-024) |
+| Synthetic smoke (temp DB) | 4 interactions + 4 follow-ups; KAPALI sales 409, collection / service 200; future date 422; no guard 403 |
+| Queue | 3 "Takip Zamanı" cards at score 60; future follow-up absent; existing reason scores unchanged |
+| Complete / clear | follow-up kept / history kept |
+| Performance | CRM requests 1–9 ms median; Customer 360 build 88 s (unchanged path) |
+| AI calls / sources / temp DB | 0 / unchanged / deleted |
+
+**Regression:** M5 top 15, M7-2 reasons, M7-3 cross-sell results and thresholds, M7-4 fair score and taxonomy, the
+build-time reservoir and Customer 360 search / identity are unchanged. Detailed Collections stays blocked. M7-6 is
+not started.
 
 ## Immediate next task
-Review and merge the M7-4 PR. Next large checkpoint (not started): M7-5 lightweight CRM / follow-up workflow. Still
-blocked or open:
+Review and merge the M7-5 PR. Next large checkpoint (not started): M7-6 owner / management views + integration /
+polish. Still blocked or open:
+- CRM: when logging is standardized enough to drop "Eksik kayıt olabilir"; a CRM export (none received);
+  `CRM_FOLLOWUP_SCORE` tuning.
 - Fair taxonomy (ETKİNLİK / SAHA), post-fair conversion window, fair cost attribution, historical invitation and
   attendance lists, `FAIR_TASK_SCORE` tuning.
 - Cross-sell threshold review (broad population on real data).

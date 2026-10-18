@@ -24,6 +24,7 @@ from services import opportunities as OP
 from services import fairs as FA
 from services import fair_store as FS
 from services import fair_center as FC
+from services import crm as CRM
 from services import action_sources  # noqa: F401  (registers the built-in deterministic sources)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -51,6 +52,19 @@ async def _require_guard_header(request: Request, call_next):
         return JSONResponse(status_code=403,
                             content={"detail": "Missing header 'X-StockAgent: 1' (local CSRF guard)."})
     return await call_next(request)
+
+
+# ---- M7-5: CRM validation errors never echo the submitted text (notes, outcomes, owner labels) ----
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError):
+    if not request.url.path.startswith("/api/crm/"):
+        return await request_validation_exception_handler(request, exc)
+    errors = [{"loc": list(e.get("loc", ())), "type": e.get("type"), "msg": e.get("msg")} for e in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": errors})
 
 
 def _warm_up(repo, c360=None):
@@ -366,7 +380,8 @@ def customer360_detail(customer_code: str, c360: C360.Customer360Repository = De
                                opportunities=_same_source_opportunities(c360, snap, ctx),
                                # M7-4: membership is local state; ERP evidence only from same-source FUAR data
                                fair_campaigns=FC.customer360_campaigns(customer_code,
-                                                                       getattr(ctx, "fairs", None) if same else None))
+                                                                       getattr(ctx, "fairs", None) if same else None),
+                               crm=CRM.customer_view(snap, customer_code))      # M7-5: local CRM / Takip
     if det is None:
         raise HTTPException(404, f"Müşteri bulunamadı: {customer_code}")
     return det
@@ -633,13 +648,103 @@ def fairs_candidates(segment: str | None = None, q: str | None = None, campaign_
                                             fuar_first=fuar_first, limit=limit))
 
 
+# ---------------- M7-5 lightweight CRM (local SQLite + Customer 360 identity; never calls the AI provider) ----------
+# Append-only structured interactions on the existing `memory` table and one current follow-up per customer.
+# Coverage is always "incomplete" (D-024); nothing here counts or ranks people. Mutations need X-StockAgent: 1.
+def _crm_snap(c360):
+    try:
+        return c360.snapshot()
+    except C360.Customer360NotReady as e:
+        raise HTTPException(503, {"state": e.state, "message": "Müşteri verisi hazırlanıyor…"})
+    except C360.Customer360Error as e:
+        raise HTTPException(503, {"state": "error", "error_code": e.code, "message": e.message})
+
+
+def _crm_error(e: "CRM.CrmError"):
+    raise HTTPException(e.status, {"error_code": e.code, "message": e.message})
+
+
+@app.get("/api/crm/summary", response_model=S.CrmSummary)
+def crm_summary(c360: C360.Customer360Repository = Depends(get_c360)):
+    return S.CrmSummary(**CRM.summary(_crm_snap(c360)))
+
+
+@app.get("/api/crm/followups", response_model=S.CrmFollowupList)
+def crm_followups(mode: Literal["due", "today", "upcoming", "all"] = "due", days: int = 7, limit: int = 100,
+                  c360: C360.Customer360Repository = Depends(get_c360)):
+    return S.CrmFollowupList(**CRM.followup_list(_crm_snap(c360), mode, days=days, limit=limit))
+
+
+@app.get("/api/crm/recent", response_model=S.CrmRecent)
+def crm_recent(limit: int = 50, c360: C360.Customer360Repository = Depends(get_c360)):
+    return S.CrmRecent(**CRM.recent(_crm_snap(c360), limit))
+
+
+@app.get("/api/crm/customers/{customer_code}", response_model=S.CrmCustomer)
+def crm_customer(customer_code: str, c360: C360.Customer360Repository = Depends(get_c360)):
+    snap = _crm_snap(c360)
+    try:
+        CRM.require_customer(snap, customer_code)
+    except CRM.CrmError as e:
+        _crm_error(e)
+    return CRM.customer_view(snap, customer_code)
+
+
+@app.post("/api/crm/customers/{customer_code}/interactions", response_model=S.CrmCustomer)
+def crm_add_interaction(customer_code: str, body: S.CrmInteractionCreate,
+                        c360: C360.Customer360Repository = Depends(get_c360)):
+    snap = _crm_snap(c360)
+    data = body.model_dump()
+    data["occurred_on"] = body.occurred_on.isoformat()
+    if body.followup is not None:
+        data["followup"] = {**body.followup.model_dump(), "due_date": body.followup.due_date.isoformat()}
+    try:
+        return CRM.add_interaction(snap, customer_code, data)
+    except CRM.CrmError as e:
+        _crm_error(e)
+
+
+@app.put("/api/crm/customers/{customer_code}/followup", response_model=S.CrmCustomer)
+def crm_set_followup(customer_code: str, body: S.CrmFollowupUpdate,
+                     c360: C360.Customer360Repository = Depends(get_c360)):
+    snap = _crm_snap(c360)
+    data = body.model_dump()
+    if body.due_date is not None:
+        data["due_date"] = body.due_date.isoformat()
+    try:
+        return CRM.set_followup(snap, customer_code, data)
+    except CRM.CrmError as e:
+        _crm_error(e)
+
+
 # ---------------- draft message (copy-only; nothing is ever sent) ----------------
+def _queue_only_customer(err, code):
+    """M7-5: a customer that reaches Günlük Satış only through local tasks (a due CRM or fair follow-up) is not in the
+    M5 entity index. For an explicit draft, use the minimum identity from the Customer 360 snapshot: code, display
+    name and the trusted master KAPALI flag (so the collection-only refusal still applies). Never CRM or fair data."""
+    if getattr(err, "status_code", None) != 404:
+        raise err
+    try:   # resolved lazily so callers without a Customer 360 repository keep the M5 behaviour (404)
+        snap = app.dependency_overrides.get(get_c360, get_c360)().snapshot()
+    except Exception:
+        raise err
+    base = snap.customers.get(code)
+    if base is None:
+        raise err
+    return {"customer_code": code, "name": base["display_name"],
+            "closed": True if snap.master_closed(code) is True else None, "history": []}
+
+
 @app.post("/api/agent/draft-message", response_model=S.DraftResponse)
 def draft_message(req: S.DraftRequest, repo: ContextRepository = Depends(get_repo),
                   agent: BusinessActionAgent = Depends(get_agent)):
     """channel × purpose draft (D-018, D-030). KAPALI customers: collection only (refused before any AI call).
     Returns text to review and copy; there is no send capability anywhere in the app."""
-    cust = _customer_facts(repo, req.customer_code)
+    try:
+        cust = _customer_facts(repo, req.customer_code)
+    except HTTPException as e:
+        cust = _queue_only_customer(e, req.customer_code)
+    cust = {**cust, "history": [m for m in cust.get("history") or [] if m.get("kind") != "crm_contact"]}
     prod = repo.product(req.product_code) if req.product_code else None
     data, r = agent.draft_message(req.channel, req.purpose, cust, prod, req.additional_instruction,
                                   ctx=_ctx_or_none(repo))

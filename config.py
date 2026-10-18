@@ -57,6 +57,9 @@ CROSS_SELL_SCORE_CAP = 69               # cross-sell score = min(cap, confidence
 # reason. One fixed score for every task (medium band, below high/critical financial reasons); it never varies by
 # revenue, Hedef, stage or days overdue. An operational placeholder the owner may tune later.
 FAIR_TASK_SCORE = 55
+# M7-5 (D-046): a due, explicitly scheduled CRM follow-up is an operational task. One fixed score (medium band) that
+# never varies by revenue, customer size, Hedef, delay, outcome or salesperson.
+CRM_FOLLOWUP_SCORE = 60
 MAX_FAIR_BULK_ADD = 200                 # explicit selection per request; never "add everyone"
 MAX_OPPORTUNITY_PAIRS = 50              # bounded pair table per request
 MAX_TERRITORY_ROWS = 200                # bounded territory rows per request

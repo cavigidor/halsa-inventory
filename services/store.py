@@ -47,6 +47,9 @@ def init_db():
         # state, memory, AI cache and older databases are left untouched.
         from services import fair_store
         fair_store.init_tables(c)
+        # M7-5 (D-046): structured CRM columns on `memory` (only if missing) + one current follow-up per customer.
+        from services import crm_store
+        crm_store.init_tables(c)
 
 
 def content_key(category, entity_id, content_hash):
@@ -117,9 +120,13 @@ def add_memory(entity_type, entity_id, kind, detail, next_followup=None):
 
 
 def get_memory(entity_type, entity_id):
+    """Legacy memory rows (M1–M7-4 behaviour). M7-5 structured CRM rows (kind `crm_contact`) are excluded here, so
+    CRM notes / outcomes / next actions / owner labels never reach the drawer's AI evidence packets; they are read
+    only through services/crm_store.py."""
     with _conn() as c:
         return [dict(r) for r in c.execute(
-            "SELECT * FROM memory WHERE entity_type=? AND entity_id=? ORDER BY ts DESC",
+            "SELECT id, entity_type, entity_id, ts, kind, detail, next_followup FROM memory "
+            "WHERE entity_type=? AND entity_id=? AND (kind IS NULL OR kind != 'crm_contact') ORDER BY ts DESC",
             (entity_type, entity_id))]
 
 
