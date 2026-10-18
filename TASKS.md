@@ -1,10 +1,10 @@
 # TASKS.md — active backlog
 
 Rules: one *Current* task at a time. Each task must be executable in one bounded session.
-Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-5 are merged; M7-6 (Yönetim + integration / polish) is done (PR pending) and **completes Milestone 7** (D-047). No new milestone is started.
+Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-6 are merged; **Milestone 7 is COMPLETE** (PR #24, squash merge `de7eb43`; D-047). No new milestone is started.
 
 ## Current
-- [ ] **Review and merge the M7-6 Yönetim / integration PR** (`claude/m7-6-owner-integration-polish`). Then M7 is complete.
+- No active implementation checkpoint. M7 is complete; Kredi `DURUM` meaning awaits the owner's clarification (expected 2026-10-19). No financial interpretation will be changed before confirmation.
 
 ## Next (after M7: owner decisions and follow-ups; start each only when moved to *Current*)
 - [ ] **Owner: cross-sell threshold review.** On real data the initial guards give a broad population (78 % of active
@@ -130,6 +130,7 @@ Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi,
   2020 should count, change `QUAL_YEARS` and that test together.
 
 ## Completed
+- [x] 2026-10-18 — PR #24 (M7-6 Yönetim / integration) squash-merged into `main` (`de7eb43`); **Milestone 7 COMPLETE**. Kredi DURUM remains unverified and informational; owner clarification pending 2026-10-19. M6-4 still blocked by the missing export.
 - [x] 2026-10-13 — M6-0 source inventory and technical verification (docs only): `docs/m6_source_inventory.md`,
   D-034. Sales grain, identifiers, `Srmmerk` activity/source field, fair-attribution feasibility, Hedef, Trodat,
   gider/gelir, kredi, Bütçe, fair files, CRM gap; DQ-4 and DQ-5 logged.
