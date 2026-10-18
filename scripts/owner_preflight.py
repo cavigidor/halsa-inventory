@@ -94,10 +94,21 @@ def main(argv: list[str] | None = None) -> int:
             file_label = row["file"] or "(yapılandırılmadı)"
             details = ""
             if row["source"] == "kredi" and row["state"] == OV.READY:
-                details = (f"; Kapalı + kalan taksit: {row['kapali_with_remaining_installments']}"
+                details = (f"; kaynak tarihi: {row['snapshot_date'] or 'bilinmiyor'}"
+                           f"; Kapalı + kalan taksit: {row['kapali_with_remaining_installments']}"
                            " (DURUM doğrulanmadı)")
+            if row["source"] == "gider_gelir" and row["state"] == OV.READY:
+                details = (f"; rapor yılı: {row['report_year'] or 'bilinmiyor'}"
+                           f"; satış verisi olan ay: {row['months_with_revenue']}"
+                           " (muhasebe esası doğrulanmadı)")
+            if row["source"] == "butce" and row["state"] == OV.READY:
+                details = (f"; geçersiz hücre: {row['invalid_cells']}"
+                           f"; #REF!: {row['ref_errors']}; #DIV/0!: {row['div0_errors']}"
+                           f"; dış bağımlı: {row['external_dependent_cells']}")
             if row["error_code"]:
                 details += f"; hata: {row['error_code']}"
+                if row["issue_codes"]:
+                    details += "; doğrulama kodları: " + ", ".join(row["issue_codes"])
             print(f"- {row['source']}: {row['state']} — {file_label}{details}")
         print(f"Teknik sonuç: {result['technical_status']}. Ticari/muhasebe onayı verilmiş değildir.")
         print("Kredi DURUM açıklaması bekleniyor. Bu test canlı banka bakiyesi doğrulaması değildir.")
