@@ -262,7 +262,11 @@ milestone (D-016).
 >   structured interactions plus one explicit current follow-up per customer; coverage always "Eksik kayıt olabilir"
 >   (D-024), no person metrics, nothing inferred; due follow-ups in Günlük Satış as "Takip Zamanı" (fixed score 60);
 >   KAPALI follow-ups only for collection / service; no CRM content to AI.
-> - **M7-6 — Owner / management views + integration / polish.**
+> - **M7-6 — Owner / management views + integration / polish: done** (D-047, `docs/m7_owner_integration.md`).
+>   Read-only Yönetim tab (operational counts, scheduled Kredi obligations by 30/60/90 days per currency, source-native
+>   Gider/Gelir, Bütçe health, system status and open data decisions); owner sources only from explicit paths, lazily
+>   cached with a guarded reload; DQ-3 fixed; Customer 360 no longer re-reads the sales workbook. **Milestone 7 is
+>   complete**; M6-4 remains blocked by a missing export.
 
 ## 5. Sales organization and CRM data quality (D-024)
 

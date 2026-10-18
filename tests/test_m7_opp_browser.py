@@ -139,7 +139,7 @@ def test_tab_summary_pairs_territory_hostile_labels(browser, tmp_path):
         page.goto(srv["base"] + "/")
         # (1) tab exists after Müşteri 360; nothing fetched before it opens
         tabs = page.eval_on_selector_all(".tab", "els => els.map(e => e.dataset.t)")
-        assert tabs[-6:] == ["sq", "c360", "opp", "fair", "crm", "ai"] and page.inner_text('.tab[data-t="opp"]') == "Fırsatlar"
+        assert tabs[-7:] == ["sq", "c360", "opp", "fair", "crm", "own", "ai"] and page.inner_text('.tab[data-t="opp"]') == "Fırsatlar"
         assert not any("/api/opportunities" in u for _, u in page.requests)
         open_opp(page, srv["base"])
         # (2) model summary

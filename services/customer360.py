@@ -35,6 +35,7 @@ if ROOT not in sys.path:
 import pandas as pd  # noqa: E402
 
 import dashboard_builder as db  # noqa: E402
+from services import sales_projection as SP  # noqa: E402
 from services.importers.base import run_import  # noqa: E402
 from services.importers.models import Audience, Confidence, Severity  # noqa: E402
 from services.importers.spec import FieldSpec, FieldType, SourceSpec, TableLayout  # noqa: E402
@@ -61,8 +62,7 @@ AGING_LIMITATIONS = [
 ]
 DETAILED_COLLECTIONS_NOTE = "Detaylı tahsilat raporu sağlanmadı."
 
-SALES_REQUIRED = ["Tarih", "Nettutar", "miktar", "sip_evrakno_seri", "sip_evrakno_sira", "Pro_kodu", "ProjeIsmi",
-                  "Musterikod", "Musteri_ismi", "sto_kod", "StokIsmi"]
+SALES_REQUIRED = SP.SALES_REQUIRED          # M7-6: defined in services/sales_projection.py
 
 _T, _U = Confidence.TRUSTED, Confidence.UNVERIFIED
 _TOL = dict(required=False, tolerate_invalid_cells=True)
@@ -267,14 +267,18 @@ def build_snapshot(data_folder: str, ctx: dict, *, hedef_path: str | None = None
     if sales_path is None:
         raise Customer360Error("sales_source_missing", "Canlı panonun satış dosyası veri klasöründe bulunamadı; "
                                                        "verileri yenileyin.")
-    try:
-        raw = db.read_sales_raw(sales_path)
-    except Exception:
-        raise Customer360Error("sales_unreadable", "Satış dosyası okunamadı.")
-    missing = [c for c in SALES_REQUIRED if c not in raw.columns]
-    if missing:
-        raise Customer360Error("sales_columns_missing", f"Satış dosyasında {len(missing)} gerekli sütun eksik.")
-    df = _prepare_sales(raw)
+    handoff = getattr(ctx, "sales_c360_handoff", None)
+    df = handoff.take(os.path.basename(sales_path)) if handoff is not None else None
+    if df is None:
+        try:
+            raw = db.read_sales_raw(sales_path)
+        except Exception:
+            raise Customer360Error("sales_unreadable", "Satış dosyası okunamadı.")
+        missing = [c for c in SALES_REQUIRED if c not in raw.columns]
+        if missing:
+            raise Customer360Error("sales_columns_missing", f"Satış dosyasında {len(missing)} gerekli sütun eksik.")
+        df = _prepare_sales(raw)
+        del raw
     asof = df["_date"].max()
     asof_iso = asof.date().isoformat() if pd.notna(asof) else None
     if asof_iso is None or asof_iso != sig.as_of:
@@ -332,30 +336,7 @@ def build_snapshot(data_folder: str, ctx: dict, *, hedef_path: str | None = None
     return snap
 
 
-def _prepare_sales(raw: pd.DataFrame) -> pd.DataFrame:
-    """D-003 identity exactly as M5 (`dashboard_builder.load_sales`): Pro_kodu as written; Musterikod only when
-    Pro_kodu is empty. No trimming of codes, no case changes. Amounts keep missing values (never zero)."""
-    df = pd.DataFrame(index=raw.index)
-    df["_date"] = pd.to_datetime(raw["Tarih"], errors="coerce")
-    df["_yr"] = df["_date"].dt.year
-    pk = raw["Pro_kodu"].astype(str).str.strip()
-    has_pro = raw["Pro_kodu"].notna() & (pk != "") & (pk.str.lower() != "nan")
-    df["_fallback"] = ~has_pro
-    df["_cust"] = raw["Pro_kodu"].where(has_pro, raw["Musterikod"]).astype(str)
-    df["_name_raw"] = raw["ProjeIsmi"].where(has_pro, raw["Musteri_ismi"])
-    df["_inv"] = raw["Musterikod"].astype(str)
-    df["_invname_raw"] = raw["Musteri_ismi"]
-    df["_ord"] = raw["sip_evrakno_seri"].astype(str) + "|" + raw["sip_evrakno_sira"].astype(str)
-    df["_amt"] = pd.to_numeric(raw["Nettutar"], errors="coerce")
-    df["_amt_missing"] = df["_amt"].isna()
-    df["_qty"] = pd.to_numeric(raw["miktar"], errors="coerce")
-    df["_sku"] = raw["sto_kod"].astype(str)
-    df["_skuname"] = raw["StokIsmi"]
-    df["_kategori"] = raw["kategori"] if "kategori" in raw.columns else None
-    df["_anagrup"] = raw["anagrup"] if "anagrup" in raw.columns else None
-    if "Satici" in raw.columns:
-        df["_satici"] = raw["Satici"].where(raw["Satici"].notna() & (raw["Satici"].astype(str).str.strip() != ""))
-    return df
+_prepare_sales = SP.prepare_sales          # M7-6: moved to services/sales_projection.py (shared, unchanged)
 
 
 def _base_facts(df: pd.DataFrame, asof: dt.date) -> dict[str, dict]:
@@ -556,6 +537,11 @@ class Customer360Repository:
         self._building: SourceSignature | None = None
         self._error: tuple[SourceSignature, Customer360Error] | None = None
         self.builds = 0
+
+    @property
+    def hedef_path(self) -> str | None:
+        """The explicitly configured Hedef file (M7-6 status shows its basename only)."""
+        return self._hedef_path
 
     def signature_for(self, ctx: dict) -> SourceSignature:
         """The signature a snapshot must carry to match this context (M7-2 consistency check)."""

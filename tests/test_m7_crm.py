@@ -454,7 +454,8 @@ def test_59_no_person_performance_metrics(client):
         assert "GROUP BY owner" not in src and "group by owner" not in src.lower()
         names = _names(os.path.join(ROOT, "services", mod))
         assert not ({"leaderboard", "per_owner", "by_owner", "Temsilci", "satici", "hedef_rep", "salespeople"} & names)
-    routes = [r.path for r in APP.app.routes]
+    # M7-6: `/api/owner/*` is the company-owner (Yönetim) audience, not a CRM owner-label metric
+    routes = [r.path.replace("/api/owner/", "/api/yonetim/") for r in APP.app.routes]
     assert not any(w in p for p in routes for w in ("leader", "performance", "owner", "rep"))
 
 
@@ -653,7 +654,7 @@ def test_tab_present_rest_byte_identical(built):
     import re
     w, wo = built
     assert w.count(CRM_BUTTON) == 1 and w.replace(CRM_BUTTON, "", 1).replace(_block(w), "", 1) == wo
-    assert re.findall(r'<button class="tab" data-t="([a-z0-9]+)"', w)[-6:] == ["sq", "c360", "opp", "fair", "crm", "ai"]
+    assert re.findall(r'<button class="tab" data-t="([a-z0-9]+)"', w)[-7:] == ["sq", "c360", "opp", "fair", "crm", "own", "ai"]
 
 
 def test_tab_script_safe(built):

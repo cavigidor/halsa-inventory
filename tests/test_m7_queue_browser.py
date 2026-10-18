@@ -154,7 +154,7 @@ def test_tab_cards_grouping_collection_first_filters(browser, tmp_path):
         page.goto(srv["base"] + "/")
         # (1) tab exists, before Müşteri 360; nothing fetched before it is opened
         tabs = page.eval_on_selector_all(".tab", "els => els.map(e => e.dataset.t)")
-        assert tabs[-6:] == ["sq", "c360", "opp", "fair", "crm", "ai"] and page.inner_text('.tab[data-t="sq"]') == "Günlük Satış"
+        assert tabs[-7:] == ["sq", "c360", "opp", "fair", "crm", "own", "ai"] and page.inner_text('.tab[data-t="sq"]') == "Günlük Satış"
         assert not any("/api/sales-queue" in u for _, u in page.requests)
         page.click('.tab[data-t="sq"]')
         page.wait_for_selector("#sq .sq-card")

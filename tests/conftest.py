@@ -21,7 +21,8 @@ from tests.fixtures import synthetic_erp  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
-    for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AI_PROVIDER", "AI_MODEL"):
+    for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AI_PROVIDER", "AI_MODEL", "KREDI_PATH", "KREDI_SNAPSHOT_DATE",
+              "GIDER_GELIR_PATH", "GIDER_GELIR_REPORT_YEAR", "BUTCE_PATH", "BUTCE_PLANNING_YEAR", "BUTCE_SNAPSHOT_DATE"):
         monkeypatch.delenv(k, raising=False)
     from services import store as ST
     monkeypatch.setattr(ST, "DB_PATH", str(tmp_path / "agent_state_test.db"))

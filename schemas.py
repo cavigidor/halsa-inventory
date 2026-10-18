@@ -1176,3 +1176,258 @@ class FairCandidates(BaseModel):
     note: str
     items: List[FairCandidate]
     ai_used: Literal[False] = False
+
+
+# ---------------------------------------------------------------------------------------------
+# M7-6 Yönetim (owner view; read-only, deterministic, never AI). Outputs are strict so nothing unplanned leaks.
+# ---------------------------------------------------------------------------------------------
+OwnerState = Literal["not_configured", "loading", "ready", "failed"]
+
+
+class _OwnerOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class OwnerWarning(_OwnerOut):
+    code: str
+    count: Optional[int] = None
+    message: str
+
+
+class OwnerSourceHead(_OwnerOut):
+    key: Literal["kredi", "gider_gelir", "butce"]
+    label: str
+    configured: bool
+    file: Optional[str] = None                 # basename only, never a path
+    state: OwnerState
+    state_label: str
+    reloading: bool = False
+    error_code: Optional[str] = None
+    message: Optional[str] = None
+    failed_step: Optional[str] = None
+    issue_codes: List[str] = []
+    loaded_at: Optional[str] = None
+
+
+class KrediBucket(_OwnerOut):
+    installments: int
+    amount: float
+
+
+class KrediHorizon(KrediBucket):
+    days: int
+
+
+class KrediCurrencySchedule(_OwnerOut):
+    currency: str
+    next_due_date: Optional[str] = None
+    horizons: List[KrediHorizon]
+    after_90: KrediBucket
+    past_due: KrediBucket
+    total_remaining: KrediBucket
+
+
+class KrediData(_OwnerOut):
+    contracts: int
+    installments: int
+    lenders: int
+    currencies: List[str]
+    status_counts: Dict[str, int]
+    snapshot_date: Optional[str] = None
+    snapshot_origin: Optional[str] = None
+    snapshot_note: Optional[str] = None
+    latest_payment_date: Optional[str] = None
+    schedule: List[KrediCurrencySchedule]
+    warnings: List[OwnerWarning]
+    remaining_principal_total: None = None     # deliberately never derived (not additive across rows)
+
+
+class OwnerKredi(OwnerSourceHead):
+    purpose: str
+    schedule_note: str
+    horizon_note: str
+    overdue_note: str
+    principal_note: str
+    today: str
+    data: Optional[KrediData] = None
+
+
+class GiderGelirMonth(_OwnerOut):
+    month: int
+    reported_sales: Optional[float] = None
+    reported_cost: Optional[float] = None
+    reported_gross_profit: Optional[float] = None
+    reported_expense: Optional[float] = None
+
+
+class GiderGelirLine(_OwnerOut):
+    line: Literal["kirtasiye", "trodat", "trotec", "imalat"]
+    label: str
+    reported_sales: Optional[float] = None
+    reported_cost: Optional[float] = None
+    reported_gross_profit: Optional[float] = None
+    allocated_expense: Optional[float] = None
+
+
+class GiderGelirBudgetLine(_OwnerOut):
+    line: str
+    label: str
+    value: Optional[float] = None
+
+
+class GiderGelirData(_OwnerOut):
+    report_year: Optional[int] = None
+    report_year_origin: Optional[str] = None
+    revision_label: Optional[str] = None
+    snapshot_date: None = None
+    months: List[GiderGelirMonth]
+    lines: List[GiderGelirLine]
+    budget: List[GiderGelirBudgetLine]
+    months_with_revenue: List[int]
+    months_with_expenses: List[int]
+    records: Dict[str, int]
+    warnings: List[OwnerWarning]
+    accounting_basis: Literal["unverified"]
+    management_mapping: Literal["not_supplied"]
+
+
+class OwnerGiderGelir(OwnerSourceHead):
+    basis_note: str
+    mapping_note: str
+    reconciliation_note: str
+    data: Optional[GiderGelirData] = None
+
+
+class ButceHealth(_OwnerOut):
+    planning_year: Optional[int] = None
+    planning_year_origin: Optional[str] = None
+    revision_label: Optional[str] = None
+    snapshot_date: Optional[str] = None
+    snapshot_origin: Optional[str] = None
+    source_status: Optional[str] = None
+    candidate_cells: int
+    blank_candidates: int
+    usable_unverified: int
+    invalid_facts: int
+    invalid_cells_in_validated_regions: int
+    invalid_cells: int
+    coverage_rate: float
+    coverage_pct: float
+    ref_errors: int
+    div0_errors: int
+    other_errors: int
+    missing_cached_formulas: int
+    external_links: int
+    external_formula_cells: int
+    external_dependent_cells: int
+    external_dependency_regions: int
+    authoritative: Literal[False]
+    file_of_record: str
+
+
+class OwnerButce(OwnerSourceHead):
+    warning: str
+    data: Optional[ButceHealth] = None
+
+
+class OwnerOperations(_OwnerOut):
+    state: Literal["ready", "building"]
+    customer360_customers: Optional[int] = None
+    daily_sales_customers: Optional[int] = None
+    collection_first_customers: Optional[int] = None
+    fair_tasks_due: Optional[int] = None
+    crm_followups_in_queue: Optional[int] = None
+    crm_overdue: Optional[int] = None
+    crm_due_today: Optional[int] = None
+    crm_current_followups: Optional[int] = None
+    crm_structured_interactions: Optional[int] = None
+    crm_coverage_status: Literal["incomplete"]
+    crm_coverage_label: str
+    active_fair_campaigns: int
+    planned_fair_campaigns: int
+    cross_sell_customers: Optional[int] = None
+    cross_sell_active_customers: Optional[int] = None
+    cross_sell_share: Optional[float] = None
+    cross_sell_note: Optional[str] = None
+
+
+class OwnerCoreSources(_OwnerOut):
+    context_state: Literal["ready", "building", "error"]
+    sales_file: Optional[str] = None
+    stock_file: Optional[str] = None
+    aging_file: Optional[str] = None
+    as_of_data_date: Optional[str] = None
+
+
+class OwnerHedefStatus(_OwnerOut):
+    configured: bool
+    file: Optional[str] = None
+    status: str
+
+
+class OwnerStores(_OwnerOut):
+    customer360_state: str
+    customer360_customers: Optional[int] = None
+    crm_coverage_status: Literal["incomplete"]
+    crm_coverage_label: str
+    fair_campaigns: int
+    sqlite_available: bool
+
+
+class OwnerBlockedSource(_OwnerOut):
+    key: str
+    label: str
+    status_label: str
+
+
+class OwnerSystem(_OwnerOut):
+    core: OwnerCoreSources
+    hedef: OwnerHedefStatus
+    owner_sources: List[OwnerSourceHead]
+    stores: OwnerStores
+    blocked: List[OwnerBlockedSource]
+
+
+class OwnerKnownIssue(_OwnerOut):
+    code: str
+    title: str
+    detail: str
+    status: Literal["open", "blocked"]
+    count: Optional[int] = None
+    count_label: Optional[str] = None
+
+
+class OwnerReloadState(_OwnerOut):
+    inflight: bool
+    generation: int
+
+
+class OwnerOverview(_OwnerOut):
+    today: str
+    audience: Literal["owner"] = "owner"
+    audience_note: str
+    access_controlled: Literal[False] = False
+    reload: OwnerReloadState
+    operations: OwnerOperations
+    kredi: OwnerKredi
+    gider_gelir: OwnerGiderGelir
+    butce: OwnerButce
+    system: OwnerSystem
+    known_issues: List[OwnerKnownIssue]
+    ai_used: Literal[False] = False
+
+
+class OwnerStatus(_OwnerOut):
+    audience_note: str
+    access_controlled: Literal[False] = False
+    reload: OwnerReloadState
+    system: OwnerSystem
+    known_issues: List[OwnerKnownIssue]
+    ai_used: Literal[False] = False
+
+
+class OwnerReloadResponse(_OwnerOut):
+    started: bool
+    reload: OwnerReloadState
+    sources: List[OwnerSourceHead]
+    ai_used: Literal[False] = False

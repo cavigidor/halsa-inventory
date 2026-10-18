@@ -737,9 +737,12 @@ LIVE = ("app.py", "dashboard_builder.py", "services/refresh.py", "services/conte
 
 
 def test_53_m5_unchanged():
+    # M7-6 (D-047): the app reaches Bütçe only through services/owner_view (validity counts); never an importer import
     for live in LIVE:
         text = (ROOT / live).read_text()
-        assert "importers" not in text and "butce" not in text and "import_butce" not in text, live
+        assert "importers" not in text and "import_butce" not in text, live
+        if live not in ("app.py", "dashboard_builder.py"):     # the Yönetim UI renders the owner_view payload
+            assert "butce" not in text, live
 
 
 def test_54_to_58_other_importers_unchanged():
@@ -753,7 +756,8 @@ def test_54_to_58_other_importers_unchanged():
 
 
 def test_59_no_dashboard_or_api_exposure():
-    assert "butce" not in (ROOT / "app.py").read_text().lower()
+    app = (ROOT / "app.py").read_text()
+    assert "import_butce" not in app and "importers" not in app and "BudgetFact" not in app   # M7-6: owner_view only
     assert "import_butce" not in (ROOT / "dashboard_builder.py").read_text()
     assert "butce" not in (ROOT / "services/evidence.py").read_text().lower()
 

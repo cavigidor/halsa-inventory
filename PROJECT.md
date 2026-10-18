@@ -25,7 +25,8 @@ dashboard_builder.py ── m_stock / m_collections / load_sales / m_lapsed / m_
    │                              server-driven "Müşteri 360" tab from _c360_panel(), M7-1, and the
    │                              server-driven "Fırsatlar" tab from _opp_panel(), M7-3, and the
    │                              server-driven "Fuar Merkezi" tab from _fair_panel(), M7-4, and the
-   │                              server-driven "Takip / CRM" tab from _crm_panel(), M7-5)
+   │                              server-driven "Takip / CRM" tab from _crm_panel(), M7-5, and the
+   │                              server-driven "Yönetim" owner tab from _own_panel(), M7-6)
    ▼
 services/context.py   build_context(): normalized, top-N "agent context"; the action queue comes from
    │                  registered sources (services/actions.py + action_sources.py), ranked by
@@ -58,6 +59,11 @@ services/fairs.py / fair_store.py / fair_center.py  M7-4 Fuar Merkezi: FUAR-only
 services/crm_store.py / crm.py  M7-5 lightweight CRM: append-only interactions (memory kind crm_contact) + one
                       current follow-up per customer (crm_followups); coverage always incomplete, no person
                       metrics; due follow-ups → Günlük Satış "Takip Zamanı"; GET/POST/PUT /api/crm/*; never AI (D-046)
+services/owner_view.py  M7-6 Yönetim: explicit-path owner sources (Kredi / Gider-Gelir / Bütçe) → compact cached views
+                      (scheduled loan obligations, source-native Gider/Gelir, Bütçe health) + operational summary +
+                      system status / known issues; GET /api/owner/*, guarded POST /api/owner/reload; never AI (D-047)
+services/sales_projection.py  M7-6: Customer 360 projection of the sales frame build_context already read, handed
+                      privately (once) to the first Customer 360 build — no second sales read
 ```
 
 ## Important files
@@ -90,6 +96,8 @@ services/crm_store.py / crm.py  M7-5 lightweight CRM: append-only interactions (
 | `services/fair_store.py` | M7-4: SQLite fair campaigns, members (manual funnel stage, next-action date, note) and audit history; parameterized SQL, no logging |
 | `services/fair_center.py` | M7-4: campaign views, KAPALI-safe manual curation, read-only candidate segments, ERP evidence vs funnel, Customer 360 campaign context |
 | `services/crm_store.py` | M7-5: SQLite CRM storage — safe `memory` column migration, append-only `crm_contact` interactions, `crm_followups` (one current follow-up per customer); parameterized SQL, no logging (`docs/m7_lightweight_crm.md`, D-046) |
+| `services/owner_view.py` | M7-6: owner sources from explicit env paths only (lazy, compact cache, generation-safe reload, per-source isolation); Kredi 30/60/90 scheduled obligations per currency; source-native Gider/Gelir; Bütçe validity / coverage; operational summary; known-issues panel (`docs/m7_owner_integration.md`, D-047) |
+| `services/sales_projection.py` | M7-6: `prepare_sales` (moved from Customer 360, unchanged) and the one-use `SalesFrameHandoff` from the context build to Customer 360 |
 | `services/crm.py` | M7-5: CRM rules and views — validation against Customer 360, KAPALI follow-up rule, incomplete coverage, counts-only summary, due lists, orphan counting, request-time `crm_followup` task rows |
 | `services/importers/butce.py` | M6-6: Bütçe (owner only) → cell-level facts (sales blocks by segment and month, rates, expense groups, BÜTÇE ÖZET panels) with validity and a coverage map; invalid and externally dependent cells are isolated, never repaired; source status `partially_usable`, never authoritative (`docs/m6_butce.md`, D-041); explicit file only; not used by M5 |
 | `tests/fixtures/xlsx_synth.py` | Runtime OOXML writer for synthetic workbooks with cached formulas, error cells and external links |
@@ -131,7 +139,7 @@ services/crm_store.py / crm.py  M7-5 lightweight CRM: append-only interactions (
 | 4 | Live macro data (TCMB/TÜİK inflation, FX) | later |
 | 5 | "✨ AI Aksiyon Merkezi" tab: deterministic action queue first, AI on demand (design: `docs/m5_action_center.md`) | **complete** (M5-1 to M5-6: backend, read-only tab, action state, drafts + drawer, controlled refresh, browser verification) |
 | 6 | Additional data sources / sales intelligence foundation: validated importers for hedef raporu, detailed collections, Trodat sales, gider/gelir, kredi takip, bütçe (`docs/roadmap_m6_m7.md`) | in progress: M6-0 source inventory done (`docs/m6_source_inventory.md`, D-034); M6-1 importer framework done (`services/importers/`, D-035); M6-2 order-source normalization done (D-036); M6-3 Hedef importer done (D-037); M6-4 blocked (missing export), so the Kredi importer was pulled forward (D-038); M6-5 Trodat importer done (D-039); M6-6 Gider/Gelir done (D-040); M6-6 Bütçe done (D-041) |
-| 7 | Sales operating system: daily sales queue, customer 360, cross-sell, January fair command center, light CRM, new-buyer discovery | in progress: M7-1 Customer 360 (D-042), M7-2 Günlük Satış (D-043), M7-3 cross-sell + opportunity / territory intelligence (D-044) and M7-4 Fuar Merkezi (D-045) and M7-5 lightweight CRM / follow-up (D-046) done; next M7-6 owner / management views + polish |
+| 7 | Sales operating system: daily sales queue, customer 360, cross-sell, January fair command center, light CRM, new-buyer discovery | in progress: M7-1 Customer 360 (D-042), M7-2 Günlük Satış (D-043), M7-3 cross-sell + opportunity / territory intelligence (D-044) and M7-4 Fuar Merkezi (D-045), M7-5 lightweight CRM / follow-up (D-046) and M7-6 Yönetim + integration / polish (D-047) done — **complete** (M6-4 still blocked externally) |
 | — | Multi-user / remote deployment (auth, admin and salesperson roles, private deployment, backups) | future, out of scope for M5 (D-016) |
 
 ## Product principle (D-015)

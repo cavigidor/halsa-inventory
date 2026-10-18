@@ -25,6 +25,7 @@ from services import fairs as FA
 from services import fair_store as FS
 from services import fair_center as FC
 from services import crm as CRM
+from services import owner_view as OV
 from services import action_sources  # noqa: F401  (registers the built-in deterministic sources)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -88,6 +89,8 @@ def _startup():
     app.state.agent = BusinessActionAgent(app.state.provider)
     app.state.c360 = C360.Customer360Repository(DATA_FOLDER, app.state.repo, hedef_path=HEDEF_PATH,
                                                 hedef_snapshot=HEDEF_SNAPSHOT_DATE, background=True)
+    # M7-6 Yönetim: owner sources only from explicit env paths; loaded lazily when the tab is first opened.
+    app.state.owner = OV.OwnerRepository(OV.config_from_env(), background=True)
     if WARMUP_CONTEXT:
         threading.Thread(target=_warm_up, args=(app.state.repo, app.state.c360), name="context-warmup",
                          daemon=True).start()
@@ -105,6 +108,9 @@ def get_agent() -> BusinessActionAgent:
 
 def get_c360() -> C360.Customer360Repository:
     return app.state.c360
+
+def get_owner() -> OV.OwnerRepository:
+    return app.state.owner
 
 
 def _ctx_or_none(repo):
@@ -715,6 +721,92 @@ def crm_set_followup(customer_code: str, body: S.CrmFollowupUpdate,
         return CRM.set_followup(snap, customer_code, data)
     except CRM.CrmError as e:
         _crm_error(e)
+
+
+# ---------------- M7-6 Yönetim (owner view; read-only; never calls the AI provider) ----------------
+# Owner sources are optional explicit-path inputs with their own lazy cache and an explicit, guarded reload that never
+# touches the core context; the core refresh never reloads them. The operational summary reuses live state only.
+def _owner_live(repo, c360):
+    ctx = repo.current()
+    snap, c3_state = None, "building"
+    try:
+        snap, c3_state = c360.snapshot(), "ready"
+    except C360.Customer360NotReady as e:
+        c3_state = e.state
+    except C360.Customer360Error:
+        c3_state = "error"
+    same = ctx is not None and snap is not None and c360.signature_for(ctx) == snap.signature
+    qcounts = None
+    if same:
+        try:
+            qcounts = SQ.build_queue(ctx, snap, upsert=False, limit=1)["filter_counts"]
+        except SQ.QueueUnavailable:
+            qcounts = None
+    crm = CRM.summary(snap) if snap is not None else None
+    try:
+        campaigns = FS.list_campaigns()
+        sqlite_ok = True
+    except Exception:
+        campaigns, sqlite_ok = [], False
+    ops = OV.operations(ctx if same else None, snap if same else None, qcounts, crm, campaigns)
+    if ctx is not None:
+        core = {"context_state": "ready", "sales_file": ctx["source_files"].get("sales"),
+                "stock_file": ctx["source_files"].get("stock"), "aging_file": ctx["source_files"].get("aging"),
+                "as_of_data_date": ctx.get("as_of_data_date")}
+    else:
+        core = {"context_state": "error" if getattr(repo, "last_error", None) else "building"}
+    stores = {"customer360_state": c3_state, "customer360_customers": len(snap.customers) if snap is not None else None,
+              "crm_coverage_status": CRM.COVERAGE_STATUS, "crm_coverage_label": CRM.COVERAGE_LABEL,
+              "fair_campaigns": len(campaigns), "sqlite_available": sqlite_ok}
+    hedef = {"configured": bool(c360.hedef_path), "file": os.path.basename(c360.hedef_path or "") or None,
+             "status": snap.hedef_status if snap is not None else ("not_configured" if not c360.hedef_path
+                                                                  else c3_state)}
+    return ctx if same else None, ops, crm, core, stores, hedef
+
+
+def _owner_system(owner, entries, core, stores, hedef):
+    return {"core": core, "hedef": hedef,
+            "owner_sources": [OV.source_head(owner, k, entries[k]) for k in OV.SOURCES],
+            "stores": stores,
+            "blocked": [{"key": "detailed_collections", "label": "Detaylı Tahsilat",
+                         "status_label": "Sağlanmadı / M6-4 bloke"}]}
+
+
+@app.get("/api/owner/overview", response_model=S.OwnerOverview)
+def owner_overview(repo: ContextRepository = Depends(get_repo), c360: C360.Customer360Repository = Depends(get_c360),
+                   owner: OV.OwnerRepository = Depends(get_owner)):
+    owner.ensure_loaded()
+    entries = owner.snapshot()
+    today = dt.date.today()
+    ctx, ops, crm, core, stores, hedef = _owner_live(repo, c360)
+    return S.OwnerOverview(
+        today=today.isoformat(), audience_note=OV.OWNER_AUDIENCE_NOTE,
+        reload={"inflight": owner.inflight, "generation": owner.generation}, operations=ops,
+        kredi=OV.kredi_section(owner, entries["kredi"], today), gider_gelir=OV.gider_gelir_section(owner, entries["gider_gelir"]),
+        butce=OV.butce_section(owner, entries["butce"]), system=_owner_system(owner, entries, core, stores, hedef),
+        known_issues=OV.known_issues(getattr(repo.current(), "data_quality", None), ops, crm))
+
+
+@app.get("/api/owner/status", response_model=S.OwnerStatus)
+def owner_status(repo: ContextRepository = Depends(get_repo), c360: C360.Customer360Repository = Depends(get_c360),
+                 owner: OV.OwnerRepository = Depends(get_owner)):
+    owner.ensure_loaded()
+    entries = owner.snapshot()
+    _, ops, crm, core, stores, hedef = _owner_live(repo, c360)
+    return S.OwnerStatus(audience_note=OV.OWNER_AUDIENCE_NOTE,
+                         reload={"inflight": owner.inflight, "generation": owner.generation},
+                         system=_owner_system(owner, entries, core, stores, hedef),
+                         known_issues=OV.known_issues(getattr(repo.current(), "data_quality", None), ops, crm))
+
+
+@app.post("/api/owner/reload", response_model=S.OwnerReloadResponse)
+def owner_reload(owner: OV.OwnerRepository = Depends(get_owner)):
+    """Re-read ONLY the explicitly configured owner workbooks (never the core sales / stock / Cari sources, never AI).
+    Ignored while a load is already in flight."""
+    r = owner.reload()
+    entries = owner.snapshot()
+    return S.OwnerReloadResponse(started=r["started"], reload={"inflight": owner.inflight, "generation": owner.generation},
+                                 sources=[OV.source_head(owner, k, entries[k]) for k in OV.SOURCES])
 
 
 # ---------------- draft message (copy-only; nothing is ever sent) ----------------
