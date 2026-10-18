@@ -4,7 +4,14 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-6 are merged; **Milestone 7 is COMPLETE** (PR #24, squash merge `de7eb43`; D-047). No new milestone is started.
 
 ## Current
-- No active implementation checkpoint. Post-M7 local readiness is merged; next is owner-side Mac setup and browser acceptance (not yet verified), plus Kredi `DURUM` clarification expected 2026-10-19. Financial/data-quality decisions remain unapproved.
+- [ ] **M8-P0 father-first launch plan (docs only):** review `docs/m8_father_first_launch.md`, `docs/m8_owner_questions_tr.md`, and D-048; merge the planning PR after CI. **No implementation or public deployment is started.** Next bounded implementation checkpoint is CP1 (security-first owner/father authentication) only after plan merges. Kredi `DURUM` remains pending 2026-10-19; all other unapproved owner decisions remain open.
+
+## Next (M8 — production launch)
+- [ ] **M8-CP1–CP8** as sequenced in `docs/m8_father_first_launch.md`. One implementation PR/checkpoint at a time, with tests and verified acceptance; revise count if approved feature-gap work expands.
+- [ ] **Owner: answer `docs/m8_owner_questions_tr.md`**, identify real file-of-record and supply missing exports via a private channel; do not commit real customer data. The original voice-note transcript is not verified in the repo, so signoff on feature coverage is still required.
+- [ ] **Owner: provision approved private cloud hosting, billing, encrypted backup and secure account setup**; verify privacy/transfer handling for Halsa data, plus father usability from Türkiye. Never deploy current unauthenticated app publicly.
+- [ ] **Owner: monthly-report upload acceptance**, including complete source date/revision selection, all affected M7 views, preserved CRM/fair/action state and failure rollback. No local installation for father.
+- [ ] **Later: Kredi DURUM semantics clarification**, one narrow follow-up after 2026-10-19 response. Do not interpret Kapalı as paid before then.
 
 ## Next (after M7: owner decisions and follow-ups; start each only when moved to *Current*)
 - [ ] **Owner: cross-sell threshold review.** On real data the initial guards give a broad population (78 % of active

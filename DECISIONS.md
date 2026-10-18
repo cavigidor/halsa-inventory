@@ -708,3 +708,24 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
    (no second sales read); the M6-2 order-source import stays because it is the only fail-closed validation of those
    columns.
 10. **M7 is complete after M7-6** even though M6-4 (Detailed Collections) remains blocked by a missing export.
+
+### D-048 · 2026-10-18 · Father-first, owner-maintained web launch is the next delivery goal (M8 plan)
+
+- **Owner direction:** The owner is in the USA and handles all technical maintenance and monthly uploads of
+  reports prepared by Halsa staff. His father in Türkiye (70) must use a secure bookmarked web link without
+  installing software, running commands, importing files or maintaining the service. Feature scope from the father's
+  original voice-message analysis is preserved, not reduced merely to simplify hosting.
+- **Release boundary:** first authenticated deployment serves ONLY the owner and his father, with all existing
+  valid M1–M7 functionality. Employees get separate, restricted access only in a later explicit checkpoint.
+  Hosting, permissions, backups and unified monthly publication are necessary for production acceptance.
+- **User experience:** one owner-controlled monthly upload validates/updates ALL relevant core and optional
+  reports and resulting cached screens in a consistent generation; previously recorded CRM, fair and action state
+  survives refresh, failure and reboot. A failed batch cannot replace the last good dashboard.
+- **What is NOT decided:** no provider/regulatory assessment, credentials, file-of-record, financial accounting
+  definition, DQ-1/2/4/5 treatment, commercial targets, or Kredi `DURUM` interpretation is implied.
+  Kredi DURUM awaits a specific follow-up on 2026-10-19. M6-4 still needs its source. The original audio/voice
+  transcript is not bundled in the repository and must be explicitly checked if verbatim coverage is claimed.
+- **Execution:** `docs/m8_father_first_launch.md` is the planning and acceptance baseline;
+  `docs/m8_owner_questions_tr.md` is the owner-decision questionnaire. Implementation consists of bounded
+  checkpoint PRs, with synthetic CI and a final remote real-data acceptance. An implementation plan does not
+  constitute a live deployment.
