@@ -1,10 +1,9 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-17 (M7-5 lightweight CRM merged to `main` @ `cc14e3f`; M7-6 Yönetim + integration / polish done on `claude/m7-6-owner-integration-polish`, PR pending)._
+_Updated 2026-10-18 (M7-6 Yönetim + integration / polish squash-merged into `main` via PR #24 @ `de7eb43`; Milestone 7 complete; Kredi DURUM clarification pending 2026-10-19)._
 
 ## Git
-- **`main`:** `cc14e3f` (PR #23, M7-5 lightweight CRM). **This checkpoint:** branch
-  `claude/m7-6-owner-integration-polish` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
+- **`main`:** PR #24 (M7-6) squash merge `de7eb43` followed by repository tracking updates. M7-6 branch is merged; new implementation work requires its own checkpoint.
 - **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
   there to get M5 (see "Owner follow-ups" below).
 
@@ -17,7 +16,7 @@ docs only), M6-1 (framework), M6-2 (order source) and M6-3 (Hedef) are merged. *
 BLOCKED** (the `Evrak Detaylı Tahsilat Raporu` export is missing). The Kredi takip importer (part of M6-6) was pulled
 forward (D-038) and is merged. M6-5 (Trodat), M6-6 Gider/Gelir and M6-6 Bütçe are merged: every currently available M6 source is done; M6-4 stays
 BLOCKED and is not renumbered.
-**Milestone 7 — Sales Operating System: COMPLETE with M7-6** (PR pending). M7-1 (Customer 360), M7-2 (Günlük Satış), M7-3 (cross-sell + opportunity / territory intelligence), M7-4 (Fuar Merkezi) and M7-5 (Takip / CRM) are merged; M7-6 (Yönetim owner view + integration / performance / polish) is done. M6-4 stays blocked by a missing export; that does not block M7 (D-047).
+**Milestone 7 — Sales Operating System: COMPLETE with M7-6** (PR #24 merged 2026-10-18 @ `de7eb43`). M7-1 (Customer 360), M7-2 (Günlük Satış), M7-3 (cross-sell + opportunity / territory intelligence), M7-4 (Fuar Merkezi) and M7-5 (Takip / CRM) are merged; M7-6 (Yönetim owner view + integration / performance / polish) is done. M6-4 stays blocked by a missing export; that does not block M7 (D-047).
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -1145,7 +1144,7 @@ Tests:
 build-time reservoir and Customer 360 search / identity are unchanged. Detailed Collections stays blocked. M7-6 is
 not started.
 
-## M7-6 Yönetim + integration / performance / polish (done; PR pending)
+## M7-6 Yönetim + integration / performance / polish (merged, PR #24 @ `de7eb43`)
 Branch `claude/m7-6-owner-integration-polish` from `main` @ `cc14e3f`. Doc: `docs/m7_owner_integration.md`, decision
 D-047.
 
@@ -1189,7 +1188,7 @@ Tests:
 M7-5 CRM rules and score, Customer 360 identity / facts are unchanged. Detailed Collections stays blocked.
 
 ## Immediate next task
-Review and merge the M7-6 PR. **Milestone 7 is then complete.** No new milestone is started. Still blocked or open
+**Milestone 7 is complete** (PR #24 merged). No new milestone is started. The Kredi `DURUM` field is still unverified; the owner expects clarification from his father on 2026-10-19. Preserve current conservative labels and calculations until the business definition is confirmed. Still blocked or open
 (TASKS.md backlog):
 - DQ-1 / DQ-2 / DQ-4 / DQ-5 (owner approval), owner files of record, single-pass framework reader (performance).
 - CRM: when logging is standardized enough to drop "Eksik kayıt olabilir"; a CRM export (none received);
