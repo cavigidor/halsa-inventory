@@ -1,10 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-17 (M7-4 Fuar Merkezi merged to `main` @ `ccbae63`; M7-5 lightweight CRM done on `claude/m7-5-lightweight-crm`, PR pending)._
+_Updated 2026-10-17 (M7-5 lightweight CRM merged to `main` @ `cc14e3f`; M7-6 Yönetim + integration / polish done on `claude/m7-6-owner-integration-polish`, PR pending)._
 
 ## Git
-- **`main`:** `ccbae63` (PR #22, M7-4 Fuar Merkezi). **This checkpoint:** branch
-  `claude/m7-5-lightweight-crm` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
+- **`main`:** `cc14e3f` (PR #23, M7-5 lightweight CRM). **This checkpoint:** branch
+  `claude/m7-6-owner-integration-polish` (PR pending); the commit that last touched this file is the checkpoint (`git log -1 -- STATUS.md`).
 - **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
   there to get M5 (see "Owner follow-ups" below).
 
@@ -17,7 +17,7 @@ docs only), M6-1 (framework), M6-2 (order source) and M6-3 (Hedef) are merged. *
 BLOCKED** (the `Evrak Detaylı Tahsilat Raporu` export is missing). The Kredi takip importer (part of M6-6) was pulled
 forward (D-038) and is merged. M6-5 (Trodat), M6-6 Gider/Gelir and M6-6 Bütçe are merged: every currently available M6 source is done; M6-4 stays
 BLOCKED and is not renumbered.
-**Milestone 7 — Sales Operating System: in progress.** M7-1 (Customer 360), M7-2 (Günlük Satış), M7-3 (cross-sell + opportunity / territory intelligence) and M7-4 (Fuar Merkezi) are merged. M7-5 (lightweight CRM / follow-up) is done (PR pending). M7-6 is not started.
+**Milestone 7 — Sales Operating System: COMPLETE with M7-6** (PR pending). M7-1 (Customer 360), M7-2 (Günlük Satış), M7-3 (cross-sell + opportunity / territory intelligence), M7-4 (Fuar Merkezi) and M7-5 (Takip / CRM) are merged; M7-6 (Yönetim owner view + integration / performance / polish) is done. M6-4 stays blocked by a missing export; that does not block M7 (D-047).
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -85,7 +85,7 @@ OpenAI model. The OpenAI default model `gpt-5-mini` lives in
 - The controlled refresh lock uses `flock`: supported on macOS and Linux (the Mac and CI), not on Windows (D-032).
 - `weekly_agent.py` (older, unused, standalone weekly report e-mail to the owner via SMTP) still exists. The app
   never imports it and it never contacts customers; it is outside the copy-only app surface (D-031).
-- DQ-3: tie order in "Büyüme / Küçülme" depends on the Python hash seed (rows, not values; TASKS *Next*).
+- DQ-3: FIXED in M7-6 (`m_momentum` sorts by `(pct, code)`; the synthetic dashboard is byte-identical across hash seeds).
 - DQ-1: dashboard margin uses `fillna(0)` for missing cost (owner decision needed).
 - DQ-2: the dashboard "Stok Eritme" list still includes KAPALI customers (owner decision needed).
 - The lapsed qualification window is 2021–2025 in code but 2020–2025 in the spec (TASKS *Blocked*).
@@ -1094,7 +1094,7 @@ Tests:
 **Regression:** M5 top 15, existing M7-2 reasons, M7-3 cross-sell results and thresholds, and Customer 360 search /
 identity are unchanged. Detailed Collections stays blocked.
 
-## M7-5 Lightweight CRM / follow-up (done; PR pending)
+## M7-5 Lightweight CRM / follow-up (merged, PR #23 @ `cc14e3f`)
 Branch `claude/m7-5-lightweight-crm` from `main` @ `ccbae63`. Doc: `docs/m7_lightweight_crm.md`, decision D-046.
 
 **What it contains:**
@@ -1145,9 +1145,53 @@ Tests:
 build-time reservoir and Customer 360 search / identity are unchanged. Detailed Collections stays blocked. M7-6 is
 not started.
 
+## M7-6 Yönetim + integration / performance / polish (done; PR pending)
+Branch `claude/m7-6-owner-integration-polish` from `main` @ `cc14e3f`. Doc: `docs/m7_owner_integration.md`, decision
+D-047.
+
+**What it contains:**
+- **Yönetim tab** (before AI Aksiyon Merkezi): A. Operasyon Özeti (counts from live state; cross-sell share with a
+  neutral broadness note at ≥ 50 %), B. Finansman / Kredi (scheduled obligations by 30/60/90-day horizon per currency,
+  past due separate, unknown snapshot stated, no remaining-principal total), C. Gider / Gelir (source-native monthly
+  reported sales / cost / gross profit / expense, four native lines separate, basis unverified), D. Bütçe Sağlığı
+  (validity / coverage counts), E. Veri ve Sistem Durumu (core sources, Hedef, owner sources, stores, blocked Detailed
+  Collections, "Açık kararlar / veri eksikleri"). Labelled owner information, not access-controlled.
+- **Owner sources** (`services/owner_view.py`): `KREDI_PATH`, `GIDER_GELIR_PATH`, `BUTCE_PATH` (+ optional declared
+  dates / years) only; lazy load, compact cache, `POST /api/owner/reload` (guarded; owner files only); per-source
+  `not_configured | loading | ready | failed`; generation-safe reload.
+- **API:** `GET /api/owner/overview`, `GET /api/owner/status`, `POST /api/owner/reload` (strict schemas, `ai_used: false`).
+- **Performance:** Customer 360 consumes a private one-use projection of the sales frame the context already read
+  (`services/sales_projection.py`); the second sales read is gone. Same-session real data: Customer 360 build
+  93.9 / 101.8 s → 64.0 / 76.0 / 53.1 s; its peak RSS ≈ 860 → ≈ 750 MB; context peak 493 → 502 MB. The M6-2 import
+  (the remaining large step) is unchanged because it is the only fail-closed validation of the order-source columns.
+- **DQ-3 fixed** (tie order). DQ-1 / DQ-2 / DQ-4 / DQ-5 untouched and listed in Yönetim.
+- **Polish:** tab focus / `aria-current` / phone wrap; Günlük Satış stale-response guard; labels on Fuar Merkezi
+  checkboxes and CRM follow-up fields.
+
+Tests:
+| Where | Command | Result |
+|---|---|---|
+| Cloud, no data (node + jsdom + Chromium) | `AI_PROVIDER=disabled REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 python -m pytest -q` | **1054 passed, 7 skipped, 1 xfailed** (53 new: 48 unit/API/integration tests in `tests/test_m7_owner.py`, 5 Playwright tests covering the 16 scenarios plus the all-tab phone and accessibility checks in `tests/test_m7_owner_browser.py`; existing tests updated only for the new tab, the `/api/owner` route name and the M6 "no API" guards, which now allow the owner view but still forbid importer imports in the app) |
+
+**Real-data read-only check** (Mac VM, 5 Oct 2026 exports; aggregates only):
+
+| Item | Result |
+|---|---|
+| M5 top 15 / collections / winback / risk / stock lists / company / shrinking / Günlük Satış reservoir | identical to `main` (607 reservoir reasons, same order) |
+| Cross-sell share (live model) | 1,516 of 1,937 active customers (78.3 %) → broadness note shown; thresholds unchanged |
+| DQ-4 blind spot | 1,181 products without computable stock coverage |
+| Operational summary | 6,754 customers; 576 open Günlük Satış customers; 5 collection-first |
+| Owner smoke (explicit paths, smoke only) | Kredi ready (25 contracts, 158 unpaid installments: 7 / 11 / 15 within 30 / 60 / 90 days, 15 later, 128 past due vs today; 152 with `Kapalı` status); Gider/Gelir ready (2026, 9 months); Bütçe ready (partially usable, 99.89 % coverage, 67 `#REF!`, 3 `#DIV/0!`, 3 externally dependent) |
+| Latency | core APIs 1–8 ms median; owner overview 3–9 ms; owner load 1.9–5.3 s; reload 1.1–2.7 s |
+| AI calls / sources / temp DB | 0 / unchanged (hash + mtime) / deleted |
+
+**Regression:** M7-2 reason ids and scores, M7-3 cross-sell thresholds and results, M7-4 fair score and taxonomy,
+M7-5 CRM rules and score, Customer 360 identity / facts are unchanged. Detailed Collections stays blocked.
+
 ## Immediate next task
-Review and merge the M7-5 PR. Next large checkpoint (not started): M7-6 owner / management views + integration /
-polish. Still blocked or open:
+Review and merge the M7-6 PR. **Milestone 7 is then complete.** No new milestone is started. Still blocked or open
+(TASKS.md backlog):
+- DQ-1 / DQ-2 / DQ-4 / DQ-5 (owner approval), owner files of record, single-pass framework reader (performance).
 - CRM: when logging is standardized enough to drop "Eksik kayıt olabilir"; a CRM export (none received);
   `CRM_FOLLOWUP_SCORE` tuning.
 - Fair taxonomy (ETKİNLİK / SAHA), post-fair conversion window, fair cost attribution, historical invitation and

@@ -684,3 +684,27 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 8. **Separation:** no CRM content is ever sent to AI (`get_memory` excludes `crm_contact` rows); fair funnel state and
    CRM state stay separate; `Dijital Pazarlama Raporu_2025.xlsx` is not imported; orphan CRM rows are counted, never
    reassigned or deleted; CRM state survives refreshes; no Excel read per request.
+
+### D-047 · 2026-10-17 · Yönetim owner view; owner sources explicit and optional; scheduled-obligation Kredi; source-native Gider/Gelir; Bütçe health; DQ-3; M7 complete (M7-6)
+1. **Owner sources stay explicit-path, optional inputs** (`KREDI_PATH`, `GIDER_GELIR_PATH`, `BUTCE_PATH` + optional
+   declared dates / years), imported only through `import_kredi` / `import_gider_gelir` / `import_butce`. Nothing is
+   discovered or ordered by mtime; configuring a file is not a file-of-record decision. They are never required by the
+   core refresh, the dashboard or any M7 workflow. Lazy load, process-lifetime compact cache, explicit guarded reload;
+   per-source isolation. Core refresh and owner reload are separate workflows.
+2. **Yönetim is owner-audience data in local single-user mode.** The tab says so and is not access-controlled; real
+   role enforcement waits for an authenticated multi-user deployment (D-016).
+3. **Kredi 30/60/90 is a scheduled-obligation view, not a cash-flow forecast:** unpaid `remaining_amount` by due date,
+   cumulative windows from the local date, past-due shown separately, per currency (no FX), freshness shown separately
+   (unknown snapshot stated), no remaining-principal total (not additive). The unverified `DURUM` field never drops an
+   unpaid installment (in the real export most `Kapalı` contracts still carry unpaid installments); it is only counted.
+4. **Gider/Gelir stays source-native and unverified** until the accounting basis and the management mapping are
+   approved: the four native lines separate, totals only where M6 verifies them, no M5 margin, no profitability.
+5. **Bütçe exposes validity / coverage**, not variance: no budget-vs-actual and no reconciliation with Gider/Gelir.
+6. **M7-6 does not fix DQ-1 / DQ-2 / DQ-4 / DQ-5** (each changes a reported number or list and needs owner
+   approval); they are shown in the known-issues panel.
+7. **DQ-3 is fixed:** `m_momentum` sorts by `(pct, code)`; ordering only, no value or membership change.
+8. **Owner data never enters AI** (evidence, actions, drafts, automatic comments) and never logs.
+9. **Performance:** Customer 360 consumes a private, one-use projection of the sales frame the context already read
+   (no second sales read); the M6-2 order-source import stays because it is the only fail-closed validation of those
+   columns.
+10. **M7 is complete after M7-6** even though M6-4 (Detailed Collections) remains blocked by a missing export.

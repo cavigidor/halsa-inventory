@@ -50,8 +50,10 @@ def m_stock(path,df=None):
                 'cov':_n(r[SC['cov']],2),'inv':_n(r[SC['inv']]),'disc':bool(r['_d'])} for _,r in over.iterrows()]
     return low_rows,over_rows,int(len(df))
 
-def load_sales(path,df=None):
-    df=read_sales_raw(path) if df is None else df.copy()
+def load_sales(path,df=None,copy=True):
+    # copy=False (M7-6, build_context only): the caller read this frame itself and hands over ownership, exactly
+    # like the default read below (which also modifies its own frame in place).
+    df=read_sales_raw(path) if df is None else (df.copy() if copy else df)
     df['_date']=pd.to_datetime(df['Tarih'],errors='coerce'); df['_yr']=df['_date'].dt.year
     _nt=num(df['Nettutar']); df['_amt_missing']=_nt.isna()   # M7-4: remember missing amounts (M5 still sums 0)
     df['Nettutar']=_nt.fillna(0); df['miktar']=num(df['miktar']).fillna(0)
@@ -138,7 +140,7 @@ def m_momentum(df,attr):
         if x<MIN_TOTAL or b<=0: continue
         rows.append({'code':c,'name':str(names.get(c,'')),'rep':a.get('rep',''),'sector':a.get('sector',''),
                      'y2025':_n(x),'y2026':_n(b),'delta':_n(b-x),'pct':round((b-x)/x*100,1)})
-    rows.sort(key=lambda r:r['pct'])
+    rows.sort(key=lambda r:(r['pct'],str(r['code'])))   # DQ-3 (M7-6): equal pct in code order, never hash-seed order
     det=_cust_detail(df[df['_cust'].isin({r['code'] for r in rows})])
     for r in rows: r['detail']=det.get(r['code'],{'years':[],'products':[]})
     return rows
@@ -222,7 +224,7 @@ def m_collections(path,df=None):
     return rows, owed_map
 
 # ---------- oluştur ----------
-def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True):
+def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True,own_panel=True):
     """sources/frames (M5-5): a frozen source selection and the already-read raw frames, so a controlled
     refresh builds from exactly what it validated. stats_out (dict): filled with build totals for verification."""
     today=today or dt.date.today()
@@ -302,7 +304,7 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     meta={'date':d_tr,'stock':os.path.basename(sp) if sp else '','sales':os.path.basename(ep) if ep else '',
           'aging':os.path.basename(ap) if ap else '','tiers':tier_counts,'total':total,'has_aging':has_aging,
           'asof':_asof_iso(sdf)}
-    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel,opp_panel=opp_panel,fair_panel=fair_panel,crm_panel=crm_panel))
+    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel,opp_panel=opp_panel,fair_panel=fair_panel,crm_panel=crm_panel,own_panel=own_panel))
     if stats_out is not None:
         stats_out.update({'asof':meta['asof'],'overdue_total':overdue_total,'overstock_value':over_val,
                           'tabs':list(modules.keys()),'products':total,'lapsed':len(lap),'low':len(low),
@@ -1325,10 +1327,11 @@ function start(){
   load(0);
 }
 async function load(n){
-  let r, body=null;
+  let r, body=null; const my=st.lseq=(st.lseq||0)+1;   // M7-6: a late response of an older filter never renders
   try{r=await fetch('/api/sales-queue?filter='+encodeURIComponent(st.filter)+'&limit=20',{headers:{'Accept':'application/json'}});
       try{body=await r.json();}catch(e){body=null;}}
-  catch(e){state(MSG.offline,'off'); return;}
+  catch(e){if(my===st.lseq) state(MSG.offline,'off'); return;}
+  if(my!==st.lseq) return;
   if(r.status===503){
     const d=(body&&body.detail)||{};
     if(d.state==='building'){state(n<POLL_MAX?MSG.building:MSG.slow,'wait'); if(n<POLL_MAX) setTimeout(()=>load(n+1),POLL_MS); return;}
@@ -1884,7 +1887,7 @@ async function loadCandidates(n){
   if(my!==st.seqs.cand) return;
   st.c.picked.clear();
   $('.fm-c-count').textContent='Bu segmentte '+num(r.total)+' müşteri var'+(r.truncated?' (ilk '+r.limit+' gösteriliyor)':'')+'. KAPALI olduğu için gösterilmeyen: '+num(r.kapali_excluded)+'. '+(r.note||'');
-  const rows=(r.items||[]).map(it=>{const cb=el('input'); cb.type='checkbox'; cb.className='fm-pick'; cb.dataset.code=it.customer_code; cb.disabled=!c||c.status==='archived'||it.in_campaign;
+  const rows=(r.items||[]).map(it=>{const cb=el('input'); cb.type='checkbox'; cb.className='fm-pick'; cb.dataset.code=it.customer_code; cb.setAttribute('aria-label','Seç: '+it.customer_code); cb.disabled=!c||c.status==='archived'||it.in_campaign;
     cb.addEventListener('change',()=>{cb.checked?st.c.picked.add(it.customer_code):st.c.picked.delete(it.customer_code); $('.fm-c-add').disabled=!st.c.picked.size;});
     const nm=el('span'); nm.append(el('div','fm-name',it.display_name),el('div','fm-code',it.customer_code));
     const tags=el('span'); (it.segments||[]).forEach(s=>tags.append(el('span','fm-chip',SEG[s]||s),document.createTextNode(' ')));
@@ -1918,7 +1921,7 @@ async function loadEdition(id,n){
   const tops=(title,list)=>{box.append(el('p','fm-muted',title)); box.append(table([['Etiket','t'],[r.amount_label,'r'],['Miktar','r'],['Sipariş','r']],(list||[]).map(x=>[x.name?x.name+' ('+x.label+')':x.label,money(x.net_order_amount),num(x.quantity),num(x.orders)])));};
   tops('En çok ürünler',r.top_products); tops('Ana gruplar (anagrup)',r.top_groups); tops('Kategoriler',r.top_categories);
   box.append(el('p','fm-muted','Fuara atfedilmiş müşteriler — '+r.customer_sort+'. Bu müşterilerin bu fuara atfedilmiş siparişi var; katılım veya davet kaydı değildir.'));
-  const rows=(r.customer_rows||[]).map(x=>{const cb=el('input'); cb.type='checkbox'; cb.className='fm-hpick'; cb.dataset.code=x.customer_code;
+  const rows=(r.customer_rows||[]).map(x=>{const cb=el('input'); cb.type='checkbox'; cb.className='fm-hpick'; cb.dataset.code=x.customer_code; cb.setAttribute('aria-label','Seç: '+x.customer_code);
     cb.disabled=!c||c.status==='archived'||x.in_campaign||x.closed===true;
     cb.addEventListener('change',()=>{cb.checked?st.h.picked.add(x.customer_code):st.h.picked.delete(x.customer_code); addB.disabled=!st.h.picked.size;});
     const nm=el('span'); nm.append(el('div','fm-name',x.display_name),el('div','fm-code',x.customer_code)); if(x.closed===true) nm.append(el('span','fm-kapali','KAPALI'));
@@ -2149,6 +2152,7 @@ function renderCustomer(x){
   f.append(lab('Temas tarihi',dt),lab('Kanal',ch),lab('Amaç (isteğe bağlı)',pu),lab('Sonuç (en fazla 120)',oc,'wide'),lab('Sonraki iş (en fazla 160)',na,'wide'),
            lab('Sorumlu etiketi (isteğe bağlı, en fazla 80)',ow),lab('Not',nt,'wide'));
   const setFu=input('checkbox','ci-setfu'); const fuDate=input('date','ci-fudate'), fuPu=sel(PU.filter(([k])=>(x.allowed_followup_purposes||[]).includes(k)),'','ci-fupurpose');
+  fuDate.setAttribute('aria-label','Sonraki takip tarihi'); fuPu.setAttribute('aria-label','Sonraki takip amacı');
   const fr=el('div','wide cr-row'); const l2=el('label','cr-muted'); l2.append(setFu,document.createTextNode(' Aynı kayıtla sonraki takibi de planla (tarih sizin seçiminiz)')); fr.append(l2,fuDate,fuPu); f.append(fr);
   const ierr=el('p','cr-err wide ci-err'); show(ierr,false);
   f.append(btn('pri ci-save wide','Etkileşimi kaydet',async()=>{
@@ -2208,7 +2212,215 @@ def _crm_panel(meta):
     return btn,block
 
 
-def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True):
+_OWN_CSS=r"""
+#own .ow-aud{background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;border-radius:10px;padding:10px 13px;margin:6px 0 12px;font-size:13px;overflow-wrap:anywhere}
+#own .ow-state{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:8px 0 12px;overflow-wrap:anywhere}
+#own .ow-state.off,#own .ow-state.err{border-color:#f3c4c4;background:#fdf3f3;color:#b42318;font-weight:600}
+#own .ow-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
+#own .ow-btn{border:1px solid var(--ink);background:var(--ink);color:#fff;font:inherit;font-size:12px;font-weight:600;padding:7px 12px;border-radius:8px;cursor:pointer}
+#own .ow-btn:disabled{opacity:.5;cursor:not-allowed}
+#own .ow-btn:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+#own .ow-sec{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:0 0 12px;min-width:0}
+#own .ow-sec h3{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;margin:0 0 8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#own .ow-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:8px}
+#own .ow-tile{border:1px solid var(--line);border-radius:8px;padding:7px 9px;min-width:0}
+#own .ow-tile .n{font-size:18px;font-weight:800;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#own .ow-tile .l{font-size:12px;color:var(--muted)}
+#own .ow-chip{font-size:11px;font-weight:700;border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--muted);white-space:nowrap;letter-spacing:0;text-transform:none}
+#own .ow-chip.ready{color:#1a7f4b;border-color:#bfe3cf}#own .ow-chip.failed{color:#b42318;border-color:#f3c4c4}
+#own .ow-chip.loading{color:var(--warn);border-color:#f5d9a8}
+#own .ow-kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:4px 14px;margin:6px 0}
+#own .ow-kv div{font-size:13px;min-width:0;overflow-wrap:anywhere}#own .ow-kv b{color:var(--muted);font-weight:600;margin-right:4px}
+#own .ow-note,#own .ow-muted{font-size:12px;color:var(--muted);margin:4px 0;overflow-wrap:anywhere}
+#own .ow-warn{background:var(--warn-bg);border:1px solid #f5d9a8;color:var(--warn);border-radius:8px;padding:6px 9px;font-size:12px;margin:6px 0;overflow-wrap:anywhere}
+#own .ow-strong{background:#fdf3f3;border:1px solid #f3c4c4;color:#b42318;border-radius:8px;padding:7px 10px;font-size:12px;font-weight:600;margin:6px 0;overflow-wrap:anywhere}
+#own .ow-err{font-size:12px;color:#b42318;font-weight:600;margin:4px 0;overflow-wrap:anywhere}
+#own .ow-scroll{overflow-x:auto;max-width:100%;margin:6px 0}
+#own table{width:100%;border-collapse:collapse;font-size:12px}
+#own th{cursor:default;white-space:nowrap}#own td{font-variant-numeric:tabular-nums}
+#own td.r,#own th.r{text-align:right}
+#own .ow-list{list-style:none;padding:0;margin:0}
+#own .ow-list li{border-bottom:1px solid var(--line);padding:7px 0;font-size:13px;overflow-wrap:anywhere}
+#own .ow-list li b{display:block}
+#own .ow-issue[data-status="blocked"] b::after{content:" · bloke";color:#b42318;font-weight:700}
+#own [hidden]{display:none!important}
+@media(max-width:600px){#own .ow-btn{min-height:36px}#own th,#own td{padding:6px 5px}#own th{white-space:normal}}
+"""
+
+_OWN_BODY="""
+<h2 class="sec">Yönetim</h2>
+<div class="ow-aud" role="note">Yönetim bilgisidir. Uygulama yerel ve tek kullanıcılıdır: bu sekme erişim kontrollü DEĞİLDİR.</div>
+<p class="note">Salt okunur. Sayılar Python ile hesaplanır; yapay zekâ kullanılmaz. Sahip kaynakları (Kredi, Gider/Gelir, Bütçe) yalnızca açıkça yapılandırılan dosyalardan okunur ve hiçbir dosya otomatik seçilmez.</p>
+<div class="ow-state" role="status" hidden></div>
+<div class="ow-bar" hidden><button type="button" class="ow-btn ow-reload">Yönetim verilerini yeniden oku</button><span class="ow-muted ow-reloadmsg" role="status" aria-live="polite"></span></div>
+<section class="ow-sec" data-sec="ops" hidden><h3>A. Operasyon Özeti</h3><div class="ow-tiles"></div><div class="ow-opsnotes"></div></section>
+<section class="ow-sec" data-sec="kredi" hidden><h3>B. Finansman / Kredi <span class="ow-chip"></span></h3><div class="ow-body"></div></section>
+<section class="ow-sec" data-sec="gg" hidden><h3>C. Gider / Gelir <span class="ow-chip"></span></h3><div class="ow-body"></div></section>
+<section class="ow-sec" data-sec="butce" hidden><h3>D. Bütçe Sağlığı <span class="ow-chip"></span></h3><div class="ow-body"></div></section>
+<section class="ow-sec" data-sec="system" hidden><h3>E. Veri ve Sistem Durumu</h3><div class="ow-body"></div>
+<h3 style="margin-top:12px">Açık kararlar / veri eksikleri</h3><ul class="ow-list ow-issues"></ul></section>
+"""
+
+_OWN_JS=r"""
+(function(){
+'use strict';
+const root=document.getElementById('own'), tabBtn=document.querySelector('.tab[data-t="own"]');
+if(!root||!tabBtn) return;
+const POLL_MS=window.__OWN_POLL_MS||1500, POLL_MAX=window.__OWN_POLL_MAX||400;
+const H={'Content-Type':'application/json','X-StockAgent':'1'};   // local CSRF guard (D-020)
+const MSG={file:'Yönetim için panoyu http://127.0.0.1:8000/ üzerinden açın.',
+  offline:'Sunucu çalışmıyor. Terminalde uvicorn app:app --host 127.0.0.1 çalıştırıp http://127.0.0.1:8000 adresini açın. Diğer sekmeler normal çalışır.',
+  fail:'Yüklenemedi'};
+const AY=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+const st={started:false,seq:0,shown:0,timer:null,polls:0,reloading:false};
+const $=s=>root.querySelector(s);
+function el(tag,cls,text){const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=String(text); return e;}
+function show(n,on){n.hidden=!on;}
+function state(t,k){const n=$('.ow-state'); n.textContent=t||''; n.className='ow-state'+(k?' '+k:''); show(n,!!t);}
+function fmtDate(iso){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||'')); return m?(+m[3])+' '+AY[+m[2]-1]+' '+m[1]:'—';}
+function num(v){return (v==null||!Number.isFinite(Number(v)))?'—':Number(v).toLocaleString('tr-TR');}
+function money(v,cur){if(v==null||!Number.isFinite(Number(v))) return '—';
+  return Number(v).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:2})+(cur?' '+cur:'');}
+function pct(v){return (v==null||!Number.isFinite(Number(v)))?'—':'%'+(Number(v)*100).toLocaleString('tr-TR',{maximumFractionDigits:1});}
+function kv(pairs){const g=el('div','ow-kv'); pairs.forEach(([k,v])=>{const d=el('div'); d.append(el('b',null,k+':'),document.createTextNode(v==null||v===''?'—':String(v))); g.append(d);}); return g;}
+function table(head,rows,cls){const w=el('div','ow-scroll'); const t=el('table',cls||null); const th=el('thead'), tr=el('tr');
+  head.forEach(([label,r])=>{const c=el('th',r?'r':null,label); c.scope='col'; tr.append(c);}); th.append(tr); t.append(th);
+  const tb=el('tbody'); rows.forEach(cells=>{const r=el('tr'); cells.forEach(([v,right],i)=>{const c=el(i===0?'th':'td',right?'r':null,v); if(i===0) c.scope='row'; r.append(c);}); tb.append(r);});
+  t.append(tb); w.append(t); return w;}
+function warnList(ws,box){(ws||[]).forEach(w=>{const p=el('p','ow-warn',w.message); p.dataset.code=w.code; box.append(p);});}
+async function api(path,opt){
+  let r; try{r=await fetch(path,opt||{headers:{'Accept':'application/json'}});}catch(e){const x=new Error('offline'); x.offline=true; throw x;}
+  let b=null; try{b=await r.json();}catch(e){b=null;}
+  if(!r.ok){const x=new Error('HTTP '+r.status); x.status=r.status; x.body=b; throw x;} return b;}
+function errText(e){if(e.offline) return MSG.offline; return MSG.fail+(e.status?' (HTTP '+e.status+')':'')+'.';}
+
+function start(){
+  if(st.started) return; st.started=true;
+  if(location.protocol==='file:'){state(MSG.file,'off'); return;}   // same-origin API only; no request
+  load();
+}
+async function load(){
+  const my=++st.seq; clearTimeout(st.timer);
+  let d; try{d=await api('/api/owner/overview');}catch(e){if(my===st.seq) state(errText(e),e.offline?'off':'err'); return;}
+  if(my!==st.seq) return;                // a newer request was issued: never render an older response
+  st.shown=my; state(''); render(d);
+  const busy=d.reload.inflight||d.operations.state!=='ready'||['kredi','gider_gelir','butce'].some(k=>d[k].state==='loading'||d[k].reloading);
+  if(busy&&st.polls<POLL_MAX){st.polls++; st.timer=setTimeout(load,POLL_MS);} else {st.polls=0; setReloading(false);}
+}
+function setReloading(on){st.reloading=on; const b=$('.ow-reload'); b.disabled=on; b.setAttribute('aria-busy',on?'true':'false');
+  $('.ow-reloadmsg').textContent=on?'Sahip kaynakları yeniden okunuyor…':'';}
+async function reload(){
+  if(st.reloading) return; setReloading(true);
+  try{await api('/api/owner/reload',{method:'POST',headers:H,body:'{}'});}
+  catch(e){setReloading(false); $('.ow-reloadmsg').textContent=errText(e); return;}
+  st.polls=0; load();
+}
+function render(d){
+  root.dataset.today=d.today; show($('.ow-bar'),true);
+  $('.ow-aud').textContent=d.audience_note;
+  renderOps(d.operations); renderKredi(d.kredi); renderGG(d.gider_gelir); renderButce(d.butce); renderSystem(d.system,d.known_issues);
+  if(!d.reload.inflight&&!st.reloading) setReloading(false);
+}
+function head(sec,src){const chip=$(sec+' .ow-chip'); chip.textContent=src.state_label+(src.reloading?' · yenileniyor':''); chip.className='ow-chip '+src.state;
+  const s=$(sec); s.dataset.state=src.state; s.dataset.reloading=src.reloading?'1':'0'; show(s,true);
+  const b=$(sec+' .ow-body'); b.replaceChildren(); b.append(kv([['Kaynak',src.file||'yapılandırılmadı']]));
+  if(src.state==='not_configured') b.append(el('p','ow-muted','Yapılandırılmadı. Göstermek için ortam değişkeninde dosya yolunu açıkça verin; dosya otomatik seçilmez.'));
+  if(src.state==='loading') b.append(el('p','ow-muted','Yükleniyor…'));
+  if(src.state==='failed'){const p=el('p','ow-err',(src.message||'Okunamadı.')+(src.failed_step?' (adım: '+src.failed_step+')':'')); p.dataset.code=src.error_code||''; b.append(p);
+    if((src.issue_codes||[]).length) b.append(el('p','ow-muted','Doğrulama kodları: '+src.issue_codes.join(', ')));}
+  return b;}
+function renderOps(o){
+  const s=$('[data-sec="ops"]'); show(s,true); s.dataset.state=o.state; const t=$('.ow-tiles'); t.replaceChildren();
+  [['customer360_customers','Müşteri 360 müşterisi'],['daily_sales_customers','Günlük Satış müşterisi (açık)'],['collection_first_customers','Önce tahsilat'],
+   ['crm_overdue','CRM takibi gecikmiş'],['crm_due_today','CRM takibi bugün'],['fair_tasks_due','Zamanı gelen fuar görevi'],
+   ['active_fair_campaigns','Aktif fuar kampanyası'],['cross_sell_customers','Çapraz satış adayı müşteri']].forEach(([k,l])=>{
+    const d=el('div','ow-tile'); d.dataset.k=k; d.append(el('div','n',num(o[k])),el('div','l',l)); t.append(d);});
+  const cov=el('div','ow-tile'); cov.dataset.k='crm_coverage'; cov.append(el('div','n',o.crm_coverage_label),el('div','l','CRM kapsamı ('+num(o.crm_structured_interactions)+' yapılandırılmış etkileşim; kayıt olmaması temas olmadığı anlamına gelmez)')); t.append(cov);
+  const n=$('.ow-opsnotes'); n.replaceChildren();
+  if(o.state!=='ready') n.append(el('p','ow-muted','Müşteri verisi hazırlanıyor…'));
+  if(o.cross_sell_share!=null) n.append(el('p','ow-muted','Çapraz satış: aktif '+num(o.cross_sell_active_customers)+' müşterinin '+pct(o.cross_sell_share)+' kadarında en az bir hedef var.'));
+  if(o.cross_sell_note){const p=el('p','ow-warn ow-xs',o.cross_sell_note); n.append(p);}
+  n.append(el('p','ow-muted','Kişi veya temsilci bazında sayım ya da sıralama yapılmaz.'));
+}
+function renderKredi(k){
+  const b=head('[data-sec="kredi"]',k); b.append(el('p','ow-note',k.purpose));
+  const x=k.data; if(!x) return;
+  b.append(kv([['Sözleşme',num(x.contracts)],['Taksit',num(x.installments)],['Banka sayısı',num(x.lenders)],['Para birimleri',(x.currencies||[]).join(', ')],
+    ['Kaynak anlık tarihi',x.snapshot_date?fmtDate(x.snapshot_date)+' (beyan edilen)':'bilinmiyor'],['Son kayıtlı ödeme tarihi',fmtDate(x.latest_payment_date)],['Bugün',fmtDate(k.today)]]));
+  if(x.snapshot_note) b.append(el('p','ow-strong ow-snap',x.snapshot_note));
+  b.append(el('p','ow-warn',k.schedule_note),el('p','ow-muted',k.horizon_note));
+  (x.schedule||[]).forEach(c=>{
+    const box=el('div','ow-cur'); box.dataset.currency=c.currency;
+    box.append(el('p','ow-note','Para birimi: '+c.currency+' · sonraki ödenmemiş taksit: '+fmtDate(c.next_due_date)));
+    const rows=(c.horizons||[]).map(h=>[[h.days+' gün içinde'],[num(h.installments),true],[money(h.amount,c.currency),true]]);
+    rows.push([['90 gün sonrası'],[num(c.after_90.installments),true],[money(c.after_90.amount,c.currency),true]]);
+    rows.push([['Vadesi geçmiş (ayrı)'],[num(c.past_due.installments),true],[money(c.past_due.amount,c.currency),true]]);
+    rows.push([['Toplam kayıtlı kalan'],[num(c.total_remaining.installments),true],[money(c.total_remaining.amount,c.currency),true]]);
+    box.append(table([['Vade ufku'],['Taksit',true],['Kalan taksit tutarı',true]],rows,'ow-sched')); b.append(box);});
+  b.append(el('p','ow-muted',k.overdue_note),el('p','ow-muted',k.principal_note)); warnList(x.warnings,b);
+}
+function renderGG(g){
+  const b=head('[data-sec="gg"]',g); const x=g.data;
+  b.append(el('p','ow-strong ow-basis',g.basis_note));
+  if(!x) return;
+  b.append(kv([['Rapor yılı',x.report_year],['Revizyon etiketi',x.revision_label],['Kaynak anlık tarihi','bilinmiyor'],
+    ['Kaynak verisi olan aylar',(x.months||[]).map(m=>AY[m.month-1]).join(', ')||'—']]));
+  b.append(el('p','ow-muted',g.mapping_note));
+  b.append(table([['Ay'],['Raporlanan satış',true],['Raporlanan maliyet',true],['Raporlanan brüt kâr',true],['Raporlanan gider',true]],
+    (x.months||[]).map(m=>[[AY[m.month-1]],[money(m.reported_sales),true],[money(m.reported_cost),true],[money(m.reported_gross_profit),true],[money(m.reported_expense),true]]),'ow-months'));
+  b.append(el('p','ow-note','Kaynaktaki iş kolları (ayrı; eşleme yok)'));
+  b.append(table([['İş kolu'],['Raporlanan satış',true],['Raporlanan maliyet',true],['Raporlanan brüt kâr',true],['Dağıtılmış gider',true]],
+    (x.lines||[]).map(l=>[[l.label],[money(l.reported_sales),true],[money(l.reported_cost),true],[money(l.reported_gross_profit),true],[money(l.allocated_expense),true]]),'ow-lines'));
+  if((x.budget||[]).length){b.append(el('p','ow-note','Kaynakta raporlanan bütçe sütunu ('+x.report_year+'; yalnızca kaynak değeri, karşılaştırma yapılmaz)'));
+    b.append(table([['Satır'],['Kaynak bütçe değeri',true]],x.budget.map(r=>[[r.label],[money(r.value),true]]),'ow-budget'));}
+  b.append(el('p','ow-muted',g.reconciliation_note)); warnList(x.warnings,b);
+}
+function renderButce(u){
+  const b=head('[data-sec="butce"]',u); const x=u.data;
+  if(!x) return;
+  b.append(el('p',x.source_status==='complete'?'ow-note':'ow-strong ow-bwarn',u.warning));
+  b.append(kv([['Planlama yılı',x.planning_year],['Revizyon etiketi',x.revision_label],['Kaynak anlık tarihi',x.snapshot_date?fmtDate(x.snapshot_date)+' (beyan edilen)':'bilinmiyor'],
+    ['Kaynak durumu',x.source_status==='partially_usable'?'kısmen kullanılabilir':x.source_status==='complete'?'tam':x.source_status],
+    ['Aday hücre',num(x.candidate_cells)],['Kullanılabilir (doğrulanmamış)',num(x.usable_unverified)],['Geçersiz hücre',num(x.invalid_cells)],
+    ['Kapsam',x.coverage_pct==null?'—':'%'+Number(x.coverage_pct).toLocaleString('tr-TR')],['#REF!',num(x.ref_errors)],['#DIV/0!',num(x.div0_errors)],
+    ['Diğer Excel hataları',num(x.other_errors)],['Önbelleksiz formül',num(x.missing_cached_formulas)],['Dış bağlantı',num(x.external_links)],
+    ['Dış bağımlı hücre',num(x.external_dependent_cells)],['Dosya kaydı','karara bağlanmadı']]));
+  b.append(el('p','ow-muted','Bütçe-vs-gerçek, fark analizi veya Gider/Gelir ile karşılaştırma yapılmaz; formüller onarılmaz.'));
+}
+function renderSystem(s,issues){
+  const sec=$('[data-sec="system"]'); show(sec,true); const b=$('[data-sec="system"] .ow-body'); b.replaceChildren();
+  const c=s.core||{};
+  b.append(el('p','ow-note','Ana kaynaklar'),kv([['Bağlam',c.context_state==='ready'?'hazır':c.context_state==='error'?'hata':'hazırlanıyor'],['Veri tarihi',fmtDate(c.as_of_data_date)],
+    ['Satış',c.sales_file],['Stok',c.stock_file],['Cari yaşlandırma',c.aging_file]]));
+  b.append(el('p','ow-note','İsteğe bağlı satış kaynağı'),kv([['Hedef',s.hedef.configured?(s.hedef.file+' · '+s.hedef.status):'yapılandırılmadı']]));
+  b.append(el('p','ow-note','Sahip kaynakları'));
+  const ul=el('ul','ow-list ow-srcs'); (s.owner_sources||[]).forEach(o=>{const li=el('li'); li.dataset.key=o.key; li.dataset.state=o.state;
+    li.append(el('b',null,o.label),document.createTextNode((o.file||'yapılandırılmadı')+' · '+o.state_label+(o.message?' · '+o.message:''))); ul.append(li);}); b.append(ul);
+  const t=s.stores||{};
+  b.append(el('p','ow-note','Operasyonel kayıtlar'),kv([['Müşteri 360',(t.customer360_state==='ready'?'hazır':t.customer360_state)+(t.customer360_customers!=null?' · '+num(t.customer360_customers)+' müşteri':'')],
+    ['CRM kapsamı',t.crm_coverage_label],['Fuar kampanyası',num(t.fair_campaigns)],['Yerel SQLite',t.sqlite_available?'erişilebilir':'erişilemiyor']]));
+  b.append(el('p','ow-note','Bloke kaynaklar'));
+  const bl=el('ul','ow-list ow-blocked'); (s.blocked||[]).forEach(x=>{const li=el('li'); li.dataset.key=x.key; li.append(el('b',null,x.label),document.createTextNode(x.status_label)); bl.append(li);}); b.append(bl);
+  const il=$('.ow-issues'); il.replaceChildren();
+  (issues||[]).forEach(i=>{const li=el('li','ow-issue'); li.dataset.code=i.code; li.dataset.status=i.status; li.append(el('b',null,i.title),document.createTextNode(i.detail));
+    if(i.count!=null) li.append(el('div','ow-muted',num(i.count)+' '+(i.count_label||''))); il.append(li);});
+}
+$('.ow-reload').addEventListener('click',reload);
+tabBtn.addEventListener('click',start);   // lazy: nothing is fetched (and no owner file is read) until the tab is opened
+})();
+"""
+
+def _own_panel(meta):
+    """(tab button, panel block) for Yönetim, wrapped in markers like the other server-driven tabs."""
+    asof=html.escape(str(meta.get('asof') or ''),quote=True)
+    btn='<button class="tab" data-t="own">Yönetim</button>'
+    block=('\n<!--OWN-TAB-START-->\n<style>'+_OWN_CSS+'</style>\n'
+           f'<div id="own" class="panel" data-asof="{asof}">'+_OWN_BODY+'</div>\n'
+           '<script>'+_OWN_JS+'</script>\n<!--OWN-TAB-END-->')
+    return btn,block
+
+
+def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True,own_panel=True):
     blob=json.dumps(modules,ensure_ascii=False).replace('</','<\\/')
     tabs=['overview']+list(modules.keys())
     tabbtns=''.join(f'<button class="tab" data-t="{t}">{("Genel Bakış" if t=="overview" else modules[t]["title"])}'
@@ -2222,6 +2434,7 @@ def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,o
     op_btn,op_block=_opp_panel(meta) if opp_panel else ('','')
     fm_btn,fm_block=_fair_panel(meta) if fair_panel else ('','')
     cr_btn,cr_block=_crm_panel(meta) if crm_panel else ('','')
+    ow_btn,ow_block=_own_panel(meta) if own_panel else ('','')
     return f"""<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>Şirket Panosu — {meta['date']}</title>
 <style>
@@ -2238,6 +2451,8 @@ h1{{font-size:26px;font-weight:800;letter-spacing:-.02em;margin:5px 0 2px}}
 .tab{{border:1px solid var(--line);background:var(--card);color:var(--muted);font:inherit;font-weight:600;
 padding:8px 14px;border-radius:8px;cursor:pointer}}
 .tab:hover{{color:var(--ink)}}.tab.on{{background:var(--ink);color:#fff;border-color:var(--ink)}}
+.tab:focus-visible{{outline:2px solid #2563eb;outline-offset:2px}}
+@media(max-width:600px){{.tabs{{gap:6px}}.tab{{padding:7px 10px;min-height:36px;white-space:nowrap}}}}
 .tab .cnt{{font-size:11px;opacity:.7;margin-left:3px}}
 .stats{{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:8px}}
 .stat{{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}}
@@ -2283,7 +2498,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <header><div class="eyebrow">Şirket Panosu</div>
 <h1>Şirket Panosu — {meta['date']}</h1>
 <div class="sub">{src} · {meta['total']:,} ürün</div></header>
-<div class="tabs">{tabbtns}{sq_btn}{c3_btn}{op_btn}{fm_btn}{cr_btn}{ai_btn}</div>
+<div class="tabs">{tabbtns}{sq_btn}{c3_btn}{op_btn}{fm_btn}{cr_btn}{ow_btn}{ai_btn}</div>
 <div id="overview" class="panel on">
 <h2 class="sec">Aktif Analizler</h2>
 <p class="note">İlk istediğiniz ikisi — <b>stok uyarıları</b> (azalan + fazla) ve <b>kayıp müşteriler</b> (geri kazanım) — çalışıyor. Gezinmek, aramak ve sıralamak için yukarıdaki sekmelere tıklayın. Her şey doğrudan tablolarınızdan hesaplanır: filtreleme, müşteri ve stok kodu üzerinden birleştirme ve aritmetik — hiçbir şey tahmin değil.</p>
@@ -2293,7 +2508,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <p class="note">Hazır olduğunuzda açabileceğimiz, tamamen gerçeğe dayalı diğer analizler — her biri yalnızca ilgili sayfanın <code>data</code> klasöründe olmasını ister, sonra kendi sekmesi olur. Yapay zekâ yok, bunlarla aynı.</p>
 <ul class="later">{laterlist}</ul>
 </div>
-<div id="panels"></div>{sq_block}{c3_block}{op_block}{fm_block}{cr_block}{ai_block}
+<div id="panels"></div>{sq_block}{c3_block}{op_block}{fm_block}{cr_block}{ow_block}{ai_block}
 <script>
 const DATA={blob};
 const fmtMoney=v=>'₺'+Math.round(v).toLocaleString('tr-TR');
@@ -2375,10 +2590,10 @@ function draw(id){{
 }}
 Object.keys(DATA).forEach(makePanel);
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{{
-  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('.tab').forEach(x=>{{x.classList.remove('on'); x.removeAttribute('aria-current');}});
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('on'));
-  b.classList.add('on'); document.getElementById(b.dataset.t).classList.add('on');}}));
-document.querySelector('.tab').classList.add('on');
+  b.classList.add('on'); b.setAttribute('aria-current','page'); document.getElementById(b.dataset.t).classList.add('on');}}));
+document.querySelector('.tab').classList.add('on'); document.querySelector('.tab').setAttribute('aria-current','page');
 </script></div></body></html>"""
 
 if __name__=='__main__':

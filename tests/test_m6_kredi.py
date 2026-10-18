@@ -429,8 +429,9 @@ def test_38_no_m5_import():
 
 
 def test_39_no_api_exposure():
-    app = (ROOT / "app.py").read_text()
-    assert "kredi" not in app.lower() and "loan" not in app.lower()
+    app = (ROOT / "app.py").read_text()                     # M7-6: owner_view section only, no importer, no rows
+    assert "import_kredi" not in app and "importers" not in app and "loan" not in app.lower()
+    assert "LoanInstallment" not in app and "lender" not in app.lower()
 
 
 def test_40_no_dashboard_exposure():

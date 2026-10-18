@@ -780,7 +780,7 @@ def test_tab_before_c360_rest_byte_identical(built):
     assert with_sq.count(SQ_BUTTON) == 1 and with_sq.count('<div id="sq" class="panel"') == 1
     assert with_sq.replace(SQ_BUTTON, "", 1).replace(_sq_block(with_sq), "", 1) == without
     tabs = re.findall(r'<button class="tab" data-t="([a-z0-9]+)"', with_sq)
-    assert tabs[-6:] == ["sq", "c360", "opp", "fair", "crm", "ai"]
+    assert tabs[-7:] == ["sq", "c360", "opp", "fair", "crm", "own", "ai"]
     assert "Bugün kimi aramalıyım?" in _sq_block(with_sq)
 
 

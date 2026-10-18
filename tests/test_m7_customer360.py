@@ -666,7 +666,7 @@ def test_tab_present_and_rest_byte_identical(built):
     assert with_c3.count(C3_BUTTON) == 1 and with_c3.count('<div id="c360" class="panel"') == 1
     assert with_c3.replace(C3_BUTTON, "", 1).replace(_c3_block(with_c3), "", 1) == without
     tabs = re.findall(r'<button class="tab" data-t="([a-z0-9]+)"', with_c3)
-    assert tabs[-5:] == ["c360", "opp", "fair", "crm", "ai"]             # M7-3 Fırsatlar, M7-4 Fuar Merkezi
+    assert tabs[-6:] == ["c360", "opp", "fair", "crm", "own", "ai"]             # M7-3 Fırsatlar, M7-4 Fuar Merkezi
 
 
 def test_tab_script_safe_and_read_only(built):

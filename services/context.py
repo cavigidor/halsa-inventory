@@ -52,6 +52,11 @@ class AgentContext(dict):
     opportunities = None
     fairs = None              # M7-4: historical FUAR index (services/fairs.FairHistory), from the frame read here
     reason_index = None       # M7-4: {category: {entity_id: max score}} over ALL uncut customer candidates
+    # M7-6: the Customer 360 projection of the sales frame read here (sales_projection.SalesFrameHandoff), used ONCE
+    # by the first Customer 360 build of this exact context so the sales workbook is not read a second time.
+    sales_c360_handoff = None
+    # M7-6: structural data-quality counts for the Yönetim known-issues panel (counts only, no rows)
+    data_quality = None
 
 
 def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sources=None, frames=None):
@@ -64,9 +69,24 @@ def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sour
     if not (sp and ep):
         raise FileNotFoundError("Stok ve satış dosyaları gerekli.")
 
-    low, over, total = db.m_stock(sp, fr.get("stock"))
+    # M7-6: read each core frame once here (as before) and keep a pristine reference long enough to derive the
+    # DQ-4 count and the compact Customer 360 projection; the M5 computations below are unchanged.
+    raw_stock = fr.get("stock")
+    if raw_stock is None:
+        raw_stock = db.read_stock(sp)
+    low, over, total = db.m_stock(sp, raw_stock)
+    dq = {"stock_coverage_unavailable_products": int(db.num(raw_stock[db.SC["cov"]]).isna().sum())
+          if db.SC["cov"] in raw_stock.columns else None}
+    del raw_stock
     coll, owed = (db.m_collections(ap, fr.get("aging")) if ap else ([], {}))
-    sdf = db.load_sales(ep, fr.get("sales"))
+    raw_sales = fr.get("sales")
+    own_read = raw_sales is None
+    if own_read:
+        raw_sales = db.read_sales_raw(ep)
+    from services import sales_projection as SP
+    handoff = SP.prepare_handoff(ep, raw_sales)          # before load_sales modifies its own frame in place
+    sdf = db.load_sales(ep, raw_sales, copy=not own_read)
+    del raw_sales
     attr = db.cust_attrs(sdf); cinv = db.inv_closed(sdf)
     lap = db.m_lapsed(sdf, owed, attr)
     mom = db.m_momentum(sdf, attr)
@@ -171,6 +191,8 @@ def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sour
     # M5-4: every customer code classified KAPALI (order-source attribute or invoice party), so the draft
     # refusal does not depend on whether the customer happens to be in the top-N risk list.
     ctx["closed_customers"] = sorted({c for c, a in attr.items() if a.get("closed")} | set(cinv))
+    ctx.sales_c360_handoff = handoff
+    ctx.data_quality = dq
     # M7-3: cross-sell model from the sales frame already read above (no Excel read; private, never serialized).
     from services import opportunities as OP
     ctx.opportunities = OP.build_cross_sell(sdf, asof_d)

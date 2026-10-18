@@ -61,7 +61,7 @@ def test_crm_workflow(browser, tmp_path):
         page = open_page(browser)
         page.goto(srv["base"] + "/")
         tabs = page.eval_on_selector_all(".tab", "els => els.map(e => e.dataset.t)")
-        assert tabs[-6:] == ["sq", "c360", "opp", "fair", "crm", "ai"]                          # (1)
+        assert tabs[-7:] == ["sq", "c360", "opp", "fair", "crm", "own", "ai"]                          # (1)
         assert page.inner_text('.tab[data-t="crm"]') == "Takip / CRM"
         assert not any("/api/crm" in u for _, u in crm_requests(page))                         # lazy
         open_crm(page, srv["base"])

@@ -60,6 +60,10 @@ Hedef section reads "yapılandırılmadı" and everything else works.
 - **Date check:** after reading the sales workbook, its max `Tarih` must equal the live `as_of_data_date`. If not, the
   build fails with `source_date_mismatch` ("…verileri yenileyin."). Mixed snapshots are never served. No mtime is
   used anywhere.
+- **No second sales read (M7-6, D-047):** the first build for a context consumes the private, one-use projection of
+  the sales frame that `build_context` already read (`services/sales_projection.py`, same `prepare_sales`). Without it
+  (another basename, missing columns, a later rebuild) the build reads the workbook as before. The master sheet and
+  the M6-2 order-source import still read the workbook through the framework (their fail-closed validation).
 - **App mode:** a missing or stale snapshot starts one background build thread. Requests get 503
   `{"state": "building"}`, and the UI polls `/status`. The startup warm-up builds the context, then Customer 360.
   - **Tests and CLI** use `background=False`, which builds synchronously.

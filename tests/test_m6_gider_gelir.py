@@ -653,9 +653,12 @@ LIVE = ("app.py", "dashboard_builder.py", "services/refresh.py", "services/conte
 
 
 def test_57_m5_does_not_import():
+    # M7-6 (D-047): the app reaches Gider/Gelir only through services/owner_view; never an importer import
     for live in LIVE:
         text = (ROOT / live).read_text()
-        assert "importers" not in text and "gider_gelir" not in text, live
+        assert "importers" not in text and "import_gider_gelir" not in text, live
+        if live not in ("app.py", "dashboard_builder.py"):     # the Yönetim UI renders the owner_view payload
+            assert "gider_gelir" not in text, live
 
 
 def test_58_to_61_other_m6_modules_untouched():
@@ -664,7 +667,8 @@ def test_58_to_61_other_m6_modules_untouched():
 
 
 def test_62_no_api():
-    assert "gider" not in (ROOT / "app.py").read_text().lower()
+    app = (ROOT / "app.py").read_text()                     # M7-6: owner_view section only, no importer, no rows
+    assert "import_gider_gelir" not in app and "importers" not in app and "ExpenseLine" not in app
 
 
 def test_63_no_dashboard():

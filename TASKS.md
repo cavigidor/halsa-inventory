@@ -1,12 +1,12 @@
 # TASKS.md — active backlog
 
 Rules: one *Current* task at a time. Each task must be executable in one bounded session.
-Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-4 are merged; M7-5 (lightweight CRM / follow-up) is done (PR pending); M7-6 is not started.
+Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-5 are merged; M7-6 (Yönetim + integration / polish) is done (PR pending) and **completes Milestone 7** (D-047). No new milestone is started.
 
 ## Current
-- [ ] **Review and merge the M7-5 lightweight CRM PR** (`claude/m7-5-lightweight-crm`).
+- [ ] **Review and merge the M7-6 Yönetim / integration PR** (`claude/m7-6-owner-integration-polish`). Then M7 is complete.
 
-## Next (M7, large checkpoints; start each only when moved to *Current*)
+## Next (after M7: owner decisions and follow-ups; start each only when moved to *Current*)
 - [ ] **Owner: cross-sell threshold review.** On real data the initial guards give a broad population (78 % of active
   customers have at least one target). Decide whether to tighten them (`config.CROSS_SELL_*`); nothing changes
   automatically.
@@ -17,7 +17,16 @@ Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi,
 - [ ] **Owner: CRM decisions (D-046).** When (if ever) logging is standardized enough to drop "Eksik kayıt
   olabilir"; whether a CRM export exists to import as legacy history; whether `CRM_FOLLOWUP_SCORE` (60) fits. Owner
   labels stay free text until a salesperson-of-record decision.
-- [ ] **M7-6 — Owner / management views + integration / polish.**
+- [ ] **Owner (optional): Yönetim sources.** Set `KREDI_PATH` (+ `KREDI_SNAPSHOT_DATE`), `GIDER_GELIR_PATH`
+  (+ `GIDER_GELIR_REPORT_YEAR`) and / or `BUTCE_PATH` (+ `BUTCE_PLANNING_YEAR`, `BUTCE_SNAPSHOT_DATE`) to explicitly
+  chosen files; that is not a file-of-record decision. Note: in the Feb 2026 Kredi export, `DURUM = Kapalı` appears on
+  152 unpaid installments; confirm what `DURUM` means (D-047 keeps it informational).
+- [ ] **Later (performance): single-pass framework reader.** The M6-2 order-source import (both openpyxl views of the
+  sales sheet) is now the largest Customer 360 startup step. Reading each cell's formula and cached value in one XML
+  pass would roughly halve it without weakening validation. Framework work; needs its own tests.
+- [ ] **Future (not scheduled):** CRM legacy import only if a customer-level export appears (through the M6
+  verification process first); new-buyer discovery / acquisition source; live macro provider; AI quality tuning;
+  authentication / multi-user / remote deployment with owner/admin roles (Yönetim is not access-controlled today).
 - [ ] **Owner (optional): Customer 360 Hedef.** To show Hedef context, set `HEDEF_PATH` (and optionally
   `HEDEF_SNAPSHOT_DATE`) to one explicitly chosen file. That is not a file-of-record decision.
 
@@ -46,8 +55,9 @@ Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi,
 - [ ] **Owner: Gider/Gelir decisions (D-040).** Map the four native lines (KIRTASIYE / TRODAT / TROTEC / IMALAT) to the
   management views (kaşe / kırtasiye / other-import). Confirm the accounting basis (cash vs accrual), the file of record
   and cadence, and whether older-year templates (2024/2025) or the TASLAK layout must be supported.
-- [ ] **Later (owner cash planning):** next 30/60/90-day obligations, outstanding principal, interest/tax visibility
-  from the Kredi model. No UI or metrics yet.
+- [ ] **Later (owner cash planning):** M7-6 shows the scheduled 30/60/90-day loan obligations (not a cash forecast).
+  Still open: outstanding principal (needs a contract-level definition), interest / tax visibility, and any combination
+  with receivables, suppliers, purchasing, tax and payroll.
 - [ ] **Owner: Hedef file of record** (D-037). Candidates: the Feb 2026 `hedef raporu.xlsx`, a June 2026
   `hedef raporu 27 haziran.xlsx` found in an old transfer folder, and the dated snapshots. Also the refresh
   cadence. Until decided, Hedef is imported only from an explicit path.
@@ -77,11 +87,6 @@ Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi,
   The AI context was fixed in M3 (D-009). The dashboard's `m_overstock_move` buyer lists still
   include KAPALI customers. On the 5 Oct 2026 data, 2 of the top 20 overstock products were affected.
   **Needs owner approval.**
-
-- [ ] **DQ-3: Deterministic tie order in "Büyüme / Küçülme".** `m_momentum` iterates a `set` of customer
-  codes and sorts by `pct` only, so rows with equal `pct` appear in hash-seed order and two builds of the
-  same data differ byte-wise (found during the M5-2 real-data check; values are identical). Fix: sort by
-  `(pct, code)`. It changes no number but changes row order, so it is a separate small task.
 
 ## Later
 - [ ] **Multi-user / remote deployment (future milestone, out of scope for M5, D-016):**
