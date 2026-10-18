@@ -1,7 +1,7 @@
 # TASKS.md — active backlog
 
 Rules: one *Current* task at a time. Each task must be executable in one bounded session.
-Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-6 are merged; **Milestone 7 is COMPLETE** (PR #24, squash merge `de7eb43`; D-047). No new milestone is started.
+Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-6 are merged; **Milestone 7 is COMPLETE** (PR #24, squash merge `de7eb43`; D-047). M8 production-readiness planning is merged (PR #26); CP1 authentication is the only active implementation task.
 
 ## Current
 - [ ] **M8-CP1 — Security-first owner/father authentication:** implement server-side authentication and authorization for ALL sensitive UI and API routes, safe account provisioning and revocable sessions, CSRF protection, login rate limits, and synthetic/browser tests. See `docs/m8_father_first_launch.md`; one isolated PR; no public deployment or financial rule changes. Kredi `DURUM` remains unverified until owner clarification.
