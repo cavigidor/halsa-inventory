@@ -4,7 +4,7 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-6 are merged; **Milestone 7 is COMPLETE** (PR #24, squash merge `de7eb43`; D-047). No new milestone is started.
 
 ## Current
-- [ ] **M8-P0 father-first launch plan (docs only):** review `docs/m8_father_first_launch.md`, `docs/m8_owner_questions_tr.md`, and D-048; merge the planning PR after CI. **No implementation or public deployment is started.** Next bounded implementation checkpoint is CP1 (security-first owner/father authentication) only after plan merges. Kredi `DURUM` remains pending 2026-10-19; all other unapproved owner decisions remain open.
+- [ ] **M8-CP1 — Security-first owner/father authentication:** implement server-side authentication and authorization for ALL sensitive UI and API routes, safe account provisioning and revocable sessions, CSRF protection, login rate limits, and synthetic/browser tests. See `docs/m8_father_first_launch.md`; one isolated PR; no public deployment or financial rule changes. Kredi `DURUM` remains unverified until owner clarification.
 
 ## Next (M8 — production launch)
 - [ ] **M8-CP1–CP8** as sequenced in `docs/m8_father_first_launch.md`. One implementation PR/checkpoint at a time, with tests and verified acceptance; revise count if approved feature-gap work expands.
@@ -137,6 +137,7 @@ Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi,
   2020 should count, change `QUAL_YEARS` and that test together.
 
 ## Completed
+- [x] 2026-10-18 — M8-P0 docs-only launch plan, father questionnaire, D-048 and checkpoint backlog merged as PR #26 (`c34a504`). CI: 1058 passed, 7 skipped, 1 xfailed; no runtime changes or deployment. Next: CP1 authentication.
 - [x] 2026-10-18 — PR #25 post-M7 local readiness squash-merged to `main` (`d67fb0b`): optional `.env.example` paths, privacy-safe `python -m scripts.owner_preflight`, synthetic tests, README and local launch checklist. CI: 1058 passed, 7 skipped, 1 expected failure. Mac/browser acceptance and real-file paths require local owner verification. Kredi `DURUM` stays unresolved.
 - [x] 2026-10-18 — PR #24 (M7-6 Yönetim / integration) squash-merged into `main` (`de7eb43`); **Milestone 7 COMPLETE**. Kredi DURUM remains unverified and informational; owner clarification pending 2026-10-19. M6-4 still blocked by the missing export.
 - [x] 2026-10-13 — M6-0 source inventory and technical verification (docs only): `docs/m6_source_inventory.md`,
