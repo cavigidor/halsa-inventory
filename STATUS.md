@@ -3,7 +3,7 @@
 _Updated 2026-10-18 (M7 complete; post-M7 readiness complete; M8-P0 father-first production plan PR #26 merged at `c34a504`, CI green; M8-CP1 authentication now Current; Kredi DURUM and owner decisions remain unresolved)._
 
 ## Git
-- **`main`:** M7 completed in PR #24 (`de7eb43`); post-M7 local readiness merged in PR #25 (`d67fb0b`), followed by documentation checkpoints. No new feature milestone is active.
+- **`main`:** M7 completed in PR #24 (`de7eb43`); post-M7 readiness PR #25 (`d67fb0b`) and M8-P0 plan PR #26 (`c34a504`) merged. M8-CP1 authentication is now the only active implementation checkpoint.
 - **Owner's Mac folder:** current checkout state was not inspected in this checkpoint. Previous notes reported an older checkout; verify `git status` before pulling, protect private `.env`, data and SQLite, and follow `docs/owner_launch_checklist.md`. Browser/real-data acceptance remains owner-local.
 
 ## Milestone
