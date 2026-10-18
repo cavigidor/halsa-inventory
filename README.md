@@ -4,8 +4,8 @@ StockAgent turns the monthly ERP Excel exports of a Turkish wholesale and statio
 into a deterministic, interactive Turkish dashboard (reorder, overstock, stock clearance,
 win-back, collections, growth and shrink, order size, margin, risk). A deterministic action queue ranks work in Python; the optional AI layer interprets facts and drafts messages on explicit request.
 
-> **Core rule:** Python/pandas computes every financial number. The AI may interpret,
-> prioritize, explain or draft. It can never invent, recalculate or alter a number, and
+> **Core rule:** Python/pandas computes every financial number and ranks actions. The AI may interpret,
+> explain or draft. It can never invent, recalculate or alter a number, and
 > this is enforced in code, not only in the prompt.
 
 The architecture is described in [`PROJECT.md`](PROJECT.md).
