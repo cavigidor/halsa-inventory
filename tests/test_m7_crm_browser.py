@@ -33,6 +33,9 @@ def open_crm(page, base):
     page.click('.tab[data-t="crm"]')
     page.wait_for_selector('#crm [data-sec="summary"]:not([hidden]) .cr-tile')
     page.wait_for_selector('#crm [data-sec="recent"]:not([hidden])')
+    # sections are shown before their fetch returns: wait for the content itself
+    for box in (".cr-due", ".cr-up", ".cr-recent"):
+        page.wait_for_selector(f"#crm {box} > *")
 
 
 def pick_customer(page, query, code):
@@ -151,8 +154,9 @@ def test_customer360_card_and_daily_sales(browser, tmp_path):
         page.wait_for_selector("#sq .sq-card")
         assert page.inner_text('#sq .sq-f[data-k="crm_followup"]').startswith("Takip Zamanı")
         page.click('#sq .sq-f[data-k="crm_followup"]')
-        page.wait_for_selector(f'#sq .sq-card[data-code="{P[17]}"]')
-        assert page.eval_on_selector_all("#sq .sq-card", "els => els.map(e => e.dataset.code)") == [P[17]]
+        page.wait_for_function(f"() => {{ const c = [...document.querySelectorAll('#sq .sq-card')].map(e => e.dataset.code);"
+                               f" return c.length === 1 && c[0] === {json.dumps(P[17])}; }}")   # filtered list, not 'all'
+
         assert "Takip Zamanı" in page.inner_text(f'#sq .sq-card[data-code="{P[17]}"] .sq-chips')
         prim = page.inner_text(f'#sq .sq-card[data-code="{P[17]}"] .sq-primary')
         assert "Planlanan müşteri takibi" in prim
@@ -176,6 +180,7 @@ def test_customer360_card_and_daily_sales(browser, tmp_path):
         page.click('.tab[data-t="sq"]')
         page.wait_for_selector('#sq .sq-f[data-k="crm_followup"]')
         page.click('#sq .sq-f[data-k="crm_followup"]')
+        page.wait_for_selector('#sq .sq-f.on[data-k="crm_followup"]')
         page.wait_for_selector(f'#sq .sq-card[data-code="{P[18]}"]')
         assert page.query_selector(f'#sq .sq-card[data-code="{P[18]}"] .sq-drafto') is None
         assert ai_calls(srv) == 0 and page.errors == []

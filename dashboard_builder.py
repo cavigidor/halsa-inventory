@@ -1739,7 +1739,7 @@ async function loadCampaigns(keep){
   let r; try{r=await api('/api/fairs/campaigns');}catch(e){state(errText(e),e.offline?'off':'err'); return;}
   st.camps=r.items||[]; st.stages=r.stages||[]; st.amountLabel=r.amount_label||st.amountLabel;
   if(!keep||!camp()){const open=st.camps.find(c=>c.status!=='archived'); st.sel=(camp()&&keep)?st.sel:(open?open.campaign_id:(st.camps[0]||{}).campaign_id||null);}
-  renderCampaign(); renderFunnel(); fillStageFilter(); loadCustomers(0); loadCandidates(0);
+  renderCampaign(); renderFunnel(); fillStageFilter(); loadCandidates(0); await loadCustomers(0);   // resolves once the list is drawn
 }
 function renderCampaign(){
   show($('[data-sec="campaign"]'),true);
@@ -1859,7 +1859,7 @@ async function addCodes(codes,where){
   const c=camp(); if(!c||c.status==='archived'){toast(MSG.noCamp); return null;}
   try{const r=await api('/api/fairs/campaigns/'+c.campaign_id+'/customers',{method:'POST',headers:H,body:JSON.stringify({customer_codes:codes.slice(0,BULK_MAX)})});
     const n=r.counts||{}, t='Eklendi: '+num(n.added)+' · zaten listede: '+num(n.already_present)+' · KAPALI engellendi: '+num(n.blocked_kapali)+' · geçersiz: '+num(n.invalid);
-    toast(t); if(where) where.textContent=t; loadCampaigns(true); return r;}
+    await loadCampaigns(true); toast(t); if(where) where.textContent=t; return r;}   // toast after the list is redrawn
   catch(x){toast(errText(x)); return null;}
 }
 async function searchAdd(q){
@@ -2066,7 +2066,8 @@ async function refresh(n){
   catch(e){if(building(e)){state(n<POLL_MAX?MSG.building:'Müşteri verisi hâlâ hazırlanıyor.','wait'); if(n<POLL_MAX) setTimeout(()=>refresh(n+1),POLL_MS); return;}
     state(errText(e),e.offline?'off':'err'); return;}
   state(''); renderSummary(s); loadList('due','.cr-due','[data-sec="due"]'); loadList('upcoming','.cr-up','[data-sec="upcoming"]'); loadRecent();
-  show($('[data-sec="customer"]'),true); if(st.code) loadCustomer(st.code);
+  show($('[data-sec="customer"]'),true);
+  if(st.code&&st.loading!==st.code) loadCustomer(st.code);   // never re-render (and wipe) a form already open
 }
 function renderSummary(s){
   show($('[data-sec="summary"]'),true); const t=$('.cr-tiles'); t.replaceChildren();
@@ -2117,7 +2118,7 @@ async function search(q){
 }
 function openCustomer(code){st.code=code; show($('[data-sec="customer"]'),true); loadCustomer(code); $('[data-sec="customer"]').scrollIntoView({block:'start'});}
 async function loadCustomer(code){
-  const p=$('.cr-panel'), my=st.seq.c=(st.seq.c||0)+1;
+  const p=$('.cr-panel'), my=st.seq.c=(st.seq.c||0)+1; st.loading=code;
   let x; try{x=await api('/api/crm/customers/'+encodeURIComponent(code));}catch(e){if(my===st.seq.c) p.replaceChildren(el('p','cr-err',errText(e))); return;}
   if(my!==st.seq.c) return; renderCustomer(x);
 }
@@ -2191,7 +2192,8 @@ async function putFollowup(code,b,errEl){
 async function refreshLists(){try{renderSummary(await api('/api/crm/summary'));}catch(e){} loadList('due','.cr-due','[data-sec="due"]'); loadList('upcoming','.cr-up','[data-sec="upcoming"]'); loadRecent();}
 $('.cr-q').addEventListener('input',e=>{clearTimeout(st.timers.q); st.timers.q=setTimeout(()=>search(e.target.value),250);});
 // Customer 360 / other tabs: open this tab on one customer (explicit writes stay here)
-window.StockAgentCRM={open:function(code){st.code=String(code); tabBtn.click(); if(st.started&&location.protocol!=='file:') loadCustomer(st.code);}};
+window.StockAgentCRM={open:function(code){st.code=String(code); const was=st.started; tabBtn.click();
+  if(was&&location.protocol!=='file:') loadCustomer(st.code);}};   // first open: start() -> refresh() loads it once
 tabBtn.addEventListener('click',start);   // lazy: nothing is fetched until the tab is opened
 })();
 """

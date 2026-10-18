@@ -224,6 +224,7 @@ def test_daily_sales_cross_sell_deep_link_and_kapali(browser, tmp_path):
         assert page.query_selector(f'#sq .sq-card[data-code="{O[30]}"]') is None
         # winback before cross-sell (sequence), collections first
         page.click('#sq .sq-f[data-k="winback"]')
+        page.wait_for_selector('#sq .sq-f.on[data-k="winback"]')              # filtered list rendered, not 'all'
         page.wait_for_selector(f'#sq .sq-card[data-code="{O[27]}"]')
         page.click(f'#sq .sq-card[data-code="{O[27]}"] .sq-toggle')
         cats = page.eval_on_selector_all(f'#sq .sq-card[data-code="{O[27]}"] .sq-r', "els => els.map(e => e.dataset.cat)")

@@ -136,6 +136,8 @@ building, `/api/crm/*` returns 503 `building`.
 - **Customer 360 "CRM / Takip" card:** read-only last contact, outcome, next action, next follow-up; buttons
   "Etkileşim kaydet" / "Takip planla" open the CRM tab on that customer.
 - Text only (`textContent`, no `innerHTML`); phone layout checked at 390 px with a letter-spacing stress.
+- Opening a customer (from search, a list or Müşteri 360) renders its form once; a later list refresh never
+  re-renders a form that is already open.
 
 ## 10. Real-data check (5 Oct 2026 exports; Mac VM; isolated temp DB; aggregates only)
 

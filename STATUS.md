@@ -1133,6 +1133,14 @@ Tests:
 | Performance | CRM requests 1–9 ms median; Customer 360 build 88 s (unchanged path) |
 | AI calls / sources / temp DB | 0 / unchanged / deleted |
 
+**Flake fixes found under parallel stress (first PR CI run failed once, push run passed):**
+- CRM tab: opening a customer from Müşteri 360 no longer loads it twice (a late second render could wipe a form being
+  typed into).
+- Fuar Merkezi: the "Eklendi / KAPALI engellendi" toast now appears after the member list is redrawn (the late redraw
+  could wipe an unsaved card edit). No rule or data change.
+- Browser tests that click a Günlük Satış filter now wait for the filtered render instead of a card that is also in
+  the "all" list.
+
 **Regression:** M5 top 15, M7-2 reasons, M7-3 cross-sell results and thresholds, M7-4 fair score and taxonomy, the
 build-time reservoir and Customer 360 search / identity are unchanged. Detailed Collections stays blocked. M7-6 is
 not started.

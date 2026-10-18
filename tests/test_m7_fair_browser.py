@@ -266,6 +266,7 @@ def test_daily_sales_fair_filter_and_draft(browser, tmp_path):
         page.click('.tab[data-t="sq"]')
         page.wait_for_selector("#sq .sq-card")
         page.click('#sq .sq-f[data-k="fair_followup"]')
+        page.wait_for_selector('#sq .sq-f.on[data-k="fair_followup"]')        # filtered list rendered, not 'all'
         page.wait_for_selector(f'#sq .sq-card[data-code="{P[17]}"]')
         codes = page.eval_on_selector_all("#sq .sq-card", "els => els.map(e => e.dataset.code)")
         assert codes == [P[17]]                                                                 # (13) P18: no date
