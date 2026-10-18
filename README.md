@@ -2,11 +2,10 @@
 
 StockAgent turns the monthly ERP Excel exports of a Turkish wholesale and stationery company
 into a deterministic, interactive Turkish dashboard (reorder, overstock, stock clearance,
-win-back, collections, growth and shrink, order size, margin, risk). On top of that, an AI
-action layer interprets the results, prioritizes them and drafts messages.
+win-back, collections, growth and shrink, order size, margin, risk). A deterministic action queue ranks work in Python; the optional AI layer interprets facts and drafts messages on explicit request.
 
-> **Core rule:** Python/pandas computes every financial number. The AI may interpret,
-> prioritize, explain or draft. It can never invent, recalculate or alter a number, and
+> **Core rule:** Python/pandas computes every financial number and ranks actions. The AI may interpret,
+> explain or draft. It can never invent, recalculate or alter a number, and
 > this is enforced in code, not only in the prompt.
 
 The architecture is described in [`PROJECT.md`](PROJECT.md).
@@ -37,7 +36,35 @@ Put the monthly exports in `./data/` (gitignored). Files are detected by name:
 - a name containing `cari` or `yaş`: receivables aging
 - a name containing `sat` (and not the above): sales
 
-When there are several files of one kind, the newest is used.
+When there are several **core** files of one kind, the newest is used. Owner reports are
+**not** covered by this discovery rule: Kredi, Gider/Gelir, Bütçe and Hedef are loaded
+only from individually configured paths.
+
+## Post-M7 local readiness (before daily use)
+
+Milestone 7 includes Customer 360, Günlük Satış, Fırsatlar, Fuar Merkezi, Takip / CRM and
+**Yönetim** (owner financial and operational overview). The latter uses optional local workbooks
+and is **not access-controlled**: use only on your own Mac via `127.0.0.1`; do not expose
+the server on a network. There is no automatic AI call.
+
+1. Back up your private `.env`, `data/` and SQLite state. Pull the latest `main` without
+   overwriting local changes.
+2. In your private `.env`, explicitly set the owner report paths if desired:
+   `KREDI_PATH`, `GIDER_GELIR_PATH`, `BUTCE_PATH`, and optionally `HEDEF_PATH`.
+   Optional declared dates/years are documented in `.env.example`. Do not auto-pick
+   a file of record or invent dates.
+3. Validate the three owner workbooks with `python -m scripts.owner_preflight` (or
+   `--json`). This is read-only, uses existing importers, prints only privacy-safe
+   summaries and exit code 1 for failed configured files. It does not validate the
+   core exports or certify accounting values.
+4. Build the dashboard, start the backend and open `http://127.0.0.1:8000/`.
+   Check `/api/health`, the owner source states, all M7 tabs and local state persistence.
+
+See **[the complete owner launch checklist](docs/owner_launch_checklist.md)** for
+acceptance steps and the future Kredi status clarification. Until clarified,
+`DURUM=Kapalı` is *not* proof that a loan installment was paid; scheduled amounts
+are not bank-verified balances. DQ-1/2/4/5, source ownership, accounting basis and
+M6-4 Detailed Collections remain separate open items.
 
 ## Run
 ```bash
