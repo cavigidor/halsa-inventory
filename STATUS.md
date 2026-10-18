@@ -1,9 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-18 (M7 complete; post-M7 readiness complete; M8-P0 father-first production plan PR #26 merged at `c34a504`, CI green; M8-CP1 authentication now Current; Kredi DURUM and owner decisions remain unresolved)._
+_Updated 2026-10-18 (M8-ACCURACY checkpoint on branch `claude/m8-accuracy-fail-closed`, PR open for owner review; owner directive "no verified evidence = no business conclusion" now precedes M8-CP1; no metric is VERIFIED; Kredi DURUM and owner decisions remain unresolved)._
 
 ## Git
-- **`main`:** M7 completed in PR #24 (`de7eb43`); post-M7 readiness PR #25 (`d67fb0b`) and M8-P0 plan PR #26 (`c34a504`) merged. M8-CP1 authentication is now the only active implementation checkpoint.
+- **`main`:** M7 completed in PR #24 (`de7eb43`); post-M7 readiness PR #25 (`d67fb0b`) and M8-P0 plan PR #26 (`c34a504`) merged; latest `7f3202d` (docs).
+- **`claude/m8-accuracy-fail-closed`:** M8-ACCURACY (from `7f3202d`); PR open, not merged. M8-CP1 follows after merge.
 - **Owner's Mac folder:** current checkout state was not inspected in this checkpoint. Previous notes reported an older checkout; verify `git status` before pulling, protect private `.env`, data and SQLite, and follow `docs/owner_launch_checklist.md`. Browser/real-data acceptance remains owner-local.
 
 ## Milestone
@@ -16,6 +17,32 @@ BLOCKED** (the `Evrak Detaylı Tahsilat Raporu` export is missing). The Kredi ta
 forward (D-038) and is merged. M6-5 (Trodat), M6-6 Gider/Gelir and M6-6 Bütçe are merged: every currently available M6 source is done; M6-4 stays
 BLOCKED and is not renumbered.
 **Milestone 7 — Sales Operating System: COMPLETE with M7-6** (PR #24 merged 2026-10-18 @ `de7eb43`). M7-1 (Customer 360), M7-2 (Günlük Satış), M7-3 (cross-sell + opportunity / territory intelligence), M7-4 (Fuar Merkezi) and M7-5 (Takip / CRM) are merged; M7-6 (Yönetim owner view + integration / performance / polish) is done. M6-4 stays blocked by a missing export; that does not block M7 (D-047).
+
+## M8-ACCURACY — factual integrity and fail-closed display (current checkpoint)
+- **Directive:** NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION (D-049). States VERIFIED / NOT_VERIFIED / INVALID;
+  only VERIFIED outputs may be displayed.
+- **Implemented:** `services/accuracy.py` (register, definitions, blockers, runtime source evidence, fail-closed gate,
+  route classification, redaction helpers); dashboard build withholds modules / stat cards / panels (no rows, no panel
+  scripts); API middleware returns 409 `accuracy_withheld` for metric-bound and unclassified routes; field-level
+  redaction for Yönetim (Kredi / Gider-Gelir / Bütçe / analytic counts), CRM active counts, fair ERP evidence and
+  segments, refresh counts and warnings; `GET /` refuses ungated dashboards; `weekly_agent.py` refuses to run; AI
+  routes withheld in production.
+- **Result today:** nothing is VERIFIED. INVALID: margin (DQ-1), Stok Eritme (DQ-2), Geri Kazanım (**DQ-6, new**),
+  Gider/Gelir (contradictory totals), Bütçe (error cells), plus outputs depending on them. Everything else is
+  NOT_VERIFIED or unavailable. Visible: system/source status, known issues, customer directory lookup, CRM records,
+  fair campaigns (members, stages, dates, notes), controlled refresh.
+- **Docs:** `docs/accuracy/metric_register.md`, `open_verification_items.md`, `release_gate.md`.
+- **Unfinished (explicit):** real-data reconciliation (owner-local); formula-aware core evidence; sales join
+  validation; field-level audit inside Customer 360 / queue scoring / fair arithmetic. Next: M8-ACCURACY-2.
+- **Tests (actual, cloud, synthetic, Python 3.12.3, Chromium + jsdom required):**
+
+| Where | Command | Result |
+|---|---|---|
+| `main` @ `7f3202d` before the change | `python -m pytest -q` (`REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1`) | **1058 passed, 7 skipped, 1 xfailed** |
+| Branch, full suite | same | **1130 passed, 7 skipped, 2 xfailed** (xfails: DQ-1, DQ-6 strict) |
+
+  73 new tests: `tests/test_m8_accuracy.py` (72, incl. 1 strict xfail) and `tests/test_m8_accuracy_browser.py`
+  (1: the production app in Chromium). The 7 skips are the owner-local `local_data` tests.
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.
@@ -84,8 +111,10 @@ OpenAI model. The OpenAI default model `gpt-5-mini` lives in
 - `weekly_agent.py` (older, unused, standalone weekly report e-mail to the owner via SMTP) still exists. The app
   never imports it and it never contacts customers; it is outside the copy-only app surface (D-031).
 - DQ-3: FIXED in M7-6 (`m_momentum` sorts by `(pct, code)`; the synthetic dashboard is byte-identical across hash seeds).
-- DQ-1: dashboard margin uses `fillna(0)` for missing cost (owner decision needed).
-- DQ-2: the dashboard "Stok Eritme" list still includes KAPALI customers (owner decision needed).
+- DQ-1: dashboard margin uses `fillna(0)` for missing cost (owner decision needed). Withheld since M8-ACCURACY.
+- DQ-2: the dashboard "Stok Eritme" list still includes KAPALI customers (owner decision needed). Withheld since M8-ACCURACY.
+- DQ-6 (new): the win-back overdue column looks up invoice-account debt with the order-source code (0 for
+  dealer-invoiced debtors). Withheld; owner rule needed.
 - The lapsed qualification window is 2021–2025 in code but 2020–2025 in the spec (TASKS *Blocked*).
 - `arama_listesi.py` is missing. It wasn't in the M1/M2 zips or on the Mac.
 - The numeric guard catches digits and common magnitude or percent words. It doesn't catch every

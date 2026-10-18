@@ -729,3 +729,34 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   `docs/m8_owner_questions_tr.md` is the owner-decision questionnaire. Implementation consists of bounded
   checkpoint PRs, with synthetic CI and a final remote real-data acceptance. An implementation plan does not
   constitute a live deployment.
+
+### D-049 · 2026-10-18 · Owner directive: no verified evidence = no business conclusion; fail-closed accuracy gate (M8-ACCURACY)
+- **Owner directive (highest priority; supersedes earlier decisions that kept potentially misleading figures visible
+  behind a warning, e.g. parts of D-047):** only results supported by valid source data, a known report date, an
+  explicitly defined deterministic calculation, passing reconciliation, validated joins, an approved business
+  definition, regression tests and an accurate label may be shown as business facts. Accuracy outranks features,
+  appearance, performance and completion. M8-ACCURACY precedes M8-CP1; later checkpoints use Claude Code.
+- **Decision:**
+  - three internal states `VERIFIED` / `NOT_VERIFIED` / `INVALID` in `services/accuracy.py`;
+  - an in-code register is the ceiling; `VERIFIED` only with D-xxx approvals for every definition, no open blocker,
+    named regression tests and real-data reconciliation evidence (`validate_register`, import time);
+  - runtime source evidence only downgrades (unknown = not passed); dependencies propagate; errors fail closed;
+  - enforcement in the backend: dashboard build embeds no withheld rows and drops withheld panel scripts; an HTTP
+    middleware withholds metric-bound routes (409 `accuracy_withheld`) and any unclassified route; mixed endpoints
+    redact field by field; `GET /` refuses dashboards built without the gate; refresh reports and warnings never carry
+    unverified totals; the legacy `weekly_agent.py` refuses to run;
+  - neutral notice "Bu analiz henüz doğrulanmadığı için gösterilmiyor." + short reasons; never zero, an estimate or
+    another field in place of a withheld value;
+  - AI interpretations / drafts withheld in production regardless of `AI_PROVIDER` (default stays `disabled`);
+    model text is never evidence.
+- **State at this checkpoint:** no output is VERIFIED (no approved definitions except D-003, no report dates for
+  stock / Cari, no real-data reconciliation in this environment). DQ-1, DQ-2, the new **DQ-6** (win-back overdue joined
+  by the wrong identity), Gider/Gelir contradictory totals and Bütçe errors are INVALID. Operational records (CRM,
+  fair campaigns, action state), system status, known issues and the customer directory lookup stay visible.
+- **Tests:** the pre-existing suite runs against a TEST-ONLY harness (`tests/accuracy_harness.py`) so the preserved
+  algorithms keep their regression coverage; `production_gate` tests run the real gate. Production code has no
+  switch that disables the gate.
+- **HTTP status choice:** 409 for a withheld resource (it exists, but its verification state conflicts with display);
+  401/403 stay free for M8-CP1 authentication.
+- **Consequences:** the father-facing dashboard shows notices instead of every analysis until owner answers and
+  real-data reconciliation allow promotions, one reviewed PR each (`docs/accuracy/release_gate.md` §2).

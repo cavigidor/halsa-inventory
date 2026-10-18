@@ -20,6 +20,9 @@ GitHub (`cavigidor/halsa-inventory`) is the source of truth. Do not rely on chat
   Python (`dashboard_builder.py`, `services/`). The AI never decides them.
 - KAPALI customers: excluded from opportunities, kept in collections and risk.
 - Missing values are never zero.
+- **No verified evidence = no business conclusion (D-049).** Only outputs certified VERIFIED in `services/accuracy.py`
+  may be displayed. Never add a flag, env var or parameter that bypasses the gate; never classify a new route as
+  anything but a metric unless it carries no business conclusion; every new route must be listed in `ACC.ROUTES`.
 - The provider gets only a small evidence packet (`services/evidence.py`). It never gets
   Excel files, DataFrames, SQLite files, whole tables or paths.
 
