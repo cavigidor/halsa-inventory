@@ -54,7 +54,7 @@ def server(tmp_path, owner=None):
     env.update({k: str(v) for k, v in (owner or {}).items()})
     port = _free_port()
     log = open(tmp_path / "server.log", "w")
-    proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(port)],
+    proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "tests.accuracy_harness_app:app", "--host", "127.0.0.1", "--port", str(port)],
                             cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
     base = f"http://127.0.0.1:{port}"
     try:

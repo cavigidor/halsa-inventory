@@ -241,7 +241,8 @@ def test_18_22_create_and_optional_stem(client, hist):
     c = new_campaign(cl)
     assert c["status"] == "planned" and c["total_customers"] == 0 and c["linked_event"] == {
         "configured": False, "found": False, "event_id": None, "label": None, "orders": None, "customers": None,
-        "net_order_amount": None, "first_order_date": None, "last_order_date": None}
+        "net_order_amount": None, "first_order_date": None, "last_order_date": None,
+        "withheld": False, "message": None, "reasons": []}                     # M8-ACCURACY notice fields (unused here)
     linked = new_campaign(cl, name="Bağlı", edition_year=2026, start_date="2026-01-17", event_stem="SENTFUARA")
     le = linked["linked_event"]
     assert le["configured"] and le["found"] and le["orders"] == 4 and le["event_id"] == ed(hist, FX.E26).event_id
