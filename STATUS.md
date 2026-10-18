@@ -1,11 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-18 (M7-6 Yönetim + integration / polish squash-merged into `main` via PR #24 @ `de7eb43`; Milestone 7 complete; Kredi DURUM clarification pending 2026-10-19)._
+_Updated 2026-10-18 (M7 complete via PR #24 `de7eb43`; post-M7 local owner-readiness PR #25 `d67fb0b` merged; Kredi DURUM clarification and Mac acceptance pending)._
 
 ## Git
 - **`main`:** PR #24 (M7-6) squash merge `de7eb43` followed by repository tracking updates. M7-6 branch is merged; new implementation work requires its own checkpoint.
-- **Owner's Mac folder:** still on `main` @ `a34ccac` (PR #2) with no uncommitted tracked changes; run `git pull`
-  there to get M5 (see "Owner follow-ups" below).
+- **Owner's Mac folder:** current checkout state was not inspected in this checkpoint. Previous notes reported an older checkout; verify `git status` before pulling, protect private `.env`, data and SQLite, and follow `docs/owner_launch_checklist.md`. Browser/real-data acceptance remains owner-local.
 
 ## Milestone
 **Milestone 5 — AI Aksiyon Merkezi: COMPLETE** (M5-1 to M5-6; final acceptance in the M5-6 section below).
@@ -1202,3 +1201,25 @@ M7-5 CRM rules and score, Customer 360 identity / facts are unchanged. Detailed 
 - Gider/Gelir: the management mapping of the four native lines, the accounting basis, and the file of record.
 - Trodat SKU mapping and units; file of record for Hedef, Kredi and Trodat.
 - Salesperson of record, whitespace policy, fair taxonomy, revenue basis, collection thresholds.
+
+
+## Post-M7 local readiness (2026-10-18; PR #25 merged @ `d67fb0b`)
+
+This **bounded operating-readiness checkpoint** did not change any scoring, financial rule, M7 tab, loan interpretation,
+importer, state store or automated AI behavior. The owner source path variables and optional Hedef variables are
+listed in `.env.example`. A new `python -m scripts.owner_preflight [--json]` reads only explicitly configured
+Kredi/Gider-Gelir/Bütçe workbooks via existing importers, with no AI calls, local DB writes or full-path output;
+safe summaries give states and validation/count warnings. It checks **owner workbooks only**, not core source dates,
+Hedef, the running dashboard, the browser or CRM/SQLite persistence. A technical pass is not financial approval.
+
+The new `docs/owner_launch_checklist.md` covers local backup, explicit export selection, run preflight, build/start the
+dashboard at `127.0.0.1`, inspect health + six M7 tabs, source dates, private state and warnings, and the specific
+`DURUM` follow-up. The app is **local, unauthenticated and not access-controlled** for owner data. No configured file
+is declared authoritative by these changes. Do not assume `Kapalı` means paid, derive source date from mtime,
+suppress missing-data warnings or combine unapproved financial categories.
+
+**Verification:** GitHub Actions PR #25 at head `89074fb` passed: **1058 passed, 7 skipped, 1 xfailed**
+(4 additional preflight tests); CI did not have the real Halsa exports. Real Mac preflight, browser acceptance,
+source selection, snapshot freshness and backup/restart verification must happen on the owner's machine.
+M6-4 detailed collections remains blocked by the missing export, and DQ-1/2/4/5 and other owner decisions stay open.
+The owner expects a clarification of Kredi `DURUM` on 2026-10-19.
