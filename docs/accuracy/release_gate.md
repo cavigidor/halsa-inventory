@@ -19,7 +19,7 @@ What the father-facing dashboard still shows is **not** a business conclusion:
   load status, the known-issues list and its data-quality counts (e.g. DQ-4 products without coverage);
 - user-entered operational records: CRM interactions and follow-ups (coverage "Eksik kayıt olabilir"), fair campaigns
   with their members, stages, dates and notes, action-state changes;
-- the customer directory lookup (code, name, master KAPALI flag, last order date as recorded);
+- the customer directory lookup: **code and recorded name only** (last-order date and KAPALI status withheld);
 - the controlled refresh (status only; unverified totals redacted).
 
 ### B. Calculated as designed, but not business-verified (withheld)
@@ -80,6 +80,9 @@ A father-facing release may go live only when **all** hold:
 - [x] Every route classified; unclassified routes withheld; tests enforce it.
 - [x] Legacy dashboards without the policy marker are refused by `GET /`.
 - [x] AI interpretations off and unreachable in production.
+- [x] Directory responses carry only code and recorded name (derived fields withheld).
+- [x] Evidence inspection fails closed; unknown evidence never passes.
+- [ ] **Generation-bound evidence shared by dashboard, API, owner views and refresh** (M8-ACCURACY-2, mandatory).
 - [ ] Each analysis the owner wants on day one is promoted to VERIFIED by §2 (none yet).
 - [ ] Owner has reviewed which tabs show only notices and accepts that state for launch, or delays launch.
 - [ ] Declared report dates for every uploaded source (CP3/CP4).
@@ -103,6 +106,21 @@ areas) and **no metric is verified**.
 
 ## 6. Next recommended checkpoint — M8-ACCURACY-2 "First verifiable core metrics"
 Bounded, one PR. Work that needs no owner answer can start at once; promotions wait for the answers.
+
+**Mandatory acceptance criteria (from the PR #27 review; no metric may be promoted before all hold):**
+- A. One immutable, validated `EvidenceSnapshot` per published source generation, produced from the exact bytes /
+  frames used, shared by the dashboard HTML, every API route, the Yönetim owner-source views and the refresh report.
+- B. The snapshot is installed atomically with the generation it describes and invalidated on refresh, owner reload,
+  failed refresh (rollback keeps the previous generation *and* its snapshot) and restart; evidence of an older
+  generation is never carried into a new one (`Gate.bound_to` already drops it; extend to the API).
+- C. Tests for verified → unverified and unverified → verified transitions, mixed-source generations (core vs owner),
+  rollback, restart, and dashboard/API agreement for the same metric.
+- D. Formula-aware evidence for the core exports (errors vs missing caches vs blanks) and recorded join validation.
+- E. Only then set `GENERATION_BOUND_API_EVIDENCE = True` (validate_register refuses any VERIFIED entry before it).
+- F. Production-gate tests prove every permitted field and route independently of the algorithm harness; the
+  harness-run suite is regression coverage only, never evidence that a path is displayable.
+
+Further work:
 1. Declared business date per core source (stock, Cari) carried into `SourceEvidence` (stepping stone for CP3).
 2. Formula-aware evidence for the core exports via the M6 framework (error cells vs missing caches vs blanks).
 3. Sales join validation (order-source ↔ master ↔ invoice account; whitespace codes reported, not repaired).
@@ -111,3 +129,27 @@ Bounded, one PR. Work that needs no owner answer can start at once; promotions w
    rules, then promote the first candidates (likely `receivables.collections`, `stock.reorder` / `stock.overstock`
    with the DQ-4 rule) — each only if §2 is fully met.
 M8-CP1 (authentication) does not display numbers and can follow this PR; the release gate above still applies.
+
+## 7. Correction pass after the independent review of PR #27 (2026-10-18)
+**Fixed in this PR**
+1. `GET /api/customer360/search` no longer returns the derived last-order date or the KAPALI status; code and
+   recorded display name stay. The same fields are withheld in CRM follow-up / customer responses and fair member
+   rows (new register entries `customer.last_order_date`, `customer.master_status`; backend `redact_directory`).
+2. `_excel_errors` returned **0** whenever inspection raised — and it raised for every numeric-only column, so those
+   columns were reported as inspected and clean. It now inspects all columns and returns `None` on failure; failures
+   are recorded as `inspection_failures` (INVALID). A crashing collector records `collector:<Error>`.
+3. `SourceEvidence` had optimistic defaults (available / layout True, counts 0, 45-day age on the source). Every field
+   now starts unknown; collectors set only what they inspected and no longer assert joins, period completeness or
+   mappings for the core exports.
+4. Freshness moved from the source to the metric: operational vs historical (§ metric_register "How a decision is
+   made"). Old complete historical periods are not withheld for age; recent sources are not approved for being recent.
+5. Evidence is bound to a content-hash generation (`EvidenceSnapshot`, `Gate.bound_to`); evidence from another
+   generation never certifies. The dashboard embeds `stockagent-generation`.
+
+**Deferred to M8-ACCURACY-2 (mandatory, §6 A–F):** sharing the generation-bound snapshot with the API, owner views and
+refresh, with transition / rollback / restart tests. Until then the API has no evidence, every source-bound metric
+stays withheld everywhere, and the production register cannot certify any metric VERIFIED.
+
+**Residual, documented:** KAPALI safeguards still act server-side and their refusal messages name the reason (they
+restrict an action; they do not present an analysis). Counts of records in the directory, CRM and campaigns, the
+data date (max sales date), file names and data-quality counts (e.g. DQ-4) remain as system information.

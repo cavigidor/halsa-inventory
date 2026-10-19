@@ -760,3 +760,21 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   401/403 stay free for M8-CP1 authentication.
 - **Consequences:** the father-facing dashboard shows notices instead of every analysis until owner answers and
   real-data reconciliation allow promotions, one reviewed PR each (`docs/accuracy/release_gate.md` §2).
+
+### D-050 · 2026-10-18 · M8-ACCURACY correction pass after the independent review of PR #27
+- **Directory attributes are analyses, not reference data.** `GET /api/customer360/search`, CRM follow-up / customer
+  responses and fair member rows keep the customer code and recorded display name only; the derived last-order date
+  (`customer.last_order_date`) and the open / KAPALI status (`customer.master_status`) are withheld in the backend
+  (`ACC.redact_directory`). Conservative KAPALI safeguards keep restricting actions server-side.
+- **Evidence fails closed.** Every `SourceEvidence` field starts unknown; unknown never passes; inspection errors are
+  recorded as failures (INVALID) — `_excel_errors` previously returned 0 on error (and errored on every numeric column).
+  Collectors no longer assert joins, period completeness or mappings they did not check.
+- **Time per metric:** `Metric.temporal` = operational (needs a fresh source, `max_source_age_days`) or historical (needs
+  a dated, complete period; no age limit). Both need a known report date and verified completeness. Age only withholds.
+- **Generation-bound evidence:** immutable `EvidenceSnapshot` keyed by a content hash of the exact frames; a gate uses
+  evidence only for the generation it decides for (`Gate.bound_to` drops evidence of other generations). The API gets
+  no snapshot yet, so every source-bound metric stays withheld there. `validate_register(production=True)` refuses any
+  VERIFIED certification while `GENERATION_BOUND_API_EVIDENCE` is False. Sharing the published generation's snapshot
+  with the API, owner views and refresh (with transition / rollback / restart tests) is a **mandatory M8-ACCURACY-2
+  acceptance criterion** (`docs/accuracy/release_gate.md` §6 A–F).
+- **Unchanged:** no financial calculation or business rule; Kredi DURUM unresolved; DQ-1/2/4/5/6 unresolved.

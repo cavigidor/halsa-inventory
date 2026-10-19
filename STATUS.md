@@ -32,6 +32,14 @@ BLOCKED and is not renumbered.
   NOT_VERIFIED or unavailable. Visible: system/source status, known issues, customer directory lookup, CRM records,
   fair campaigns (members, stages, dates, notes), controlled refresh.
 - **Docs:** `docs/accuracy/metric_register.md`, `open_verification_items.md`, `release_gate.md`.
+- **Correction pass (independent review of PR #27, D-050):** search / CRM / fair member rows now carry only code +
+  recorded name (last-order date and KAPALI status withheld); `_excel_errors` no longer reports 0 when inspection fails
+  (it previously did so for every numeric column); `SourceEvidence` starts fully unknown and failed inspections are
+  INVALID; time rules per metric (operational freshness vs historical period completeness); immutable
+  generation-bound `EvidenceSnapshot`; the API has no evidence (all source-bound metrics withheld) and the production
+  register refuses any VERIFIED entry until ACCURACY-2 shares the snapshot (mandatory criteria A–F).
+  Performance note: hashing the generation adds about 3.6 s per dashboard build at real-data scale (measured on a
+  synthetic 182,000 × 36 frame); the evidence counts add about 0.7 s.
 - **Unfinished (explicit):** real-data reconciliation (owner-local); formula-aware core evidence; sales join
   validation; field-level audit inside Customer 360 / queue scoring / fair arithmetic. Next: M8-ACCURACY-2.
 - **Tests (actual, cloud, synthetic, Python 3.12.3, Chromium + jsdom required):**
@@ -39,10 +47,13 @@ BLOCKED and is not renumbered.
 | Where | Command | Result |
 |---|---|---|
 | `main` @ `7f3202d` before the change | `python -m pytest -q` (`REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1`) | **1058 passed, 7 skipped, 1 xfailed** |
-| Branch, full suite | same | **1130 passed, 7 skipped, 2 xfailed** (xfails: DQ-1, DQ-6 strict) |
+| Branch, first pass (`c8a9e9b`) | same | **1130 passed, 7 skipped, 2 xfailed** (xfails: DQ-1, DQ-6 strict) |
+| Branch, after the correction pass | same | **1164 passed, 7 skipped, 2 xfailed** |
 
-  73 new tests: `tests/test_m8_accuracy.py` (72, incl. 1 strict xfail) and `tests/test_m8_accuracy_browser.py`
-  (1: the production app in Chromium). The 7 skips are the owner-local `local_data` tests.
+  107 accuracy tests run the real production gate: `tests/test_m8_accuracy.py` (79, incl. 1 strict xfail),
+  `tests/test_m8_accuracy_review.py` (27, correction pass) and `tests/test_m8_accuracy_browser.py` (1, the production
+  app in Chromium). The rest of the suite runs on the test-only algorithm harness (regression coverage only, not
+  evidence that a path is displayable). The 7 skips are the owner-local `local_data` tests.
 
 ## What works
 - Deterministic dashboard (`python dashboard_builder.py data`). This file was unchanged by M3.

@@ -122,7 +122,18 @@ Owner questions are numbered as in `docs/m8_owner_questions_tr.md` (Q#). "Withhe
 - **To resolve:** revenue-basis decision (Q3: order / delivery / invoice; treatment of cancellations and returns);
   implement it once in Python; stop substituting zero; reconcile yearly totals against accounting.
 
+### CUSTOMER DIRECTORY — derived attributes · NOT_VERIFIED
+- **Evidence:** search hits carried `last_order_date` (max order-line date, cancelled / undelivered parts included) and
+  the master KAPALI flag (`liste` CARİ FİRMA; attribute source of record open, DQ-5 / Q10). Raised by the PR #27 review.
+- **Now:** withheld in search, CRM and fair member responses; code and recorded name remain.
+- **To resolve:** last-order-date basis (Q3), attribute source of record (Q10), real-data reconciliation.
+
 ## Cross-cutting items
+- **Generation-bound evidence (review of PR #27, mandatory for M8-ACCURACY-2):** the API receives no evidence today;
+  the snapshot of the published generation must be shared by dashboard, API, owner views and refresh before any
+  promotion (`release_gate.md` §6 A–F).
+- **Evidence inspection (fixed):** `_excel_errors` previously reported 0 when inspection raised (always for numeric
+  columns); it now fails closed.
 - **Report dates:** stock and Cari exports are chosen by modification time; no report date is read or declared. The
   M8 upload (CP3) must capture a declared business date per source; until then stock / Cari outputs stay NOT_VERIFIED.
 - **Real-data reconciliation:** required for every promotion; owner-local only.

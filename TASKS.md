@@ -7,11 +7,16 @@ Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi,
 - [ ] **M8-ACCURACY — Factual integrity and fail-closed display audit** (owner-approved priority change, 2026-10-18):
   VERIFIED / NOT_VERIFIED / INVALID register and backend gate (`services/accuracy.py`), withheld dashboard modules /
   panels / API routes with the Turkish notice, AI off in production, metric register and audit docs in
-  `docs/accuracy/`. Branch `claude/m8-accuracy-fail-closed`; PR open, **review and merge by the owner** (not merged
+  `docs/accuracy/`. Branch `claude/m8-accuracy-fail-closed`; PR #27 open, **review and merge by the owner** (not merged
   automatically). No metric is VERIFIED yet; the audit is bounded, not complete (`docs/accuracy/release_gate.md`).
+  Correction pass after the independent review done (D-050): directory fields redacted, evidence fails closed,
+  operational vs historical time rules, generation-bound evidence interface; promotion blocked until ACCURACY-2.
 
 ## Next (M8 — accuracy and production launch)
-- [ ] **M8-ACCURACY-2 — First verifiable core metrics** (proposed; `docs/accuracy/release_gate.md` §6): declared
+- [ ] **M8-ACCURACY-2 — First verifiable core metrics** (proposed; `docs/accuracy/release_gate.md` §6). **Mandatory
+  first:** one generation-bound evidence snapshot shared by dashboard, API, owner views and refresh, invalidated on
+  refresh / reload / rollback / restart, with transition and mixed-generation tests (criteria A–F); only then flip
+  `GENERATION_BOUND_API_EVIDENCE`. Then: declared
   report dates for stock / Cari, formula-aware core evidence, sales join validation, owner-local privacy-safe
   reconciliation evidence; then, with owner answers, fix DQ-6 / DQ-2 / DQ-1 / zero-substituted amounts and promote
   the first metrics only if every VERIFIED criterion holds.

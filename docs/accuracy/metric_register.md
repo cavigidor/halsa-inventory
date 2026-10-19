@@ -1,6 +1,7 @@
 # M8-ACCURACY — Metric register
 
-_Status: 2026-10-18, checkpoint M8-ACCURACY (branch `claude/m8-accuracy-fail-closed`, from `main` @ `7f3202d`)._
+_Status: 2026-10-18, checkpoint M8-ACCURACY (branch `claude/m8-accuracy-fail-closed`, from `main` @ `7f3202d`);
+updated by the correction pass after the independent review of PR #27 (see `release_gate.md` §7)._
 _Source of truth in code: `services/accuracy.py` (`REGISTER`, `DEFINITIONS`, `ROUTES`). This document mirrors it and
 adds the audit evidence. If they disagree, the code wins and this file must be corrected._
 
@@ -20,12 +21,21 @@ most four short reasons (no numbers, names, paths or exception text).
    with no open blocker, every definition approved by a `D-xxx` decision, named regression tests and a real-data
    reconciliation reference. **No entry is certified `VERIFIED` today.**
 2. **Blockers** (known, documented problems) and **unapproved definitions** downgrade the state.
-3. **Runtime evidence** for each source actually read (`SourceEvidence`) can only downgrade: unknown or stale report
-   date, Excel errors, missing cached formula results, missing required values, duplicate records, join problems,
-   partial periods, contradictory totals, unsupported layouts, unapproved mappings. Unknown is never "passed".
-   Missing evidence for a source = `NOT_VERIFIED`.
-4. **Dependencies.** A combined output is the worst of its own state and every output it depends on.
-5. Any error while deciding, an unknown key or an unclassified API route = `INVALID` (fail-closed).
+3. **Runtime evidence** for each source actually read (`SourceEvidence`) can only downgrade: Excel errors, missing
+   cached formula results, missing required values, duplicate records, join problems, contradictory totals,
+   unsupported layouts, unapproved mappings, failed inspections. **Every field starts unknown (None) and unknown is
+   never "passed"**; a failed inspection is `INVALID`, never "0 errors". Missing evidence for a source = `NOT_VERIFIED`.
+   **Time** is judged per metric: an *operational* metric (current state) needs a known report date no older than its
+   `max_source_age_days` (45); a *historical* metric (a closed past period) needs a known report date, a dated
+   `period_end` and a complete period, with no age limit. Both need verified completeness. Age never approves.
+4. **Generation binding.** Evidence lives in an immutable `EvidenceSnapshot` whose `generation_id` is a content hash
+   of the exact frames the outputs were computed from. A gate accepts evidence only for the generation it decides for;
+   evidence from another (earlier) generation never certifies anything. The dashboard build binds itself to the
+   snapshot of its own frames. **The API currently receives no snapshot**, so every source-bound metric is withheld
+   there; `validate_register(production=True)` refuses any VERIFIED certification until M8-ACCURACY-2 shares the
+   published generation's snapshot with the API, owner views and refresh (`GENERATION_BOUND_API_EVIDENCE`).
+5. **Dependencies.** A combined output is the worst of its own state and every output it depends on.
+6. Any error while deciding, an unknown key or an unclassified API route = `INVALID` (fail-closed).
 
 Enforcement points (backend / shared response layer, never only JavaScript):
 - **Dashboard HTML** — `dashboard_builder.build(..., gate=None)`: a withheld module is emitted with `rows: []`,
@@ -78,13 +88,18 @@ tests are owner-local `local_data`). Nothing below claims a real-data reconcilia
 | `scenario.receivables` | — | `POST /api/scenario` | NOT_VERIFIED | no |
 | `collections.detailed` | — (no surface) | — | NOT_VERIFIED — **source missing** | — |
 | `trodat.sales` | — (no surface) | — | NOT_VERIFIED | — |
+| `customer.last_order_date` | search hits, fair members | field in `/api/customer360/search`, fair member APIs | NOT_VERIFIED | no |
+| `customer.master_status` | KAPALI badge in search, CRM, fair members | fields `closed` / `master_status` in search, CRM, fair member APIs | NOT_VERIFIED | no |
 
 Non-metric surfaces (classified in `ACC.ROUTES`; not business conclusions):
 - **system**: `/`, `/docs`, `/openapi.json`, `/redoc`, `/api/health`, `/api/agent/categories`, `/api/ai/calls`
   (metadata only), `/api/macro` (always "unavailable"), `/api/customer360/status`, `/api/owner/status` (system status
   + known issues; the cross-sell count is redacted).
-- **reference**: `/api/customer360/search` — code, display name, trusted-master KAPALI flag, last order date as
-  recorded. A directory lookup, needed by CRM and fair campaigns; no analysis.
+- **redacted directory**: `/api/customer360/search` returns only the customer code and recorded display name; the
+  derived last-order date and the open / KAPALI status are withheld (`customer.last_order_date`,
+  `customer.master_status`), with notices. The same two fields are withheld in CRM follow-up / customer responses and
+  fair member rows. The conservative KAPALI safeguards (no sales follow-up or invite for a trusted-KAPALI customer)
+  keep working server-side: they restrict an action and display no analysis.
 - **operational** (user-entered records and state changes): CRM interactions / follow-ups / lists, fair campaign
   create / update / archive / add members, action state (`/api/actions/*`), owner reload. Analytic fields attached to
   them are redacted (`crm.active_customers`, `fairs.history`, `fairs.segments`).
@@ -278,6 +293,13 @@ Field legend: **UI** · **API** · **Source** (workbook / sheet / columns) · **
 ### `scenario.receivables`
 - `services/scenarios.run_scenario` over `overdue_total` and request assumptions. **State:** NOT_VERIFIED.
 
+### `customer.last_order_date`, `customer.master_status` (directory attributes)
+- **Last order date:** `services/customer360.py` = max `Tarih` of the customer's order lines; cancelled
+  (`Vazgecilen`) and undelivered (`Kalan`) parts count; trailing-space code policy open; no report-date / completeness
+  verification. **State:** NOT_VERIFIED. **Shown:** no.
+- **Master status:** `snap.master_closed` from `liste` `CARİ FİRMA`; the attribute source of record is open (Q10,
+  DQ-5); ~10 duplicate master codes. **State:** NOT_VERIFIED. **Shown:** no (operational safeguards stay).
+
 ### `collections.detailed`, `trodat.sales`
 - No display surface. Detailed collections: source `Evrak Detaylı Tahsilat Raporu` **missing** (M6-4 blocked; never
   derived from Cari aging). Trodat: native importer only; SKU mapping and units unverified (D-039).
@@ -289,7 +311,10 @@ Field legend: **UI** · **API** · **Source** (workbook / sheet / columns) · **
 - **Formula-aware reading of the core sources:** the M5 path reads stock / sales / Cari with pandas, which turns Excel
   errors and missing cached results into NaN. The collector counts them as missing required values (INVALID), but
   cannot tell error, missing cache and blank apart. Routing the core sources through the M6 framework is future work.
-- **Join validation** (`SourceEvidence.joins_validated`) is not computed for sales; it stays unknown → NOT_VERIFIED.
+- **Join validation** (`SourceEvidence.joins_validated`) is not computed for any source; it stays unknown → NOT_VERIFIED.
+- **Generation-bound evidence for the API, owner views and refresh** (mandatory M8-ACCURACY-2 criterion).
+- **Formula-aware core reading:** pandas cannot report missing cached formula results, so `missing_cached_formulas`
+  stays unknown for the core exports (NOT_VERIFIED).
 - **Control totals** (`totals_consistent`) are not available for the core exports; unknown → NOT_VERIFIED.
 - **Customer 360 field-level audit** (each card), **Günlük Satış scoring** and **fair edition arithmetic** were audited
   at the module level only, because each is withheld as a whole.
