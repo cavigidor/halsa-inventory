@@ -78,19 +78,27 @@ def _cell_xml(ref: str, v: Any) -> str:
     return _value_xml(ref, v)
 
 
-def _sheet_xml(rows: Sequence[Sequence[Any]], merged: Sequence[str] = ()) -> str:
-    out, max_c = [], 1
+def _sheet_xml(rows: Sequence[Sequence[Any]], merged: Sequence[str] = (), hidden_rows: Sequence[int] = (),
+               auto_filter: tuple[str, int] | None = None) -> str:
+    """`hidden_rows`: 1-based rows marked hidden (as an Excel AutoFilter leaves them); `auto_filter`: (ref, colId) of
+    a saved filter with criteria on that column (the criteria themselves are not modeled)."""
+    out, max_c, hidden = [], 1, set(hidden_rows)
     for r, row in enumerate(rows, start=1):
         cells = [_cell_xml(f"{col_letter(c)}{r}", v) for c, v in enumerate(row, start=1) if v is not None]
         if row:
             max_c = max(max_c, len(row))
-        if cells:
-            out.append(f'<row r="{r}">{"".join(cells)}</row>')
+        if cells or r in hidden:
+            attr = ' hidden="1"' if r in hidden else ""
+            out.append(f'<row r="{r}"{attr}>{"".join(cells)}</row>')
     dim = f"A1:{col_letter(max_c)}{max(len(rows), 1)}"
+    pr = '<sheetPr filterMode="1"/>' if auto_filter else ""
+    af = (f'<autoFilter ref="{auto_filter[0]}"><filterColumn colId="{auto_filter[1]}"><filters>'
+          '<dateGroupItem year="2026" dateTimeGrouping="year"/></filters></filterColumn></autoFilter>'
+          if auto_filter else "")
     return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
             'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-            f'<dimension ref="{dim}"/><sheetData>{"".join(out)}</sheetData>'
+            f'{pr}<dimension ref="{dim}"/><sheetData>{"".join(out)}</sheetData>{af}'
             + (f'<mergeCells count="{len(merged)}">' + "".join(f'<mergeCell ref="{m}"/>' for m in merged)
                + "</mergeCells>" if merged else "")
             + "</worksheet>")
@@ -112,7 +120,9 @@ _NS_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
 
 def write_xlsx(path: str | Path, sheets: dict[str, Sequence[Sequence[Any]]], *,
-               external_links: Sequence[str] = (), merged: dict[str, Sequence[str]] | None = None) -> Path:
+               external_links: Sequence[str] = (), merged: dict[str, Sequence[str]] | None = None,
+               hidden_rows: dict[str, Sequence[int]] | None = None,
+               auto_filter: dict[str, tuple[str, int]] | None = None) -> Path:
     """Write a workbook with the given sheets (name → rows). `external_links` are link targets
     (e.g. a fictional 'file:///C:/Users/someone/Other.xlsx'); the parts are only declared.
     `merged` maps a sheet name to merged ranges (e.g. ["B5:D5"]); only the top-left cell holds a value."""
@@ -162,7 +172,9 @@ def write_xlsx(path: str | Path, sheets: dict[str, Sequence[Sequence[Any]]], *,
         z.writestr("xl/_rels/workbook.xml.rels", "".join(rels))
         z.writestr("xl/styles.xml", _STYLES)
         for i, name in enumerate(names, start=1):
-            z.writestr(f"xl/worksheets/sheet{i}.xml", _sheet_xml(sheets[name], (merged or {}).get(name, ())))
+            z.writestr(f"xl/worksheets/sheet{i}.xml", _sheet_xml(sheets[name], (merged or {}).get(name, ()),
+                                                                 (hidden_rows or {}).get(name, ()),
+                                                                 (auto_filter or {}).get(name)))
         for j, target in enumerate(external_links, start=1):
             z.writestr(f"xl/externalLinks/externalLink{j}.xml",
                        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
