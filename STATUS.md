@@ -1,10 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-18 (M8-ACCURACY checkpoint on branch `claude/m8-accuracy-fail-closed`, PR open for owner review; owner directive "no verified evidence = no business conclusion" now precedes M8-CP1; no metric is VERIFIED; Kredi DURUM and owner decisions remain unresolved)._
+_Updated 2026-10-19 (M8-ACCURACY safety gate PR #27 merged at `a28b2b9`; M8-ACCURACY-2 is Current. Owner supplied a newly filtered Kredi workbook for source-validation handoff; no loan or other financial metric has been certified VERIFIED)._
 
 ## Git
-- **`main`:** M7 completed in PR #24 (`de7eb43`); post-M7 readiness PR #25 (`d67fb0b`) and M8-P0 plan PR #26 (`c34a504`) merged; latest `7f3202d` (docs).
-- **`claude/m8-accuracy-fail-closed`:** M8-ACCURACY (from `7f3202d`); PR open, not merged. M8-CP1 follows after merge.
+- **`main`:** M7 complete PR #24; readiness PR #25; M8 planning PR #26; M8-ACCURACY safety gate PR #27 squash merged (`a28b2b9`). M8-ACCURACY-2 is the next implementation checkpoint.
+- **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
 - **Owner's Mac folder:** current checkout state was not inspected in this checkpoint. Previous notes reported an older checkout; verify `git status` before pulling, protect private `.env`, data and SQLite, and follow `docs/owner_launch_checklist.md`. Browser/real-data acceptance remains owner-local.
 
 ## Milestone
@@ -18,7 +18,7 @@ forward (D-038) and is merged. M6-5 (Trodat), M6-6 Gider/Gelir and M6-6 Bütçe 
 BLOCKED and is not renumbered.
 **Milestone 7 — Sales Operating System: COMPLETE with M7-6** (PR #24 merged 2026-10-18 @ `de7eb43`). M7-1 (Customer 360), M7-2 (Günlük Satış), M7-3 (cross-sell + opportunity / territory intelligence), M7-4 (Fuar Merkezi) and M7-5 (Takip / CRM) are merged; M7-6 (Yönetim owner view + integration / performance / polish) is done. M6-4 stays blocked by a missing export; that does not block M7 (D-047).
 
-## M8-ACCURACY — factual integrity and fail-closed display (current checkpoint)
+## M8-ACCURACY — factual integrity and fail-closed display (merged PR #27; ACCURACY-2 now Current)
 - **Directive:** NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION (D-049). States VERIFIED / NOT_VERIFIED / INVALID;
   only VERIFIED outputs may be displayed.
 - **Implemented:** `services/accuracy.py` (register, definitions, blockers, runtime source evidence, fail-closed gate,
@@ -1283,3 +1283,21 @@ The xfail remains the known owner-approval-dependent DQ-1 margin test.
 route-level protection. Kredi `DURUM` answer expected 2026-10-19; never assume Kapalı is paid. Other business
 decisions and source gaps, including M6-4 detailed collections, are still open. Actual hosted/local Mac
 real-data smoke, privacy/transfer approval, and father remote usability have NOT been verified.
+
+
+## 2026-10-19 owner Kredi workbook handoff (private attachment; no workbook committed)
+
+Owner's father supplied a revised filtered Kredi repayment workbook for year/month/bank scheduling. In the private
+attachment, Excel hides rows through a date filter and shows formulas for a selected subset. The workbook differs
+structurally from the M6 strict export: row 1 contains SUBTOTAL-linked formulas, row 2 contains the 23-column
+header, installment data are on later rows, an ERP control-total row is followed by a SUBTOTAL summary row. The
+existing M6 importer expects row 1 headers and a final control-total row, so the current workbook **must not be
+assumed import-compatible**. Any safe adaptation needs a clearly identified layout, a synthetic regression fixture
+and validation of the full source, including filtered-out rows and report/date provenance.
+
+A filtered date range is **not** a proof of a complete future liability schedule, even when its SUBTOTAL matches its
+visible rows. The private source contains additional hidden positive-remaining entries outside the selected dates
+and a negative residual exception; both need owner reconciliation. Do not auto-zero, exclude, or repair them. Contract
+status `Kapalı` is not approved as proof of payment, and source file-of-record / true snapshot date remain
+unconfirmed. Record user-approved year, month, bank, interest/principal/tax breakdown definitions separately before
+any VERIFIED production output. All values must remain withheld by the M8 accuracy gate until demonstrated.
