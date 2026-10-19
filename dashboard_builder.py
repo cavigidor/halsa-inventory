@@ -238,8 +238,10 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     if fr.get('stock') is None: fr['stock']=read_stock(sp)
     if ep and fr.get('sales') is None: fr['sales']=read_sales_raw(ep)
     if ap and fr.get('aging') is None: fr['aging']=read_aging_raw(ap)
-    gate=(gate or ACC.current_gate(today=today)).with_evidence(
-        ACC.collect_core_evidence(fr.get('stock'),fr.get('sales'),fr.get('aging'),today=today))
+    # Evidence is bound to THIS generation (a content hash of exactly these frames); evidence held for any other
+    # generation is dropped, never reused (services/accuracy.Gate.bound_to).
+    snapshot=ACC.collect_snapshot({'stock':fr.get('stock'),'sales':fr.get('sales'),'aging':fr.get('aging')},today=today)
+    gate=(gate or ACC.current_gate(today=today)).bound_to(snapshot)
     low,over,total=m_stock(sp,fr.get('stock'))
     coll,owed=([],{})
     if ap: coll,owed=m_collections(ap,fr.get('aging'))
@@ -327,14 +329,14 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     meta={'date':d_tr,'stock':os.path.basename(sp) if sp else '','sales':os.path.basename(ep) if ep else '',
           'aging':os.path.basename(ap) if ap else '','tiers':tier_counts,'total':total,'has_aging':has_aging,
           'asof':_asof_iso(sdf),'show_tiers':show_tiers,'withheld_stats':withheld_stats,
-          'withheld_panels':panel_notice,'accuracy_policy':ACC.POLICY_VERSION}
+          'withheld_panels':panel_notice,'accuracy_policy':ACC.POLICY_VERSION,'generation':snapshot.generation_id or ''}
     with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel,opp_panel=opp_panel,fair_panel=fair_panel,crm_panel=crm_panel,own_panel=own_panel))
     if stats_out is not None:
         # Internal build totals for the refresh's context ↔ dashboard reconciliation (never displayed as such).
         stats_out.update({'asof':meta['asof'],'overdue_total':overdue_total,'overstock_value':over_val,
                           'tabs':list(modules.keys()),'products':total,'lapsed':len(lap),'low':len(low),
                           'over':len(over),'coll':len(coll),'sources':{k:(os.path.basename(v) if v else None) for k,v in src.items()},
-                          'accuracy':{k:d.state.value for k,d in decisions.items()}})
+                          'accuracy':{k:d.state.value for k,d in decisions.items()},'generation':snapshot.generation_id})
     return out_path,{'low':len(low),'over':len(over),'lapsed':len(lap),'coll':len(coll),
                      'momentum':len(momentum),'margin':len(margin),'ordersize':len(ordersize),
                      'osmove':len(osmove),'risk':len(risk)}
@@ -2497,6 +2499,7 @@ def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,o
     tiers=(f'<p class="note" style="margin-top:14px">Geri kazanım dağılımı — Kademe 1: {meta["tiers"][1]} · Kademe 2: {meta["tiers"][2]} · Kademe 3: {meta["tiers"][3]}.</p>'
            if meta.get('show_tiers',True) else '')
     acc=html.escape(str(meta.get('accuracy_policy') or ''),quote=True)
+    gen=html.escape(str(meta.get('generation') or ''),quote=True)
     laterlist=''.join(f'<li>{html.escape(x)}</li>' for x in later)
     src=f"Stok: {meta['stock']} · Satış: {meta['sales']}"+(f" · Alacaklar: {meta['aging']}" if meta['has_aging'] else '')
     ai_btn,ai_block=_ai_panel(meta) if ai_panel else ('','')
@@ -2508,7 +2511,7 @@ def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,o
     cr_btn,cr_block=_crm_panel(meta) if crm_panel else ('','')
     ow_btn,ow_block=_own_panel(meta) if own_panel else ('','')
     return f"""<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="stockagent-accuracy" content="{acc}"><title>Şirket Panosu — {meta['date']}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="stockagent-accuracy" content="{acc}"><meta name="stockagent-generation" content="{gen}"><title>Şirket Panosu — {meta['date']}</title>
 <style>
 :root{{--ink:#16191d;--muted:#6b7480;--line:#e6e8ec;--paper:#fbfbf9;--card:#fff;
 --low:#c2410c;--crit:#9f1239;--over:#0e7490;--gold:#92660a;--lap:#6d28d9;--warn:#b45309;--warn-bg:#fef6e7;}}

@@ -780,6 +780,7 @@ class Customer360Search(BaseModel):
     truncated: bool
     as_of_data_date: str
     results: List[C360SearchHit]
+    withheld: List[WithheldNotice] = []      # M8-ACCURACY: directory attributes withheld (last order, KAPALI)
 
 
 class Customer360Status(BaseModel):

@@ -73,7 +73,9 @@ def _route_template(scope):
 
 
 def accuracy_gate():
-    """The gate for this request (production: services.accuracy.current_gate; no runtime switch exists)."""
+    """The gate for this request (production: services.accuracy.current_gate; no runtime switch exists).
+    No evidence snapshot is passed: until M8-ACCURACY-2 shares the published generation's snapshot with the API
+    (ACC.GENERATION_BOUND_API_EVIDENCE), every source-bound metric is withheld here, whatever the dashboard shows."""
     return ACC.current_gate()
 
 
@@ -425,8 +427,11 @@ def customer360_search(q: str = "", limit: int = C360.SEARCH_DEFAULT,
     snap = _c360_snapshot(c360)
     limit = max(1, min(limit, C360.SEARCH_MAX))
     hits, truncated = snap.search(q, limit)
+    gate = accuracy_gate()      # M8-ACCURACY: code + recorded name stay; derived last-order date / KAPALI withheld
     return S.Customer360Search(query=q, limit=limit, min_chars=C360.SEARCH_MIN_CHARS, count=len(hits),
-                               truncated=truncated, as_of_data_date=snap.as_of.isoformat(), results=hits)
+                               truncated=truncated, as_of_data_date=snap.as_of.isoformat(),
+                               results=[ACC.redact_directory(h, gate) for h in hits],
+                               withheld=ACC.directory_notices(gate))
 
 
 @app.get("/api/customer360/{customer_code}", response_model=S.Customer360Detail)
@@ -743,7 +748,9 @@ def crm_summary(c360: C360.Customer360Repository = Depends(get_c360)):
 @app.get("/api/crm/followups", response_model=S.CrmFollowupList)
 def crm_followups(mode: Literal["due", "today", "upcoming", "all"] = "due", days: int = 7, limit: int = 100,
                   c360: C360.Customer360Repository = Depends(get_c360)):
-    return S.CrmFollowupList(**CRM.followup_list(_crm_snap(c360), mode, days=days, limit=limit))
+    body = CRM.followup_list(_crm_snap(c360), mode, days=days, limit=limit)
+    gate = accuracy_gate()
+    return S.CrmFollowupList(**{**body, "items": [ACC.redact_directory(it, gate) for it in body["items"]]})
 
 
 @app.get("/api/crm/recent", response_model=S.CrmRecent)
@@ -758,7 +765,7 @@ def crm_customer(customer_code: str, c360: C360.Customer360Repository = Depends(
         CRM.require_customer(snap, customer_code)
     except CRM.CrmError as e:
         _crm_error(e)
-    return CRM.customer_view(snap, customer_code)
+    return ACC.redact_directory(CRM.customer_view(snap, customer_code), accuracy_gate())
 
 
 @app.post("/api/crm/customers/{customer_code}/interactions", response_model=S.CrmCustomer)
@@ -770,7 +777,7 @@ def crm_add_interaction(customer_code: str, body: S.CrmInteractionCreate,
     if body.followup is not None:
         data["followup"] = {**body.followup.model_dump(), "due_date": body.followup.due_date.isoformat()}
     try:
-        return CRM.add_interaction(snap, customer_code, data)
+        return ACC.redact_directory(CRM.add_interaction(snap, customer_code, data), accuracy_gate())
     except CRM.CrmError as e:
         _crm_error(e)
 
@@ -783,7 +790,7 @@ def crm_set_followup(customer_code: str, body: S.CrmFollowupUpdate,
     if body.due_date is not None:
         data["due_date"] = body.due_date.isoformat()
     try:
-        return CRM.set_followup(snap, customer_code, data)
+        return ACC.redact_directory(CRM.set_followup(snap, customer_code, data), accuracy_gate())
     except CRM.CrmError as e:
         _crm_error(e)
 

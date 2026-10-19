@@ -20,11 +20,11 @@ class AlgorithmHarnessGate(ACC.Gate):
         title = ACC.REGISTER[key].title_tr if key in ACC.REGISTER else key
         return ACC.Decision(key, title, ACC.State.VERIFIED)
 
-    def with_evidence(self, evidence):
+    def bound_to(self, collected):
         return self
 
 
-def harness_gate(today=None, evidence=None):
+def harness_gate(today=None, snapshot=None, expected_generation=None):
     return AlgorithmHarnessGate(today=today)
 
 
@@ -33,5 +33,5 @@ def install():
     ACC.current_gate = harness_gate
 
 
-def production_gate(today=None, evidence=None):
-    return _PRODUCTION_CURRENT_GATE(today=today, evidence=evidence)
+def production_gate(today=None, snapshot=None, expected_generation=None):
+    return _PRODUCTION_CURRENT_GATE(today=today, snapshot=snapshot, expected_generation=expected_generation)

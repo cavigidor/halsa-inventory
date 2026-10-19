@@ -23,6 +23,11 @@ How the decision is made (``Gate.decide``), always fail-closed:
    required values, duplicates, join problems, partial periods, contradictory totals, unsupported layouts, unapproved
    mappings) can only DOWNGRADE that ceiling. Missing evidence is itself a downgrade (NOT_VERIFIED).
 3. A combined output is the worst of its own state and the state of every output it depends on.
+4. Evidence is bound to ONE source generation (`EvidenceSnapshot.generation_id`, a content hash of the exact frames
+   the outputs were computed from). A gate uses evidence only when the snapshot's generation equals the generation it
+   is deciding for; evidence from another (earlier) generation never certifies anything.
+5. Time: an OPERATIONAL output (current state, e.g. stock levels, receivables) also needs a fresh source; a HISTORICAL
+   output (a closed past period) needs a complete, dated period but no age limit. Age never approves anything.
 
 Nothing here computes a business number. The algorithms stay where they are, unchanged, so they can be verified
 later. There is no environment variable, flag or HTTP parameter that turns the gate off. The only way to show a
@@ -32,9 +37,11 @@ from __future__ import annotations
 
 import datetime as dt
 import enum
+import hashlib
 import re
+import types
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Iterable, Mapping
 
 # ---------------------------------------------------------------------------------------------
 # states and user-facing text
@@ -44,6 +51,12 @@ WITHHELD_CODE = "accuracy_withheld"
 WITHHELD_HTTP_STATUS = 409          # the resource exists; its verification state conflicts with displaying it
 MAX_REASONS_SHOWN = 4               # keep the father-facing notice short
 POLICY_VERSION = "m8-accuracy-1"    # embedded in every gated dashboard build (served `/` checks it)
+DEFAULT_OPERATIONAL_MAX_AGE_DAYS = 45
+TEMPORAL_KINDS = ("operational", "historical")
+# M8-ACCURACY-2 acceptance criterion (mandatory): one generation-bound evidence snapshot shared by the dashboard, the
+# API, the owner-source views and the refresh, replaced atomically with each published generation. Until that exists,
+# the production register refuses any VERIFIED certification (validate_register) and API routes get no evidence.
+GENERATION_BOUND_API_EVIDENCE = False
 
 
 class State(str, enum.Enum):
@@ -92,6 +105,10 @@ class Metric:
     depends_on: tuple[str, ...] = ()
     blockers: tuple[Blocker, ...] = ()
     certified: State = State.NOT_VERIFIED
+    # "operational": current state → needs a fresh source (max_source_age_days); "historical": a closed past period
+    # → needs a dated, complete period, no age limit. Both need a known report date and verified completeness.
+    temporal: str = "operational"
+    max_source_age_days: int | None = DEFAULT_OPERATIONAL_MAX_AGE_DAYS
     approval_refs: tuple[str, ...] = ()        # required for VERIFIED
     regression_tests: tuple[str, ...] = ()     # required for VERIFIED
     reconciliation_ref: str | None = None      # required for VERIFIED (real-data reconciliation evidence)
@@ -124,6 +141,8 @@ DEFINITIONS: dict[str, Definition] = {d.key: d for d in (
     Definition("gg_business_line_mapping", "Gider/Gelir iş kolu eşlemesi", question_ref=f"{_Q} #4"),
     Definition("butce_file_of_record", "Bütçe esas dosyası ve bozuk formüllerin onarımı", question_ref=f"{_Q} #5"),
     Definition("trodat_sku_mapping", "Trodat model → Halsa stok kodu eşlemesi ve birimi", question_ref=f"{_Q} #6"),
+    Definition("last_order_date_basis", "'Son sipariş tarihi' esası (iptal / teslim edilmemiş siparişler)",
+               question_ref=f"{_Q} #3"),
 )}
 
 
@@ -200,6 +219,13 @@ B_SCENARIO = Blocker("SCENARIO", NV, "Senaryo, doğrulanmamış vadesi geçen to
 B_SOURCE_MISSING = Blocker("SOURCE-MISSING", NV, "Kaynak rapor sağlanmadı.",
                            "Evrak Detaylı Tahsilat Raporu not supplied (M6-4 blocked).")
 B_TRODAT = Blocker("TRODAT-MAPPING", NV, "Trodat ürün eşlemesi ve birimi doğrulanmadı.", "D-039.")
+B_LAST_ORDER = Blocker("LAST-ORDER-DATE", NV, "Son sipariş tarihi satış satırlarından türetiliyor; iptal edilen veya "
+                       "teslim edilmeyen siparişler de sayılıyor ve kaynağın tamlığı doğrulanmadı.",
+                       "services/customer360.py: last_order_date = max Tarih of the customer's order lines "
+                       "(Kalan / Vazgecilen parts included, docs/m6_source_inventory.md §2.2).")
+B_MASTER_STATUS = Blocker("MASTER-STATUS", NV, "Müşterinin açık / KAPALI durumunun esas kaynağı karara bağlanmadı "
+                          "(DQ-5).", "services/customer360.master_closed reads liste CARİ FİRMA; the attribute source "
+                          "of record is owner question #10; about 10 duplicate master codes (M6-0 §3).")
 
 # ---------------------------------------------------------------------------------------------
 # the metric register (certified states). Keys are stable; docs/accuracy/metric_register.md mirrors them.
@@ -225,9 +251,9 @@ REGISTER: dict[str, Metric] = {m.key: m for m in (
        blockers=(B_REVENUE, B_AMOUNT_ZERO, B_DQ5, B_REAL)),
     _M("customers.order_size", "Sipariş Büyüklüğü", ("dashboard:ordersize",), ("sales",),
        ("customer_identity", "revenue_basis", "kapali_attribute_source", "salesperson_of_record"),
-       blockers=(B_REVENUE, B_AMOUNT_ZERO, B_DQ5, B_REAL)),
+       blockers=(B_REVENUE, B_AMOUNT_ZERO, B_DQ5, B_REAL), temporal="historical", max_source_age_days=None),
     _M("finance.margin", "Kâr Marjı", ("dashboard:margin",), ("sales",), ("revenue_basis", "margin_cost_basis"),
-       blockers=(B_DQ1, B_REVENUE, B_REAL), certified=INV),
+       blockers=(B_DQ1, B_REVENUE, B_REAL), certified=INV, temporal="historical", max_source_age_days=None),
     _M("receivables.risk", "Riskli Müşteri", ("dashboard:risk",), ("sales", "aging"),
        ("overdue_definition", "revenue_basis", "salesperson_of_record"),
        blockers=(B_AGING_DATE, B_OVERDUE_DEF, B_REVENUE, B_SALESPERSON, B_REAL)),
@@ -271,7 +297,8 @@ REGISTER: dict[str, Metric] = {m.key: m for m in (
                                                              "api:/api/fairs/history/{event_id}",
                                                              "api:fairs.campaign.linked_event",
                                                              "api:fairs.campaign.member_erp_evidence"),
-       ("sales",), ("fair_taxonomy", "revenue_basis"), blockers=(B_FAIR, B_REVENUE, B_REAL)),
+       ("sales",), ("fair_taxonomy", "revenue_basis"), blockers=(B_FAIR, B_REVENUE, B_REAL), temporal="historical",
+       max_source_age_days=None),
     _M("fairs.segments", "Fuar aday segmentleri", ("api:/api/fairs/candidates", "api:fairs.campaign.member_segments"),
        definitions=("active_customer_window",),
        depends_on=("fairs.history", "customers.winback", "actions.real_decline", "opportunities.cross_sell",
@@ -282,16 +309,25 @@ REGISTER: dict[str, Metric] = {m.key: m for m in (
        ("kredi_durum", "kredi_file_of_record"), blockers=(B_KREDI_DURUM, B_KREDI_SNAP)),
     _M("owner.gider_gelir", "Gider / Gelir", ("api:owner.overview.gider_gelir",), ("gider_gelir",),
        ("gg_accounting_basis", "gg_business_line_mapping"), blockers=(B_GG_TOTALS, B_GG_BASIS, B_GG_MAP),
-       certified=INV),
+       certified=INV, temporal="historical", max_source_age_days=None),
     _M("owner.butce", "Bütçe", ("api:owner.overview.butce",), ("butce",), ("butce_file_of_record",),
-       blockers=(B_BUTCE,), certified=INV),
+       blockers=(B_BUTCE,), certified=INV, temporal="historical", max_source_age_days=None),
     _M("owner.operations", "Yönetim operasyon sayıları", ("api:owner.overview.operations",),
        depends_on=("sales_queue", "opportunities.cross_sell")),
     _M("scenario.receivables", "Senaryo hesabı", ("api:/api/scenario",), definitions=("inflation_source",),
        depends_on=("receivables.collections",), blockers=(B_SCENARIO,)),
     _M("collections.detailed", "Detaylı tahsilat (evrak bazlı)", (), ("detailed_collections",),
        blockers=(B_SOURCE_MISSING,)),
-    _M("trodat.sales", "Trodat satış raporu", (), ("trodat",), ("trodat_sku_mapping",), blockers=(B_TRODAT,)),
+    _M("trodat.sales", "Trodat satış raporu", (), ("trodat",), ("trodat_sku_mapping",), blockers=(B_TRODAT,),
+       temporal="historical", max_source_age_days=None),
+    # ---- customer directory attributes (search, CRM, fair members) ----
+    _M("customer.last_order_date", "Müşterinin son sipariş tarihi", ("api:/api/customer360/search",
+                                                                      "api:crm.followups", "api:fairs.campaign.members"),
+       ("sales",), ("last_order_date_basis", "customer_identity", "customer_code_whitespace"),
+       blockers=(B_LAST_ORDER, B_WHITESPACE, B_REAL)),
+    _M("customer.master_status", "Müşterinin açık / KAPALI durumu", ("api:/api/customer360/search", "api:crm.customer",
+                                                                     "api:crm.followups", "api:fairs.campaign.members"),
+       ("liste",), ("kapali_attribute_source",), blockers=(B_MASTER_STATUS, B_REAL)),
 )}
 
 # Dashboard overview stat cards → the metric that owns the number (dashboard_builder.build `stats`).
@@ -339,7 +375,7 @@ ROUTES: dict[tuple[str, str], tuple[str, str | tuple[str, ...] | None]] = {
     ("POST", "/api/agent/draft-message"): ("metric", "ai.drafts"),
     ("POST", "/api/scenario"): ("metric", "scenario.receivables"),
     ("GET", "/api/customer360/status"): ("system", None),
-    ("GET", "/api/customer360/search"): ("reference", None),
+    ("GET", "/api/customer360/search"): ("redacted", ("customer.last_order_date", "customer.master_status")),
     ("GET", "/api/customer360/{customer_code}"): ("metric", "customer360.profile"),
     ("GET", "/api/sales-queue"): ("metric", "sales_queue"),
     ("GET", "/api/opportunities/summary"): ("metric", "opportunities.cross_sell"),
@@ -352,15 +388,19 @@ ROUTES: dict[tuple[str, str], tuple[str, str | tuple[str, ...] | None]] = {
     ("GET", "/api/fairs/campaigns/{campaign_id}"): ("redacted", ("fairs.history",)),
     ("PUT", "/api/fairs/campaigns/{campaign_id}"): ("redacted", ("fairs.history",)),
     ("POST", "/api/fairs/campaigns/{campaign_id}/archive"): ("redacted", ("fairs.history",)),
-    ("GET", "/api/fairs/campaigns/{campaign_id}/customers"): ("redacted", ("fairs.history", "fairs.segments")),
+    ("GET", "/api/fairs/campaigns/{campaign_id}/customers"): ("redacted", ("fairs.history", "fairs.segments",
+                                                                         "customer.last_order_date",
+                                                                         "customer.master_status")),
     ("POST", "/api/fairs/campaigns/{campaign_id}/customers"): ("operational", None),
-    ("PUT", "/api/fairs/campaigns/{campaign_id}/customers"): ("redacted", ("fairs.history", "fairs.segments")),
+    ("PUT", "/api/fairs/campaigns/{campaign_id}/customers"): ("redacted", ("fairs.history", "fairs.segments",
+                                                                         "customer.last_order_date",
+                                                                         "customer.master_status")),
     ("GET", "/api/crm/summary"): ("redacted", ("crm.active_customers",)),
-    ("GET", "/api/crm/followups"): ("operational", None),
+    ("GET", "/api/crm/followups"): ("redacted", ("customer.master_status",)),
     ("GET", "/api/crm/recent"): ("operational", None),
-    ("GET", "/api/crm/customers/{customer_code}"): ("operational", None),
-    ("POST", "/api/crm/customers/{customer_code}/interactions"): ("operational", None),
-    ("PUT", "/api/crm/customers/{customer_code}/followup"): ("operational", None),
+    ("GET", "/api/crm/customers/{customer_code}"): ("redacted", ("customer.master_status",)),
+    ("POST", "/api/crm/customers/{customer_code}/interactions"): ("redacted", ("customer.master_status",)),
+    ("PUT", "/api/crm/customers/{customer_code}/followup"): ("redacted", ("customer.master_status",)),
     ("GET", "/api/owner/overview"): ("redacted", ("owner.kredi", "owner.gider_gelir", "owner.butce",
                                                   "owner.operations", "opportunities.cross_sell")),
     ("GET", "/api/owner/status"): ("redacted", ("opportunities.cross_sell",)),
@@ -383,7 +423,11 @@ _DECISION_RE = re.compile(r"^D-\d{3}$")
 
 
 def validate_register(register: dict[str, Metric] | None = None,
-                      definitions: dict[str, Definition] | None = None) -> None:
+                      definitions: dict[str, Definition] | None = None, *, production: bool | None = None) -> None:
+    """`production` (default: True when validating the module's own REGISTER) adds the release-level rules: every
+    metric-bound route must exist in the register, and no metric may be certified VERIFIED until generation-bound
+    evidence is shared with the API (GENERATION_BOUND_API_EVIDENCE, an M8-ACCURACY-2 acceptance criterion)."""
+    production = (register is None) if production is None else production
     reg = REGISTER if register is None else register
     defs = DEFINITIONS if definitions is None else definitions
     for d in defs.values():
@@ -392,6 +436,12 @@ def validate_register(register: dict[str, Metric] | None = None,
     for k, m in reg.items():
         if k != m.key:
             raise RegisterError(f"register key {k} != metric key {m.key}")
+        if m.temporal not in TEMPORAL_KINDS:
+            raise RegisterError(f"{k}: temporal must be one of {TEMPORAL_KINDS}")
+        if m.temporal == "operational" and not (isinstance(m.max_source_age_days, int) and m.max_source_age_days > 0):
+            raise RegisterError(f"{k}: an operational metric needs a positive max_source_age_days")
+        if m.temporal == "historical" and m.max_source_age_days is not None:
+            raise RegisterError(f"{k}: a historical metric is judged by period completeness, not by age")
         for dk in m.definitions:
             if dk not in defs:
                 raise RegisterError(f"{k}: unknown definition {dk}")
@@ -425,75 +475,138 @@ def validate_register(register: dict[str, Metric] | None = None,
             visit(dep, stack + (key,))
     for k in reg:
         visit(k, ())
-    if register is None:        # the production register must cover every metric-bound route
-        for (_, _), (kind, ref) in ROUTES.items():
-            if kind == "metric" and ref not in reg:
-                raise RegisterError(f"route references unknown metric {ref}")
+    if production:
+        for (_, _), (kind, ref) in ROUTES.items():       # the production register covers every gated route
+            refs = (ref,) if kind == "metric" else (ref if kind == "redacted" else ())
+            for r in refs:
+                if r not in reg and r != "refresh.counts":
+                    raise RegisterError(f"route references unknown metric {r}")
+        if not GENERATION_BOUND_API_EVIDENCE:
+            early = [k for k, m in reg.items() if m.certified == State.VERIFIED]
+            if early:
+                raise RegisterError(f"{early}: no metric may be certified VERIFIED before generation-bound evidence is "
+                                    "shared by the dashboard, the API, the owner views and the refresh (M8-ACCURACY-2)")
 
 
 # ---------------------------------------------------------------------------------------------
-# runtime source evidence (can only downgrade)
+# runtime source evidence (can only downgrade). Unknown (None) is NEVER treated as passing.
 # ---------------------------------------------------------------------------------------------
-@dataclass
+@dataclass(frozen=True)
 class SourceEvidence:
-    """Facts about one source as it was actually read. Counts only, never values, names or paths."""
+    """Facts about one source as it was actually read. Counts only, never values, names or paths.
+
+    Every field starts as unknown (None). A collector sets only what it really inspected; an inspection that raised is
+    recorded in `inspection_failures` (INVALID), never as zero errors. The report date and the period are facts about
+    the source; how old a source may be is a property of the METRIC (operational vs historical), decided by the gate."""
     source: str
-    available: bool = True
-    layout_supported: bool = True
+    available: bool | None = None
+    layout_supported: bool | None = None
     report_date: dt.date | None = None
     report_date_origin: str | None = None          # "declared", "max_transaction_date", …
-    max_age_days: int | None = 45
-    error_cells: int = 0                            # Excel error values (#REF!, #DIV/0!, …) in required fields
-    missing_cached_formulas: int = 0
-    missing_required_values: int = 0
-    duplicate_records: int = 0
-    join_unmatched: int = 0
-    join_ambiguous: int = 0
-    # Unknown (None) is never treated as passing: each must be established explicitly by a collector or a recorded
-    # reconciliation step.
-    joins_validated: bool | None = None
+    period_start: dt.date | None = None
+    period_end: dt.date | None = None
     period_complete: bool | None = None
+    error_cells: int | None = None                  # Excel error values (#REF!, #DIV/0!, …) in required fields
+    missing_cached_formulas: int | None = None
+    missing_required_values: int | None = None
+    duplicate_records: int | None = None
+    join_unmatched: int | None = None
+    join_ambiguous: int | None = None
+    joins_validated: bool | None = None
     totals_consistent: bool | None = None
     mapping_approved: bool | None = None
+    inspection_failures: tuple[str, ...] = ()       # inspections that could not run (fail closed)
     notes: tuple[str, ...] = ()
 
-    def problems(self, today: dt.date) -> list[tuple[State, str]]:
+    def problems(self) -> list[tuple[State, str]]:
+        """Source-intrinsic problems (not time). Unknown → NOT_VERIFIED; a known defect or failed inspection → INVALID."""
         out: list[tuple[State, str]] = []
-        if not self.available:
+        if self.available is False:
             return [(NV, "Kaynak rapor sağlanmadı.")]
-        if not self.layout_supported:
+        if self.available is None:
+            out.append((NV, "Kaynağın okunduğu doğrulanmadı."))
+        if self.inspection_failures:
+            out.append((INV, "Kaynak denetimi tamamlanamadı."))
+        if self.layout_supported is False:
             out.append((INV, "Kaynak dosyanın düzeni desteklenmiyor."))
-        if self.error_cells:
-            out.append((INV, "Kaynakta hatalı Excel formülleri var."))
-        if self.missing_cached_formulas:
-            out.append((INV, "Kaynakta hesaplanmamış (önbelleksiz) formüller var."))
-        if self.missing_required_values:
-            out.append((INV, "Gerekli alanlarda eksik değerler var."))
-        if self.duplicate_records:
-            out.append((INV, "Kaynakta yinelenen kayıtlar var."))
+        elif self.layout_supported is None:
+            out.append((NV, "Kaynak dosyanın düzeni doğrulanmadı."))
+        for value, bad, unknown in (
+                (self.error_cells, "Kaynakta hatalı Excel formülleri var.", "Excel hata denetimi yapılmadı."),
+                (self.missing_cached_formulas, "Kaynakta hesaplanmamış (önbelleksiz) formüller var.",
+                 "Formül önbelleği denetimi yapılmadı."),
+                (self.missing_required_values, "Gerekli alanlarda eksik değerler var.", "Eksik değer denetimi yapılmadı."),
+                (self.duplicate_records, "Kaynakta yinelenen kayıtlar var.", "Yinelenen kayıt denetimi yapılmadı.")):
+            if value is None:
+                out.append((NV, unknown))
+            elif value:
+                out.append((INV, bad))
         if self.join_unmatched or self.join_ambiguous or self.joins_validated is False:
             out.append((INV, "Müşteri veya ürün eşleşmesi hatalı."))
-        elif self.joins_validated is None:
+        elif self.joins_validated is not True:
             out.append((NV, "Müşteri veya ürün eşleşmeleri doğrulanmadı."))
         if self.totals_consistent is False:
             out.append((INV, "Kaynaktaki toplamlar birbiriyle çelişiyor."))
-        if self.report_date is None:
-            out.append((NV, "Kaynak raporun tarihi bilinmiyor."))
-        elif self.max_age_days is not None and (today - self.report_date).days > self.max_age_days:
-            out.append((NV, "Kaynak rapor güncel değil."))
-        elif self.report_date > today:
-            out.append((INV, "Kaynak raporun tarihi gelecekte görünüyor."))
-        if self.period_complete is False:
-            out.append((NV, "Raporlama dönemi eksik (kısmi dönem)."))
-        elif self.period_complete is None:
-            out.append((NV, "Raporlama döneminin tamlığı doğrulanmadı."))
+        elif self.totals_consistent is None:
+            out.append((NV, "Kaynak toplamlarının mutabakatı yapılmadı."))
         if self.mapping_approved is False:
             out.append((NV, "Kaynak eşlemesi onaylanmadı."))
         elif self.mapping_approved is None:
             out.append((NV, "Kaynak eşlemesinin onayı bilinmiyor."))
-        if self.totals_consistent is None:
-            out.append((NV, "Kaynak toplamlarının mutabakatı yapılmadı."))
         return out
+
+
+def temporal_problems(metric: Metric, ev: SourceEvidence, today: dt.date) -> list[tuple[State, str]]:
+    """Time rules per metric kind. Age only ever withholds; a recent date never approves anything.
+    - unknown report date → NOT_VERIFIED (both kinds); a future date → INVALID;
+    - completeness must be established (None → NOT_VERIFIED, False = partial period → NOT_VERIFIED);
+    - operational: older than max_source_age_days → NOT_VERIFIED (current operational freshness);
+    - historical: no age limit (historical reporting validity), but the period must be dated and complete."""
+    out: list[tuple[State, str]] = []
+    if ev.report_date is None:
+        out.append((NV, "Kaynak raporun tarihi bilinmiyor."))
+    elif ev.report_date > today:
+        out.append((INV, "Kaynak raporun tarihi gelecekte görünüyor."))
+    elif metric.temporal == "operational" and (today - ev.report_date).days > (metric.max_source_age_days or 0):
+        out.append((NV, "Kaynak rapor güncel değil (güncel durum analizi için)."))
+    if ev.period_complete is False:
+        out.append((NV, "Raporlama dönemi eksik (kısmi dönem)."))
+    elif ev.period_complete is None:
+        out.append((NV, "Raporlama döneminin tamlığı doğrulanmadı."))
+    if metric.temporal == "historical":
+        if ev.period_end is None:
+            out.append((NV, "Tarihsel dönemin bitişi belirtilmedi."))
+        elif ev.report_date is not None and ev.period_end > ev.report_date:
+            out.append((INV, "Tarihsel dönem raporun tarihinden sonra bitiyor."))
+    return out
+
+
+@dataclass(frozen=True)
+class EvidenceSnapshot:
+    """Immutable evidence for ONE source generation. `generation_id` is a content hash of the exact frames the outputs
+    were computed from (None when it could not be computed → the snapshot certifies nothing)."""
+    generation_id: str | None
+    evidence: Mapping[str, SourceEvidence]
+    collected_on: dt.date | None = None
+
+    def __post_init__(self):
+        object.__setattr__(self, "evidence", types.MappingProxyType(dict(self.evidence)))
+
+
+def generation_id(frames: dict) -> str | None:
+    """Content hash of the source frames as read (column names + every cell). None if any frame cannot be hashed.
+    Two builds of the same bytes share an id; any change in any source gives a new id."""
+    try:
+        import pandas as pd
+        h = hashlib.sha256()
+        for key in sorted(k for k, v in frames.items() if v is not None):
+            df = frames[key]
+            h.update(key.encode())
+            h.update("\x1f".join(map(str, df.columns)).encode())
+            h.update(pd.util.hash_pandas_object(df.astype(str), index=True).values.tobytes())
+        return h.hexdigest()
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------------------------
@@ -528,22 +641,40 @@ def _dedupe(items: Iterable[str]) -> tuple[str, ...]:
 
 
 class Gate:
-    """Decides, per metric, whether it may be displayed. Fail-closed: unknown keys, missing evidence and any error
-    while deciding all mean 'withheld'."""
+    """Decides, per metric, whether it may be displayed. Fail-closed: unknown keys, missing or unbound evidence and any
+    error while deciding all mean 'withheld'.
+
+    `snapshot` is used only when `expected_generation` is given and equals `snapshot.generation_id`: the gate decides
+    for one published generation and accepts evidence only from that generation."""
 
     def __init__(self, register: dict[str, Metric] | None = None, definitions: dict[str, Definition] | None = None,
-                 evidence: dict[str, SourceEvidence] | None = None, today: dt.date | None = None):
+                 snapshot: EvidenceSnapshot | None = None, today: dt.date | None = None,
+                 expected_generation: str | None = None):
         self.register = REGISTER if register is None else register
         self.definitions = DEFINITIONS if definitions is None else definitions
-        self.evidence = dict(evidence or {})
+        self.snapshot = snapshot
+        self.expected_generation = expected_generation
         self.today = today or dt.date.today()
         self._memo: dict[str, Decision] = {}
 
-    def with_evidence(self, evidence: dict[str, SourceEvidence] | None) -> "Gate":
-        """A gate that also knows `evidence` (collected from the frames actually read). Evidence this gate already
-        holds for a source is kept, so an explicitly declared observation is never replaced."""
-        merged = {**(evidence or {}), **self.evidence}
-        return type(self)(self.register, self.definitions, merged, self.today)
+    def bound_to(self, collected: EvidenceSnapshot) -> "Gate":
+        """The gate for the generation `collected` was computed from (a dashboard build binds itself to the frames it
+        renders). Evidence this gate already holds is kept only if it belongs to that same generation; evidence from
+        any other generation is dropped, never carried over."""
+        ev = dict(collected.evidence)
+        if (self.snapshot is not None and collected.generation_id is not None
+                and self.snapshot.generation_id == collected.generation_id):
+            ev.update(self.snapshot.evidence)
+        snap = EvidenceSnapshot(collected.generation_id, ev, collected.collected_on)
+        return type(self)(self.register, self.definitions, snap, self.today, collected.generation_id)
+
+    def _evidence(self) -> tuple[Mapping[str, SourceEvidence], str | None]:
+        if self.snapshot is None:
+            return {}, "NO-EVIDENCE"
+        if (self.expected_generation is None or self.snapshot.generation_id is None
+                or self.snapshot.generation_id != self.expected_generation):
+            return {}, "EVIDENCE-GENERATION"
+        return self.snapshot.evidence, None
 
     def decide(self, key: str) -> Decision:
         if key in self._memo:
@@ -575,14 +706,16 @@ class Gate:
                 states.append(NV)
                 reasons.append(f"Tanım onaylanmadı: {d.title_tr if d else dk}.")
                 codes.append(f"DEF:{dk}")
+        evidence, unbound = self._evidence()
         for src in m.sources:
-            ev = self.evidence.get(src)
+            ev = evidence.get(src)
             if ev is None:
                 states.append(NV)
-                reasons.append("Kaynak doğrulama kanıtı yok.")
-                codes.append(f"NO-EVIDENCE:{src}")
+                reasons.append("Kanıt başka bir veri üretimine ait." if unbound == "EVIDENCE-GENERATION"
+                               else "Kaynak doğrulama kanıtı yok.")
+                codes.append(f"{unbound or 'NO-EVIDENCE'}:{src}")
                 continue
-            for st, why in ev.problems(self.today):
+            for st, why in ev.problems() + temporal_problems(m, ev, self.today):
                 states.append(st)
                 reasons.append(why)
                 codes.append(f"SRC:{src}")
@@ -601,88 +734,148 @@ class Gate:
 
 
 # The production gate. Tests that exercise preserved algorithms replace this factory from tests/ only.
-def current_gate(today: dt.date | None = None, evidence: dict[str, SourceEvidence] | None = None) -> Gate:
-    return Gate(REGISTER, DEFINITIONS, evidence, today)
+# The API calls it WITHOUT a snapshot (GENERATION_BOUND_API_EVIDENCE is False): every source-bound metric is withheld
+# there until M8-ACCURACY-2 shares the published generation's snapshot with the API.
+def current_gate(today: dt.date | None = None, snapshot: EvidenceSnapshot | None = None,
+                 expected_generation: str | None = None) -> Gate:
+    return Gate(REGISTER, DEFINITIONS, snapshot, today, expected_generation)
 
 
 # ---------------------------------------------------------------------------------------------
-# evidence collectors for the core sources (counts only; never raise)
+# evidence collectors for the core sources (counts only). They never raise and never report a clean result for
+# something they could not inspect: an inspection error is recorded as a failure (INVALID); a check they cannot make
+# stays None (NOT_VERIFIED).
 # ---------------------------------------------------------------------------------------------
 _ERR_RE = re.compile(r"^#(REF!|DIV/0!|N/A|VALUE!|NAME\?|NUM!|NULL!)$")
 
 
-def _excel_errors(series) -> int:
+def _excel_errors(series) -> int | None:
+    """Number of Excel error strings in `series`; None when the inspection itself failed (never 0 on failure)."""
+    # Note (found in review): the earlier version applied `.str` to numeric-only columns, raised, and returned 0, so
+    # every numeric column looked "inspected and clean". A column without text simply has no error strings.
     try:
         s = series.dropna()
-        s = s[s.map(lambda v: isinstance(v, str))]
-        return int(s.str.strip().str.match(_ERR_RE).sum())
+        texts = [v.strip() for v in s.tolist() if isinstance(v, str)]
+        return sum(1 for v in texts if _ERR_RE.match(v))
     except Exception:
-        return 0
+        return None
+
+
+def _sum_counts(values, failures: list, label: str) -> int | None:
+    total = 0
+    for v in values:
+        if v is None:
+            failures.append(label)
+            return None
+        total += v
+    return total
+
+
+def _stock_evidence(df, declared) -> SourceEvidence:
+    req = ["Stok_Kodu", "TOPLAM STOK MİKTAR ", "STOK Kontrol %", "minseviye", "maxseviye", "Envanter değeri"]
+    have = [c for c in req if c in df.columns]
+    fails: list[str] = []
+    errs = _sum_counts([_excel_errors(df[c]) for c in have], fails, "excel_errors")
+    miss = int(df["STOK Kontrol %"].isna().sum()) if "STOK Kontrol %" in df.columns else None
+    dup = int(df["Stok_Kodu"].astype(str).duplicated().sum()) if "Stok_Kodu" in df.columns else None
+    return SourceEvidence("stock", available=True, layout_supported=len(have) == len(req), error_cells=errs,
+                          missing_required_values=miss, duplicate_records=dup, report_date=declared.get("stock"),
+                          report_date_origin="declared" if declared.get("stock") else None,
+                          inspection_failures=tuple(fails))
+
+
+def _sales_evidence(df, declared) -> SourceEvidence:
+    import pandas as pd
+    req = ["sip_evrakno_seri", "sip_evrakno_sira", "Musterikod", "Pro_kodu", "sto_kod", "Tarih", "miktar", "Nettutar"]
+    have = [c for c in req if c in df.columns]
+    fails: list[str] = []
+    errs = _sum_counts([_excel_errors(df[c]) for c in have], fails, "excel_errors")
+    amt = pd.to_numeric(df["Nettutar"], errors="coerce") if "Nettutar" in df.columns else None
+    dates = pd.to_datetime(df["Tarih"], errors="coerce") if "Tarih" in df.columns else None
+    miss = (int(amt.isna().sum()) + int(dates.isna().sum())) if (amt is not None and dates is not None) else None
+    dup = int(df.duplicated().sum())
+    asof = dates.max() if dates is not None else None
+    rd = declared.get("sales") or (asof.date() if asof is not None and pd.notna(asof) else None)
+    return SourceEvidence("sales", available=True, layout_supported=len(have) == len(req), error_cells=errs,
+                          missing_required_values=miss, duplicate_records=dup, report_date=rd,
+                          report_date_origin="declared" if declared.get("sales") else
+                          ("max_transaction_date" if rd else None), inspection_failures=tuple(fails))
+
+
+_AY = ("Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık")
+
+
+def _aging_evidence(df, declared) -> SourceEvidence:
+    cols = [str(c).strip() for c in df.columns]
+    buckets = [c for c in df.columns if "öncesi" in str(c) or any(m in str(c) for m in _AY)]
+    fails: list[str] = []
+    errs = _sum_counts([_excel_errors(df[c]) for c in buckets], fails, "excel_errors") if buckets else None
+    key = next((c for c in df.columns if str(c).strip() == "Hesap kodu"), None)
+    dup = int(df[key].astype(str).duplicated().sum()) if key is not None else None
+    return SourceEvidence("aging", available=True, layout_supported="Hesap kodu" in cols and bool(buckets),
+                          error_cells=errs, duplicate_records=dup, report_date=declared.get("aging"),
+                          report_date_origin="declared" if declared.get("aging") else None,
+                          inspection_failures=tuple(fails))
+
+
+_COLLECTORS = {"stock": _stock_evidence, "sales": _sales_evidence, "aging": _aging_evidence}
 
 
 def collect_core_evidence(stock_df=None, sales_df=None, aging_df=None, today: dt.date | None = None,
                           declared_dates: dict[str, dt.date] | None = None) -> dict[str, SourceEvidence]:
     """Evidence for stock / sales / Cari aging from the RAW frames as read (before any coercion). The stock and
-    aging exports carry no report date the code can read, so it stays unknown unless explicitly declared."""
+    aging exports carry no report date the code can read, so it stays unknown unless explicitly declared. Joins,
+    control totals, period completeness and mappings cannot be established here and stay unknown."""
     declared = declared_dates or {}
     out: dict[str, SourceEvidence] = {}
-    try:
-        if stock_df is not None:
-            req = ["Stok_Kodu", "TOPLAM STOK MİKTAR ", "STOK Kontrol %", "minseviye", "maxseviye", "Envanter değeri"]
-            have = [c for c in req if c in stock_df.columns]
-            errs = sum(_excel_errors(stock_df[c]) for c in have)
-            cov = stock_df["STOK Kontrol %"] if "STOK Kontrol %" in stock_df.columns else None
-            miss = int(cov.isna().sum()) if cov is not None else 0
-            dup = int(stock_df["Stok_Kodu"].astype(str).duplicated().sum()) if "Stok_Kodu" in stock_df.columns else 0
-            out["stock"] = SourceEvidence("stock", layout_supported=len(have) == len(req), error_cells=errs,
-                                          missing_required_values=miss, duplicate_records=dup,
-                                          joins_validated=True, period_complete=True, mapping_approved=True,
-                                          report_date=declared.get("stock"),
-                                          report_date_origin="declared" if declared.get("stock") else None)
-    except Exception:
-        out["stock"] = SourceEvidence("stock", layout_supported=False)
-    try:
-        if sales_df is not None:
-            import pandas as pd
-            req = ["sip_evrakno_seri", "sip_evrakno_sira", "Musterikod", "Pro_kodu", "sto_kod", "Tarih", "miktar",
-                   "Nettutar"]
-            have = [c for c in req if c in sales_df.columns]
-            errs = sum(_excel_errors(sales_df[c]) for c in have)
-            amt = pd.to_numeric(sales_df["Nettutar"], errors="coerce") if "Nettutar" in sales_df.columns else None
-            dates = pd.to_datetime(sales_df["Tarih"], errors="coerce") if "Tarih" in sales_df.columns else None
-            miss = (int(amt.isna().sum()) if amt is not None else 0) + (int(dates.isna().sum()) if dates is not None else 0)
-            dup = int(sales_df.duplicated().sum())
-            asof = dates.max() if dates is not None else None
-            rd = declared.get("sales") or (asof.date() if asof is not None and pd.notna(asof) else None)
-            out["sales"] = SourceEvidence("sales", layout_supported=len(have) == len(req), error_cells=errs,
-                                          missing_required_values=miss, duplicate_records=dup, report_date=rd,
-                                          mapping_approved=True,
-                                          report_date_origin="declared" if declared.get("sales") else
-                                          ("max_transaction_date" if rd else None))
-    except Exception:
-        out["sales"] = SourceEvidence("sales", layout_supported=False)
-    try:
-        if aging_df is not None:
-            cols = [str(c).strip() for c in aging_df.columns]
-            ok = "Hesap kodu" in cols
-            buckets = [c for c in aging_df.columns if "öncesi" in str(c) or any(
-                m in str(c) for m in ("Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos",
-                                      "Eylül", "Ekim", "Kasım", "Aralık"))]
-            errs = sum(_excel_errors(aging_df[c]) for c in buckets)
-            key = next((c for c in aging_df.columns if str(c).strip() == "Hesap kodu"), None)
-            dup = int(aging_df[key].astype(str).duplicated().sum()) if key is not None else 0
-            out["aging"] = SourceEvidence("aging", layout_supported=ok and bool(buckets), error_cells=errs,
-                                          duplicate_records=dup, joins_validated=True, period_complete=True,
-                                          mapping_approved=True, report_date=declared.get("aging"),
-                                          report_date_origin="declared" if declared.get("aging") else None)
-    except Exception:
-        out["aging"] = SourceEvidence("aging", layout_supported=False)
+    for key, df in (("stock", stock_df), ("sales", sales_df), ("aging", aging_df)):
+        if df is None:
+            continue
+        try:
+            out[key] = _COLLECTORS[key](df, declared)
+        except Exception as e:      # fail closed: the source is not shown as clean
+            out[key] = SourceEvidence(key, inspection_failures=(f"collector:{type(e).__name__}",))
     return out
+
+
+def collect_snapshot(frames: dict, today: dt.date | None = None,
+                     declared_dates: dict[str, dt.date] | None = None) -> EvidenceSnapshot:
+    """The immutable evidence snapshot of exactly these frames (one generation)."""
+    ev = collect_core_evidence(frames.get("stock"), frames.get("sales"), frames.get("aging"), today=today,
+                               declared_dates=declared_dates)
+    return EvidenceSnapshot(generation_id(frames), ev, today)
 
 
 # ---------------------------------------------------------------------------------------------
 # shared response-layer redaction helpers (used by app.py endpoints; pure functions on response dicts)
 # ---------------------------------------------------------------------------------------------
+DIRECTORY_MASTER_WARNINGS = ("master_duplicate", "master_unmatched", "master_unavailable")
+
+
+def redact_directory(row: dict, gate: Gate) -> dict:
+    """Customer directory rows (search hits, CRM follow-ups / customer, fair members): the code and the recorded
+    display name stay; the derived last-order date and the open / KAPALI status interpretation are withheld unless
+    verified. Operational safeguards that depend on the master status (refusing a KAPALI sales follow-up or invite,
+    `allowed_followup_purposes`, `suppressed_kapali`) keep working server-side; they restrict an action and show no
+    analysis."""
+    out = dict(row)
+    if "last_order_date" in out and not gate.displayable("customer.last_order_date"):
+        out["last_order_date"] = None
+    if not gate.displayable("customer.master_status"):
+        if "closed" in out:
+            out["closed"] = None
+        if "master_status" in out:
+            out["master_status"] = "withheld"
+        if "warnings" in out:
+            out["warnings"] = [w for w in (out.get("warnings") or []) if w.get("code") not in DIRECTORY_MASTER_WARNINGS]
+    return out
+
+
+def directory_notices(gate: Gate) -> list[dict]:
+    return [gate.decide(k).notice() for k in ("customer.last_order_date", "customer.master_status")
+            if not gate.displayable(k)]
+
+
 def redact_crm_summary(body: dict, gate: Gate) -> dict:
     out = dict(body)
     if not gate.displayable("crm.active_customers"):
@@ -703,7 +896,7 @@ def redact_fair_campaign(summary: dict, gate: Gate) -> dict:
 
 
 def redact_fair_member(row: dict, gate: Gate) -> dict:
-    out = dict(row)
+    out = redact_directory(row, gate)
     if not gate.displayable("fairs.segments"):
         out["segments"] = []
         out["collection_first"] = None
@@ -776,7 +969,8 @@ def accuracy_known_issues() -> list[dict]:
 
 validate_register()
 
-__all__ = ["State", "Definition", "Blocker", "Metric", "SourceEvidence", "Decision", "Gate", "current_gate",
-           "collect_core_evidence", "validate_register", "RegisterError", "REGISTER", "DEFINITIONS", "ROUTES",
+__all__ = ["State", "Definition", "Blocker", "Metric", "SourceEvidence", "EvidenceSnapshot", "Decision", "Gate",
+           "current_gate", "collect_core_evidence", "collect_snapshot", "generation_id", "temporal_problems",
+           "redact_directory", "GENERATION_BOUND_API_EVIDENCE", "validate_register", "RegisterError", "REGISTER", "DEFINITIONS", "ROUTES",
            "STAT_METRIC", "MODULE_METRIC", "accuracy_known_issues", "PANEL_METRIC", "REFRESH_COUNT_METRIC", "WITHHELD_MESSAGE",
            "WITHHELD_CODE", "WITHHELD_HTTP_STATUS", "POLICY_VERSION", "worst"]

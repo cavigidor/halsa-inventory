@@ -40,24 +40,38 @@ DEF_OK = ACC.Definition("t.def", "Test tanımı", True, "D-999")
 DEF_OPEN = ACC.Definition("t.def", "Test tanımı", False)
 
 
-def _metric(key="t.metric", sources=("src",), deps=(), certified=S, blockers=(), defs=("t.def",)):
+def _metric(key="t.metric", sources=("src",), deps=(), certified=S, blockers=(), defs=("t.def",),
+            temporal="operational"):
     kw = dict(approval_refs=("D-999",), regression_tests=("tests/test_m8_accuracy.py",),
               reconciliation_ref="synthetic") if certified == S else {}
-    return ACC.Metric(key, key, ("test",), sources, defs, deps, blockers, certified, **kw)
+    age = ACC.DEFAULT_OPERATIONAL_MAX_AGE_DAYS if temporal == "operational" else None
+    return ACC.Metric(key, key, ("test",), sources, defs, deps, blockers, certified, temporal=temporal,
+                      max_source_age_days=age, **kw)
 
 
 def clean(source="src", **kw):
-    base = dict(report_date=TODAY - dt.timedelta(days=3), report_date_origin="declared", joins_validated=True,
-                period_complete=True, totals_consistent=True, mapping_approved=True)
+    """Evidence where every check was actually made and passed (the only shape that can verify)."""
+    rd = kw.pop("report_date", TODAY - dt.timedelta(days=3))
+    base = dict(available=True, layout_supported=True, report_date=rd, report_date_origin="declared",
+                period_start=dt.date(2025, 1, 1), period_end=rd, period_complete=True, error_cells=0,
+                missing_cached_formulas=0, missing_required_values=0, duplicate_records=0, join_unmatched=0,
+                join_ambiguous=0, joins_validated=True, totals_consistent=True, mapping_approved=True)
     base.update(kw)
     return ACC.SourceEvidence(source, **base)
 
 
-def gate(metrics, evidence=None, definitions=None):
+GEN = "gen-test-1"
+
+
+def snap(evidence, generation=GEN):
+    return ACC.EvidenceSnapshot(generation, evidence, TODAY)
+
+
+def gate(metrics, evidence=None, definitions=None, generation=GEN, expected=GEN):
     reg = {m.key: m for m in metrics}
     defs = definitions or {"t.def": DEF_OK}
     ACC.validate_register(reg, defs)
-    return ACC.Gate(reg, defs, evidence or {}, TODAY)
+    return ACC.Gate(reg, defs, snap(evidence or {}, generation), TODAY, expected)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -69,8 +83,9 @@ def test_production_register_is_valid_and_nothing_is_verified_today():
     states = {k: g.decide(k).state for k in ACC.REGISTER}
     assert S not in states.values(), "no metric may be VERIFIED without owner approval and real-data evidence"
     # even perfectly clean evidence for every source cannot promote anything past its certification
-    g2 = ACC.current_gate(today=TODAY, evidence={s: clean(s) for s in
-                                                 ("stock", "sales", "aging", "hedef", "kredi", "gider_gelir")})
+    g2 = ACC.current_gate(today=TODAY, snapshot=snap({s: clean(s) for s in ("stock", "sales", "aging", "hedef",
+                                                                            "kredi", "gider_gelir", "liste")}),
+                          expected_generation=GEN)
     assert all(not g2.decide(k).displayable for k in ACC.REGISTER)
 
 
@@ -142,7 +157,7 @@ def test_a_fully_evidenced_metric_is_verified():
     (dict(join_ambiguous=1), INV),
     (dict(joins_validated=False), INV),
     (dict(joins_validated=None), NV),
-    (dict(report_date=TODAY - dt.timedelta(days=400)), NV),         # stale report date
+    (dict(report_date=TODAY - dt.timedelta(days=400)), NV),         # stale report date (operational metric)
     (dict(report_date=None), NV),                                   # unknown report date
     (dict(report_date=TODAY + dt.timedelta(days=5)), INV),          # impossible (future) report date
     (dict(mapping_approved=False), NV),                             # unapproved business mapping
@@ -153,6 +168,13 @@ def test_a_fully_evidenced_metric_is_verified():
     (dict(totals_consistent=None), NV),
     (dict(layout_supported=False), INV),                            # unsupported source layout
     (dict(available=False), NV),                                    # source not supplied
+    (dict(available=None), NV),                                     # reading not established
+    (dict(layout_supported=None), NV),
+    (dict(error_cells=None), NV),                                   # a check that was never made is not "0 errors"
+    (dict(missing_cached_formulas=None), NV),
+    (dict(missing_required_values=None), NV),
+    (dict(duplicate_records=None), NV),
+    (dict(inspection_failures=("excel_errors",)), INV),             # an inspection that failed
 ])
 def test_every_data_quality_failure_withholds(evidence, expected):
     d = gate([_metric()], {"src": clean(**evidence)}).decide("t.metric")
@@ -166,7 +188,7 @@ def test_missing_evidence_is_not_verified():
 
 def test_unverified_business_definition_withholds_at_runtime():
     reg = {"t.metric": _metric()}
-    d = ACC.Gate(reg, {"t.def": DEF_OPEN}, {"src": clean()}, TODAY).decide("t.metric")
+    d = ACC.Gate(reg, {"t.def": DEF_OPEN}, snap({"src": clean()}), TODAY, GEN).decide("t.metric")
     assert d.state == NV and any("Tanım onaylanmadı" in r for r in d.reasons_tr)
 
 
@@ -186,7 +208,7 @@ def test_gate_fails_closed_on_unknown_keys_and_internal_errors(monkeypatch):
     g = gate([_metric()], {"src": clean()})
     assert g.decide("does.not.exist").state == INV
     monkeypatch.setattr(ACC.Gate, "_decide", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
-    d = ACC.Gate(evidence={}, today=TODAY).decide("stock.reorder")
+    d = ACC.Gate(today=TODAY).decide("stock.reorder")
     assert d.state == INV and not d.displayable and "RuntimeError" not in json.dumps(d.notice())
 
 
@@ -216,7 +238,7 @@ def test_invalid_formulas_and_missing_caches_in_a_stock_export_are_caught(tmp_pa
     assert ev.missing_required_values == 2
     reg = {"stock.reorder": _metric("stock.reorder", sources=("stock",), defs=())}
     ev2 = dataclasses.replace(ev, report_date=TODAY, totals_consistent=True)
-    assert ACC.Gate(reg, {}, {"stock": ev2}, TODAY).decide("stock.reorder").state == INV
+    assert ACC.Gate(reg, {}, snap({"stock": ev2}), TODAY, GEN).decide("stock.reorder").state == INV
     # string error values (as some exports deliver them) are counted as formula errors
     df = pd.DataFrame({c: [1, 2] for c in cols})
     df["STOK Kontrol %"] = ["#DIV/0!", 0.5]
@@ -330,18 +352,26 @@ def test_unaffected_verified_metric_renders_unchanged_beside_an_invalid_one(tmp_
     reg["stock.reorder"] = dataclasses.replace(reg["stock.reorder"], blockers=(), definitions=(), certified=S,
                                                approval_refs=("D-999",), regression_tests=("this test",),
                                                reconciliation_ref="synthetic fixture")
-    ACC.validate_register(reg)
-    g = ACC.Gate(reg, ACC.DEFINITIONS, {"stock": clean("stock")}, TODAY)
+    ACC.validate_register(reg)                                  # a synthetic copy: not the production register
+    with pytest.raises(ACC.RegisterError):                      # …the production rules refuse any promotion today
+        ACC.validate_register(reg, production=True)
+    gid = ACC.generation_id(_frames(data))
+    g = ACC.Gate(reg, ACC.DEFINITIONS, ACC.EvidenceSnapshot(gid, {"stock": clean("stock")}), TODAY, gid)
     out = str(tmp_path / "d.html")
     db.build(data, out, today=TODAY, gate=g)
     blob = _data_blob(open(out, encoding="utf-8").read())
     low, _, _ = db.m_stock(db.select_sources(data)["stock"])
     assert blob["reorder"]["rows"] == json.loads(json.dumps(low)) and "withheld" not in blob["reorder"]
     assert blob["margin"]["rows"] == [] and blob["margin"]["withheld"]["verification"] == "invalid"
-    # the collected evidence (real frames) would NOT have verified it: stock has no report date
-    g_real = ACC.Gate(reg, ACC.DEFINITIONS, None, TODAY).with_evidence(
-        ACC.collect_core_evidence(db.read_stock(db.select_sources(data)["stock"])))
+    # the collected evidence (real frames) would NOT have verified it: stock has no report date, nothing reconciled
+    g_real = ACC.Gate(reg, ACC.DEFINITIONS, None, TODAY).bound_to(ACC.collect_snapshot(_frames(data)))
     assert g_real.decide("stock.reorder").state == NV
+
+
+def _frames(data):
+    src = db.select_sources(data)
+    return {"stock": db.read_stock(src["stock"]), "sales": db.read_sales_raw(src["sales"]),
+            "aging": db.read_aging_raw(src["aging"])}
 
 
 def test_withheld_module_is_rendered_as_a_notice_by_the_page_script(tmp_path):
