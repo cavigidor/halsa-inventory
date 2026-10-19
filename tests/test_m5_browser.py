@@ -73,7 +73,7 @@ def app_server(tmp_path, provider):
     env = {**os.environ, "STOCKAGENT_NO_DOTENV": "1", "AI_PROVIDER": provider, "OPENAI_API_KEY": "",
            "MANUAL_INFLATION_RATE": "0.40", "DATA_FOLDER": data, "DASHBOARD_PATH": dash,
            "AGENT_DB": str(tmp_path / "state.db")}
-    proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(port)],
+    proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "tests.accuracy_harness_app:app", "--host", "127.0.0.1", "--port", str(port)],
                             cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
     base = f"http://127.0.0.1:{port}"
     try:

@@ -447,5 +447,12 @@ def run(force=False, data_folder=None, output_folder=None, send=True):
 # --- Phase 3 (cross-sell: 5 products -> 5 companies) — next
 # def propose_cross_sell(...): ...
 
+REFUSAL = ("weekly_agent.py is disabled (M8-ACCURACY): it emails stock and win-back lists computed by a separate, "
+           "unverified implementation. No verified evidence = no business conclusion. See docs/accuracy/release_gate.md.")
+
+
 if __name__ == "__main__":
-    run(force="--force" in sys.argv)
+    # Fail-closed: the legacy weekly e-mail would send unverified lists (separate copies of the stock / lapsed rules,
+    # including the DQ-4 coverage behaviour). The code is kept for later verification; it does not run.
+    print(REFUSAL, file=sys.stderr)
+    sys.exit(2)

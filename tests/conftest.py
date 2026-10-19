@@ -30,6 +30,29 @@ def _isolate(tmp_path, monkeypatch):
     yield
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _accuracy_algorithm_harness():
+    """M8-ACCURACY. The production gate withholds every output that is not VERIFIED (none is today). The pre-existing
+    tests of the preserved algorithms and their UI run against the TEST-ONLY harness (tests/accuracy_harness.py) for
+    the whole session, including module- and session-scoped fixtures that build dashboards."""
+    from services import accuracy as ACC
+    from tests import accuracy_harness as H
+    original = ACC.current_gate
+    ACC.current_gate = H.harness_gate
+    yield
+    ACC.current_gate = original
+
+
+@pytest.fixture(autouse=True)
+def _accuracy_gate_mode(request, monkeypatch):
+    """Tests marked `production_gate` run the REAL production gate."""
+    if request.node.get_closest_marker("production_gate") is not None:
+        from services import accuracy as ACC
+        from tests import accuracy_harness as H
+        monkeypatch.setattr(ACC, "current_gate", H.production_gate)
+    yield
+
+
 @pytest.fixture(scope="session")
 def synthetic_dir(tmp_path_factory):
     return synthetic_erp.write_all(str(tmp_path_factory.mktemp("synthetic_erp")))

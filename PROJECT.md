@@ -98,6 +98,7 @@ services/sales_projection.py  M7-6: Customer 360 projection of the sales frame b
 | `services/crm_store.py` | M7-5: SQLite CRM storage — safe `memory` column migration, append-only `crm_contact` interactions, `crm_followups` (one current follow-up per customer); parameterized SQL, no logging (`docs/m7_lightweight_crm.md`, D-046) |
 | `services/owner_view.py` | M7-6: owner sources from explicit env paths only (lazy, compact cache, generation-safe reload, per-source isolation); Kredi 30/60/90 scheduled obligations per currency; source-native Gider/Gelir; Bütçe validity / coverage; operational summary; known-issues panel (`docs/m7_owner_integration.md`, D-047) |
 | `services/sales_projection.py` | M7-6: `prepare_sales` (moved from Customer 360, unchanged) and the one-use `SalesFrameHandoff` from the context build to Customer 360 |
+| `services/accuracy.py` | M8-ACCURACY (D-049): VERIFIED / NOT_VERIFIED / INVALID register, runtime source evidence, fail-closed `Gate`, route classification and response-layer redaction; used by the dashboard build, the API middleware and the refresh. Register docs: `docs/accuracy/` |
 | `services/crm.py` | M7-5: CRM rules and views — validation against Customer 360, KAPALI follow-up rule, incomplete coverage, counts-only summary, due lists, orphan counting, request-time `crm_followup` task rows |
 | `services/importers/butce.py` | M6-6: Bütçe (owner only) → cell-level facts (sales blocks by segment and month, rates, expense groups, BÜTÇE ÖZET panels) with validity and a coverage map; invalid and externally dependent cells are isolated, never repaired; source status `partially_usable`, never authoritative (`docs/m6_butce.md`, D-041); explicit file only; not used by M5 |
 | `tests/fixtures/xlsx_synth.py` | Runtime OOXML writer for synthetic workbooks with cached formulas, error cells and external links |
@@ -118,6 +119,8 @@ services/sales_projection.py  M7-6: Customer 360 projection of the sales frame b
 - **Receivables**: dynamic monthly aging buckets detected from the column headers.
   The oldest non-zero bucket is the age.
 - **Missing ≠ zero** anywhere in the AI layer.
+- **Factual integrity (D-049):** only VERIFIED outputs are displayed (HTML and API); everything else is withheld with
+  the notice "Bu analiz henüz doğrulanmadığı için gösterilmiyor." The gate lives in the backend (`services/accuracy.py`).
 
 ## AI layer (Milestone 3)
 - Providers: `disabled` (default), `mock`, `openai` (Responses API, structured output,

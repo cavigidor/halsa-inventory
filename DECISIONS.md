@@ -729,3 +729,52 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   `docs/m8_owner_questions_tr.md` is the owner-decision questionnaire. Implementation consists of bounded
   checkpoint PRs, with synthetic CI and a final remote real-data acceptance. An implementation plan does not
   constitute a live deployment.
+
+### D-049 · 2026-10-18 · Owner directive: no verified evidence = no business conclusion; fail-closed accuracy gate (M8-ACCURACY)
+- **Owner directive (highest priority; supersedes earlier decisions that kept potentially misleading figures visible
+  behind a warning, e.g. parts of D-047):** only results supported by valid source data, a known report date, an
+  explicitly defined deterministic calculation, passing reconciliation, validated joins, an approved business
+  definition, regression tests and an accurate label may be shown as business facts. Accuracy outranks features,
+  appearance, performance and completion. M8-ACCURACY precedes M8-CP1; later checkpoints use Claude Code.
+- **Decision:**
+  - three internal states `VERIFIED` / `NOT_VERIFIED` / `INVALID` in `services/accuracy.py`;
+  - an in-code register is the ceiling; `VERIFIED` only with D-xxx approvals for every definition, no open blocker,
+    named regression tests and real-data reconciliation evidence (`validate_register`, import time);
+  - runtime source evidence only downgrades (unknown = not passed); dependencies propagate; errors fail closed;
+  - enforcement in the backend: dashboard build embeds no withheld rows and drops withheld panel scripts; an HTTP
+    middleware withholds metric-bound routes (409 `accuracy_withheld`) and any unclassified route; mixed endpoints
+    redact field by field; `GET /` refuses dashboards built without the gate; refresh reports and warnings never carry
+    unverified totals; the legacy `weekly_agent.py` refuses to run;
+  - neutral notice "Bu analiz henüz doğrulanmadığı için gösterilmiyor." + short reasons; never zero, an estimate or
+    another field in place of a withheld value;
+  - AI interpretations / drafts withheld in production regardless of `AI_PROVIDER` (default stays `disabled`);
+    model text is never evidence.
+- **State at this checkpoint:** no output is VERIFIED (no approved definitions except D-003, no report dates for
+  stock / Cari, no real-data reconciliation in this environment). DQ-1, DQ-2, the new **DQ-6** (win-back overdue joined
+  by the wrong identity), Gider/Gelir contradictory totals and Bütçe errors are INVALID. Operational records (CRM,
+  fair campaigns, action state), system status, known issues and the customer directory lookup stay visible.
+- **Tests:** the pre-existing suite runs against a TEST-ONLY harness (`tests/accuracy_harness.py`) so the preserved
+  algorithms keep their regression coverage; `production_gate` tests run the real gate. Production code has no
+  switch that disables the gate.
+- **HTTP status choice:** 409 for a withheld resource (it exists, but its verification state conflicts with display);
+  401/403 stay free for M8-CP1 authentication.
+- **Consequences:** the father-facing dashboard shows notices instead of every analysis until owner answers and
+  real-data reconciliation allow promotions, one reviewed PR each (`docs/accuracy/release_gate.md` §2).
+
+### D-050 · 2026-10-18 · M8-ACCURACY correction pass after the independent review of PR #27
+- **Directory attributes are analyses, not reference data.** `GET /api/customer360/search`, CRM follow-up / customer
+  responses and fair member rows keep the customer code and recorded display name only; the derived last-order date
+  (`customer.last_order_date`) and the open / KAPALI status (`customer.master_status`) are withheld in the backend
+  (`ACC.redact_directory`). Conservative KAPALI safeguards keep restricting actions server-side.
+- **Evidence fails closed.** Every `SourceEvidence` field starts unknown; unknown never passes; inspection errors are
+  recorded as failures (INVALID) — `_excel_errors` previously returned 0 on error (and errored on every numeric column).
+  Collectors no longer assert joins, period completeness or mappings they did not check.
+- **Time per metric:** `Metric.temporal` = operational (needs a fresh source, `max_source_age_days`) or historical (needs
+  a dated, complete period; no age limit). Both need a known report date and verified completeness. Age only withholds.
+- **Generation-bound evidence:** immutable `EvidenceSnapshot` keyed by a content hash of the exact frames; a gate uses
+  evidence only for the generation it decides for (`Gate.bound_to` drops evidence of other generations). The API gets
+  no snapshot yet, so every source-bound metric stays withheld there. `validate_register(production=True)` refuses any
+  VERIFIED certification while `GENERATION_BOUND_API_EVIDENCE` is False. Sharing the published generation's snapshot
+  with the API, owner views and refresh (with transition / rollback / restart tests) is a **mandatory M8-ACCURACY-2
+  acceptance criterion** (`docs/accuracy/release_gate.md` §6 A–F).
+- **Unchanged:** no financial calculation or business rule; Kredi DURUM unresolved; DQ-1/2/4/5/6 unresolved.

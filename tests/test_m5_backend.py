@@ -250,7 +250,10 @@ def test_get_needs_no_header(mk):
 # ---------------- GET / serves the dashboard (D-020) ----------------
 def test_root_serves_dashboard_file(mk, tmp_path, monkeypatch):
     f = tmp_path / "dashboard.html"
-    f.write_text("<!doctype html><title>Şirket Panosu — test</title>", encoding="utf-8")
+    # M8-ACCURACY: `/` serves only dashboards built with the factual-integrity gate (policy marker in <head>).
+    from services import accuracy as ACC
+    f.write_text(f'<!doctype html><meta name="stockagent-accuracy" content="{ACC.POLICY_VERSION}">'
+                 "<title>Şirket Panosu — test</title>", encoding="utf-8")
     monkeypatch.setattr(APP, "DASHBOARD_PATH", str(f))
     c, _ = mk(headers={})
     r = c.get("/")

@@ -271,10 +271,16 @@ def verify(ctx, stats, html_path, expected_as_of, previous_context=None, drop=PL
             errors.append(f"Oluşturulan panoda beklenen yapı eksik ({len(missing)} öğe).")
     # plausibility against the live data (warnings only)
     new, old = context_counts(ctx), context_counts(previous_context)
+    from services import accuracy as ACC
+    gate = ACC.current_gate()
     for k, v in new.items():
         p = old.get(k)
         if p and v is not None and p > 0 and v < p * (1 - drop):
-            warnings.append(f"{_COUNT_TR[k]} belirgin düştü: {p:,} → {v:,}.".replace(",", "."))
+            mk = ACC.REFRESH_COUNT_METRIC.get(k, "unregistered")
+            if mk is None or (mk != "unregistered" and gate.displayable(mk)):
+                warnings.append(f"{_COUNT_TR[k]} belirgin düştü: {p:,} → {v:,}.".replace(",", "."))
+            else:   # M8-ACCURACY: an unverified total is never printed, not even in a warning
+                warnings.append(f"{_COUNT_TR[k]} önceki veriye göre belirgin düştü (değer doğrulanmadığı için gösterilmiyor).")
     if previous_context is None:
         warnings.append("Karşılaştırılacak canlı bağlam yok; sayı makullük kontrolü atlandı.")
     return {"ok": not errors, "errors": errors, "warnings": warnings, "counts": new}
@@ -318,7 +324,8 @@ def run_refresh(data_folder=None, dashboard_path=None, *, previous_context=None,
                       as_of_data_date=_prev_date(previous_context, dashboard_path))
     rep["duration_ms"] = int((time.monotonic() - t0) * 1000)
     log.info("refresh: ok=%s step=%s date=%s (%d ms)", rep["ok"], rep["step"], rep["as_of_data_date"], rep["duration_ms"])
-    return rep
+    from services import accuracy as ACC
+    return ACC.redact_refresh_report(rep, ACC.current_gate())   # M8-ACCURACY: API and CLI never print unverified totals
 
 
 def _prev_date(previous_context, dashboard_path):

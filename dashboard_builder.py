@@ -224,12 +224,24 @@ def m_collections(path,df=None):
     return rows, owed_map
 
 # ---------- oluştur ----------
-def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True,own_panel=True):
+def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True,own_panel=True,gate=None):
     """sources/frames (M5-5): a frozen source selection and the already-read raw frames, so a controlled
-    refresh builds from exactly what it validated. stats_out (dict): filled with build totals for verification."""
+    refresh builds from exactly what it validated. stats_out (dict): filled with build totals for verification.
+    gate (M8-ACCURACY): the factual-integrity gate; default = the production gate (services/accuracy.py). Every
+    module, stat card and server-driven panel whose metric is not VERIFIED is WITHHELD from the HTML: its rows are
+    never embedded, only a neutral notice. The computations themselves are unchanged."""
+    from services import accuracy as ACC
     today=today or dt.date.today()
-    src=sources or select_sources(data_folder); fr=frames or {}
+    src=sources or select_sources(data_folder); fr=dict(frames or {})
     sp,ep,ap=src.get('stock'),src.get('sales'),src.get('aging')
+    # Read each raw frame once here (as the callees would) so the accuracy evidence sees the values as read.
+    if fr.get('stock') is None: fr['stock']=read_stock(sp)
+    if ep and fr.get('sales') is None: fr['sales']=read_sales_raw(ep)
+    if ap and fr.get('aging') is None: fr['aging']=read_aging_raw(ap)
+    # Evidence is bound to THIS generation (a content hash of exactly these frames); evidence held for any other
+    # generation is dropped, never reused (services/accuracy.Gate.bound_to).
+    snapshot=ACC.collect_snapshot({'stock':fr.get('stock'),'sales':fr.get('sales'),'aging':fr.get('aging')},today=today)
+    gate=(gate or ACC.current_gate(today=today)).bound_to(snapshot)
     low,over,total=m_stock(sp,fr.get('stock'))
     coll,owed=([],{})
     if ap: coll,owed=m_collections(ap,fr.get('aging'))
@@ -295,6 +307,19 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
            ('fazla stok değeri',_money(over_val)),('kayıp müşteri',f"{len(lap):,}")]
     if has_aging:
         stats+=[('vadesi geçen toplam',_money(overdue_total)),('borçlu kayıp müşteri',f"{lap_owe}")]
+    # ---- M8-ACCURACY: withhold every output whose metric is not VERIFIED (rows never reach the HTML) ----
+    decisions={}
+    def _dec(key):
+        if key not in decisions: decisions[key]=gate.decide(key)
+        return decisions[key]
+    for k in list(modules):
+        d=_dec(ACC.MODULE_METRIC.get(k,'unregistered:'+k))
+        if not d.displayable:
+            modules[k]={'title':modules[k]['title'],'rows':[],'cols':[],'withheld':d.notice()}
+    withheld_stats=[l for l,_ in stats if not _dec(ACC.STAT_METRIC.get(l,'unregistered:'+l)).displayable]
+    stats=[(l,v) for l,v in stats if l not in withheld_stats]
+    show_tiers=_dec('customers.winback').displayable
+    panel_notice={p:_dec(k).notice() for p,k in ACC.PANEL_METRIC.items() if not _dec(k).displayable}
     later=(['Tahsilat & alacak yaşlandırma'] if not has_aging else [])+[
            'Hedef vs gerçekleşen (müşteri / temsilci / bölge)','Temsilci verimliliği (ziyaret / km başına satış)',
            'Gerçek stok hareketinden sipariş','Bütçe vs gerçekleşen — giderler',
@@ -303,12 +328,15 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     d_tr=f"{today.day} {AYLAR[today.month]} {today.year}"
     meta={'date':d_tr,'stock':os.path.basename(sp) if sp else '','sales':os.path.basename(ep) if ep else '',
           'aging':os.path.basename(ap) if ap else '','tiers':tier_counts,'total':total,'has_aging':has_aging,
-          'asof':_asof_iso(sdf)}
+          'asof':_asof_iso(sdf),'show_tiers':show_tiers,'withheld_stats':withheld_stats,
+          'withheld_panels':panel_notice,'accuracy_policy':ACC.POLICY_VERSION,'generation':snapshot.generation_id or ''}
     with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel,opp_panel=opp_panel,fair_panel=fair_panel,crm_panel=crm_panel,own_panel=own_panel))
     if stats_out is not None:
+        # Internal build totals for the refresh's context ↔ dashboard reconciliation (never displayed as such).
         stats_out.update({'asof':meta['asof'],'overdue_total':overdue_total,'overstock_value':over_val,
                           'tabs':list(modules.keys()),'products':total,'lapsed':len(lap),'low':len(low),
-                          'over':len(over),'coll':len(coll),'sources':{k:(os.path.basename(v) if v else None) for k,v in src.items()}})
+                          'over':len(over),'coll':len(coll),'sources':{k:(os.path.basename(v) if v else None) for k,v in src.items()},
+                          'accuracy':{k:d.state.value for k,d in decisions.items()},'generation':snapshot.generation_id})
     return out_path,{'low':len(low),'over':len(over),'lapsed':len(lap),'coll':len(coll),
                      'momentum':len(momentum),'margin':len(margin),'ordersize':len(ordersize),
                      'osmove':len(osmove),'risk':len(risk)}
@@ -445,6 +473,7 @@ _AI_JS=r"""
 const root=document.getElementById('ai'), tabBtn=document.querySelector('.tab[data-t="ai"]');
 if(!root||!tabBtn) return;
 const ASOF=root.getAttribute('data-asof')||'';
+const WITHHELD=root.getAttribute('data-withheld')==='1';   // M8-ACCURACY: queue withheld server-side; never fetched
 const MAX_IDS=5;                                   // server contract: at most 5 ids and one provider call per request
 const POLL_MS=window.__AI_POLL_MS||3000, POLL_MAX_MS=120000;
 const POST_HEADERS={'Content-Type':'application/json','X-StockAgent':'1'};   // local CSRF guard (D-020)
@@ -522,6 +551,7 @@ async function pollHealth(elapsed){
   let h;
   try{h=await getJSON('/api/health');}catch(e){offline(); return;}
   srvChip(true); show($('.ai-refresh'),true);   // refresh needs the server (never offered offline or from file://)
+  if(WITHHELD){checkDate(h.as_of_data_date); return;}   // M8-ACCURACY: status + controlled refresh only
   if(!h.context_ready){
     if(h.context_error){setState(MSG.ctxError+h.context_error,'err'); return;}
     setState(MSG.warming,'wait');
@@ -835,13 +865,39 @@ $('.ai-next').addEventListener('click',enrichNext);
 })();
 """
 
+def _notice_html(n):
+    """M8-ACCURACY: the neutral withheld notice (escaped; message + at most a few short reasons; no numbers)."""
+    why=''.join(f'<li>{html.escape(str(r))}</li>' for r in (n.get('reasons') or []))
+    return (f'<div class="aw-box" role="note" data-metric="{html.escape(str(n.get("metric","")),quote=True)}" '
+            f'data-verification="{html.escape(str(n.get("verification","")),quote=True)}">'
+            f'<p class="aw-msg">{html.escape(str(n.get("message","")))}</p>'
+            +(f'<ul class="aw-why">{why}</ul>' if why else '')+'</div>')
+
+
+def _withheld_panel(pid,label,marker,n,meta):
+    """M8-ACCURACY: a server-driven panel whose metric is not VERIFIED is replaced by its notice. No script is
+    embedded, so the page never requests the withheld API; the tab and the panel id stay for navigation."""
+    asof=html.escape(str(meta.get('asof') or ''),quote=True)
+    btn=f'<button class="tab" data-t="{pid}">{label}</button>'
+    block=(f'\n<!--{marker}-TAB-START-->\n'
+           f'<div id="{pid}" class="panel" data-asof="{asof}" data-withheld="1">'
+           f'<h2 class="sec">{label}</h2>'+_notice_html(n)+'</div>\n'
+           f'<!--{marker}-TAB-END-->')
+    return btn,block
+
+
 def _ai_panel(meta):
     """(tab button, panel block) for the AI Aksiyon Merkezi. The block is wrapped in markers so tests
-    can strip it and prove the rest of the dashboard is byte-identical to the build without it."""
+    can strip it and prove the rest of the dashboard is byte-identical to the build without it.
+    M8-ACCURACY: when the action queue is withheld the panel keeps only the server status and the controlled
+    refresh (operational); the script never requests the actions or any AI text (data-withheld)."""
     asof=html.escape(str(meta.get('asof') or ''),quote=True)
+    n=(meta.get('withheld_panels') or {}).get('ai')
     btn='<button class="tab" data-t="ai">✨ AI Aksiyon Merkezi</button>'
+    body=_AI_BODY if n is None else _AI_BODY.replace('<div class="ai-list"></div>',_notice_html(n)+'<div class="ai-list"></div>',1)
+    attr='' if n is None else ' data-withheld="1"'
     block=('\n<!--AI-TAB-START-->\n<style>'+_AI_CSS+'</style>\n'
-           f'<div id="ai" class="panel" data-asof="{asof}">'+_AI_BODY+'</div>\n'
+           f'<div id="ai" class="panel" data-asof="{asof}"{attr}>'+body+'</div>\n'
            '<script>'+_AI_JS+'</script>\n<!--AI-TAB-END-->')
     return btn,block
 
@@ -1757,6 +1813,7 @@ function renderCampaign(){
   box.append(r1);
   const le=c.linked_event||{}, lp=el('p','fm-note fm-link');
   if(!le.configured) lp.textContent='ERP fuar kimliği tanımlı değil (isteğe bağlı).';
+  else if(le.withheld) lp.textContent='Bağlı ERP fuarı: '+(le.message||'')+((le.reasons||[]).length?' '+le.reasons.join(' '):'');
   else if(!le.found) lp.textContent='Tanımlı ERP fuar kimliği satış verisinde henüz yok.';
   else lp.textContent='Bağlı ERP fuarı: '+(le.label||'')+' · '+num(le.orders)+' sipariş · '+num(le.customers)+' müşteri · '+st.amountLabel+': '+money(le.net_order_amount);
   box.append(lp);
@@ -2076,9 +2133,10 @@ function renderSummary(s){
   show($('[data-sec="summary"]'),true); const t=$('.cr-tiles'); t.replaceChildren();
   [['total_customers','Müşteri 360 müşterisi'],['customers_with_structured_contact','Yapılandırılmış kaydı olan müşteri'],
    ['active_customers_with_structured_contact','Aktif müşterilerden kaydı olan'],['current_followups','Güncel takip'],
-   ['overdue','Gecikmiş'],['due_today','Bugün'],['upcoming_7d','7 gün içinde']].forEach(([k,l])=>{const d=el('div','cr-tile'); d.dataset.k=k;
-    d.append(el('div','n',num(s[k])),el('div','l',l)); t.append(d);});
-  $('.cr-unknown').textContent=(s.unknown_note||'')+' Bu sayılar sistem kapsamını ve iş yükünü gösterir; kişi bazında sayım yapılmaz.'+(s.orphan_customer_records?' Güncel veride bulunmayan '+num(s.orphan_customer_records)+' müşteri kodunun CRM kaydı saklanıyor (gösterilmez).':'');
+   ['overdue','Gecikmiş'],['due_today','Bugün'],['upcoming_7d','7 gün içinde']].forEach(([k,l])=>{
+    if(s[k]==null&&(s.withheld||[]).length) return;   // M8-ACCURACY: withheld classification, no tile
+    const d=el('div','cr-tile'); d.dataset.k=k; d.append(el('div','n',num(s[k])),el('div','l',l)); t.append(d);});
+  $('.cr-unknown').textContent=(s.unknown_note||'')+((s.withheld||[]).length?' Aktif müşteri sayıları doğrulanmadığı için gösterilmiyor.':'')+' Bu sayılar sistem kapsamını ve iş yükünü gösterir; kişi bazında sayım yapılmaz.'+(s.orphan_customer_records?' Güncel veride bulunmayan '+num(s.orphan_customer_records)+' müşteri kodunun CRM kaydı saklanıyor (gösterilmez).':'');
 }
 async function loadList(mode,boxSel,secSel){
   show($(secSel),true); const box=$(boxSel);
@@ -2288,6 +2346,9 @@ function table(head,rows,cls){const w=el('div','ow-scroll'); const t=el('table',
   const tb=el('tbody'); rows.forEach(cells=>{const r=el('tr'); cells.forEach(([v,right],i)=>{const c=el(i===0?'th':'td',right?'r':null,v); if(i===0) c.scope='row'; r.append(c);}); tb.append(r);});
   t.append(tb); w.append(t); return w;}
 function warnList(ws,box){(ws||[]).forEach(w=>{const p=el('p','ow-warn',w.message); p.dataset.code=w.code; box.append(p);});}
+// M8-ACCURACY: a withheld section carries a notice and no data (enforced by the server)
+function withheld(w,box){const d=el('div','aw-box'); d.setAttribute('role','note'); d.dataset.metric=w.metric||''; d.dataset.verification=w.verification||'';
+  d.append(el('p','aw-msg',w.message)); if((w.reasons||[]).length){const u=el('ul','aw-why'); w.reasons.forEach(r=>u.append(el('li',null,r))); d.append(u);} box.append(d);}
 async function api(path,opt){
   let r; try{r=await fetch(path,opt||{headers:{'Accept':'application/json'}});}catch(e){const x=new Error('offline'); x.offline=true; throw x;}
   let b=null; try{b=await r.json();}catch(e){b=null;}
@@ -2334,9 +2395,11 @@ function renderOps(o){
   [['customer360_customers','Müşteri 360 müşterisi'],['daily_sales_customers','Günlük Satış müşterisi (açık)'],['collection_first_customers','Önce tahsilat'],
    ['crm_overdue','CRM takibi gecikmiş'],['crm_due_today','CRM takibi bugün'],['fair_tasks_due','Zamanı gelen fuar görevi'],
    ['active_fair_campaigns','Aktif fuar kampanyası'],['cross_sell_customers','Çapraz satış adayı müşteri']].forEach(([k,l])=>{
+    if(o.withheld&&o[k]==null&&k!=='customer360_customers') return;   // M8-ACCURACY: withheld counts are not shown
     const d=el('div','ow-tile'); d.dataset.k=k; d.append(el('div','n',num(o[k])),el('div','l',l)); t.append(d);});
   const cov=el('div','ow-tile'); cov.dataset.k='crm_coverage'; cov.append(el('div','n',o.crm_coverage_label),el('div','l','CRM kapsamı ('+num(o.crm_structured_interactions)+' yapılandırılmış etkileşim; kayıt olmaması temas olmadığı anlamına gelmez)')); t.append(cov);
   const n=$('.ow-opsnotes'); n.replaceChildren();
+  if(o.withheld) withheld(o.withheld,n);
   if(o.state!=='ready') n.append(el('p','ow-muted','Müşteri verisi hazırlanıyor…'));
   if(o.cross_sell_share!=null) n.append(el('p','ow-muted','Çapraz satış: aktif '+num(o.cross_sell_active_customers)+' müşterinin '+pct(o.cross_sell_share)+' kadarında en az bir hedef var.'));
   if(o.cross_sell_note){const p=el('p','ow-warn ow-xs',o.cross_sell_note); n.append(p);}
@@ -2344,6 +2407,7 @@ function renderOps(o){
 }
 function renderKredi(k){
   const b=head('[data-sec="kredi"]',k); b.append(el('p','ow-note',k.purpose));
+  if(k.withheld&&k.state!=='not_configured'){withheld(k.withheld,b); return;}
   const x=k.data; if(!x) return;
   b.append(kv([['Sözleşme',num(x.contracts)],['Taksit',num(x.installments)],['Banka sayısı',num(x.lenders)],['Para birimleri',(x.currencies||[]).join(', ')],
     ['Kaynak anlık tarihi',x.snapshot_date?fmtDate(x.snapshot_date)+' (beyan edilen)':'bilinmiyor'],['Son kayıtlı ödeme tarihi',fmtDate(x.latest_payment_date)],['Bugün',fmtDate(k.today)]]));
@@ -2361,6 +2425,7 @@ function renderKredi(k){
 }
 function renderGG(g){
   const b=head('[data-sec="gg"]',g); const x=g.data;
+  if(g.withheld&&g.state!=='not_configured'){withheld(g.withheld,b); return;}
   b.append(el('p','ow-strong ow-basis',g.basis_note));
   if(!x) return;
   b.append(kv([['Rapor yılı',x.report_year],['Revizyon etiketi',x.revision_label],['Kaynak anlık tarihi','bilinmiyor'],
@@ -2377,6 +2442,7 @@ function renderGG(g){
 }
 function renderButce(u){
   const b=head('[data-sec="butce"]',u); const x=u.data;
+  if(u.withheld&&u.state!=='not_configured'){withheld(u.withheld,b); return;}
   if(!x) return;
   b.append(el('p',x.source_status==='complete'?'ow-note':'ow-strong ow-bwarn',u.warning));
   b.append(kv([['Planlama yılı',x.planning_year],['Revizyon etiketi',x.revision_label],['Kaynak anlık tarihi',x.snapshot_date?fmtDate(x.snapshot_date)+' (beyan edilen)':'bilinmiyor'],
@@ -2424,19 +2490,28 @@ def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,o
     blob=json.dumps(modules,ensure_ascii=False).replace('</','<\\/')
     tabs=['overview']+list(modules.keys())
     tabbtns=''.join(f'<button class="tab" data-t="{t}">{("Genel Bakış" if t=="overview" else modules[t]["title"])}'
-                    f'{"" if t=="overview" else f" <span class=cnt>{len(modules[t]["rows"])}</span>"}</button>' for t in tabs)
+                    f'{"" if (t=="overview" or modules[t].get("withheld")) else f" <span class=cnt>{len(modules[t]["rows"])}</span>"}</button>' for t in tabs)
     statcards=''.join(f'<div class="stat"><div class="n">{v}</div><div class="l">{l}</div></div>' for l,v in stats)
+    # M8-ACCURACY: withheld stat cards are left out entirely (no number); one neutral line names them.
+    ws=meta.get('withheld_stats') or []
+    statnote=(f'<p class="note aw-stats">{html.escape("Bu özet göstergeler henüz doğrulanmadığı için gösterilmiyor: "+", ".join(ws)+".")}</p>'
+              if ws else '')
+    tiers=(f'<p class="note" style="margin-top:14px">Geri kazanım dağılımı — Kademe 1: {meta["tiers"][1]} · Kademe 2: {meta["tiers"][2]} · Kademe 3: {meta["tiers"][3]}.</p>'
+           if meta.get('show_tiers',True) else '')
+    acc=html.escape(str(meta.get('accuracy_policy') or ''),quote=True)
+    gen=html.escape(str(meta.get('generation') or ''),quote=True)
     laterlist=''.join(f'<li>{html.escape(x)}</li>' for x in later)
     src=f"Stok: {meta['stock']} · Satış: {meta['sales']}"+(f" · Alacaklar: {meta['aging']}" if meta['has_aging'] else '')
     ai_btn,ai_block=_ai_panel(meta) if ai_panel else ('','')
-    c3_btn,c3_block=_c360_panel(meta) if c360_panel else ('','')
-    sq_btn,sq_block=_sq_panel(meta) if sq_panel else ('','')
-    op_btn,op_block=_opp_panel(meta) if opp_panel else ('','')
+    wp=meta.get('withheld_panels') or {}
+    c3_btn,c3_block=(_withheld_panel('c360','Müşteri 360','C360',wp['c360'],meta) if 'c360' in wp else _c360_panel(meta)) if c360_panel else ('','')
+    sq_btn,sq_block=(_withheld_panel('sq','Günlük Satış','SQ',wp['sq'],meta) if 'sq' in wp else _sq_panel(meta)) if sq_panel else ('','')
+    op_btn,op_block=(_withheld_panel('opp','Fırsatlar','OPP',wp['opp'],meta) if 'opp' in wp else _opp_panel(meta)) if opp_panel else ('','')
     fm_btn,fm_block=_fair_panel(meta) if fair_panel else ('','')
     cr_btn,cr_block=_crm_panel(meta) if crm_panel else ('','')
     ow_btn,ow_block=_own_panel(meta) if own_panel else ('','')
     return f"""<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Şirket Panosu — {meta['date']}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="stockagent-accuracy" content="{acc}"><meta name="stockagent-generation" content="{gen}"><title>Şirket Panosu — {meta['date']}</title>
 <style>
 :root{{--ink:#16191d;--muted:#6b7480;--line:#e6e8ec;--paper:#fbfbf9;--card:#fff;
 --low:#c2410c;--crit:#9f1239;--over:#0e7490;--gold:#92660a;--lap:#6d28d9;--warn:#b45309;--warn-bg:#fef6e7;}}
@@ -2494,6 +2569,9 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 .prods{{flex:1;min-width:280px}}.prods-h{{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;margin-bottom:6px}}
 .prow{{display:flex;justify-content:space-between;gap:14px;padding:4px 0;border-bottom:1px solid var(--line)}}
 .pn{{font-size:13px}}.pv{{font-size:12px;color:var(--muted);white-space:nowrap;font-family:"SF Mono",Menlo,monospace}}
+.aw-box{{border:1px solid var(--line);background:#f4f5f7;border-radius:10px;padding:14px 16px;margin:8px 0 14px}}
+.aw-msg{{font-weight:700;margin:0 0 6px;font-size:15px}}.aw-why{{margin:0;padding-left:18px;color:var(--muted);font-size:13px}}
+.aw-why li{{margin:3px 0}}
 </style></head><body><div class="wrap">
 <header><div class="eyebrow">Şirket Panosu</div>
 <h1>Şirket Panosu — {meta['date']}</h1>
@@ -2501,11 +2579,11 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <div class="tabs">{tabbtns}{sq_btn}{c3_btn}{op_btn}{fm_btn}{cr_btn}{ow_btn}{ai_btn}</div>
 <div id="overview" class="panel on">
 <h2 class="sec">Aktif Analizler</h2>
-<p class="note">İlk istediğiniz ikisi — <b>stok uyarıları</b> (azalan + fazla) ve <b>kayıp müşteriler</b> (geri kazanım) — çalışıyor. Gezinmek, aramak ve sıralamak için yukarıdaki sekmelere tıklayın. Her şey doğrudan tablolarınızdan hesaplanır: filtreleme, müşteri ve stok kodu üzerinden birleştirme ve aritmetik — hiçbir şey tahmin değil.</p>
-<div class="stats">{statcards}</div>
-<p class="note" style="margin-top:14px">Geri kazanım dağılımı — Kademe 1: {meta['tiers'][1]} · Kademe 2: {meta['tiers'][2]} · Kademe 3: {meta['tiers'][3]}.</p>
+<p class="note">Bu panoda yalnızca kaynağı, tarihi, tanımı ve hesabı doğrulanmış sonuçlar gösterilir. Doğrulanmamış bir analizin yerinde rakam değil, neyin eksik olduğunu söyleyen kısa bir not görürsünüz. Rakamlar yapay zekâ tarafından üretilmez.</p>
+<div class="stats">{statcards}</div>{statnote}
+{tiers}
 <h2 class="sec" style="margin-top:34px">Sonrası İçin</h2>
-<p class="note">Hazır olduğunuzda açabileceğimiz, tamamen gerçeğe dayalı diğer analizler — her biri yalnızca ilgili sayfanın <code>data</code> klasöründe olmasını ister, sonra kendi sekmesi olur. Yapay zekâ yok, bunlarla aynı.</p>
+<p class="note">İleride eklenebilecek analizler. Her biri ancak kaynağı sağlanıp doğrulandıktan sonra gösterilir.</p>
 <ul class="later">{laterlist}</ul>
 </div>
 <div id="panels"></div>{sq_block}{c3_block}{op_block}{fm_block}{cr_block}{ow_block}{ai_block}
@@ -2536,6 +2614,13 @@ function detailHTML(d){{
 }}
 function makePanel(id){{
   const m=DATA[id]; const p=document.createElement('div'); p.className='panel'; p.id=id;
+  if(m.withheld){{   // M8-ACCURACY: withheld server-side; the build embedded no rows for this module
+    const w=m.withheld; p.dataset.withheld='1';
+    p.innerHTML=`<h2 class="sec">${{esc(m.title)}}</h2><div class="aw-box" role="note"><p class="aw-msg">${{esc(w.message)}}</p>`
+      +((w.reasons||[]).length?`<ul class="aw-why">${{w.reasons.map(r=>`<li>${{esc(r)}}</li>`).join('')}}</ul>`:'')+`</div>`;
+    const bx=p.querySelector('.aw-box'); bx.dataset.metric=String(w.metric||''); bx.dataset.verification=String(w.verification||'');
+    document.getElementById('panels').appendChild(p); return;
+  }}
   let filterHTML='';
   if(m.filter){{
     const vals=[...new Set(m.rows.map(r=>r[m.filter]).filter(x=>x))].sort((a,b)=>String(a).localeCompare(String(b),'tr'));
