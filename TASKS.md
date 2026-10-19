@@ -4,28 +4,17 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-6 are merged; **Milestone 7 is COMPLETE** (PR #24, squash merge `de7eb43`; D-047). M8 production-readiness planning is merged (PR #26). **Owner directive 2026-10-18: NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION.** The M8-ACCURACY checkpoint now precedes M8-CP1 authentication and all deployment work; all subsequent checkpoints are implemented with Claude Code (the Codex plan is replaced).
 
 ## Current
-- [ ] **M8-ACCURACY — Factual integrity and fail-closed display audit** (owner-approved priority change, 2026-10-18):
-  VERIFIED / NOT_VERIFIED / INVALID register and backend gate (`services/accuracy.py`), withheld dashboard modules /
-  panels / API routes with the Turkish notice, AI off in production, metric register and audit docs in
-  `docs/accuracy/`. Branch `claude/m8-accuracy-fail-closed`; PR #27 open, **review and merge by the owner** (not merged
-  automatically). No metric is VERIFIED yet; the audit is bounded, not complete (`docs/accuracy/release_gate.md`).
-  Correction pass after the independent review done (D-050): directory fields redacted, evidence fails closed,
-  operational vs historical time rules, generation-bound evidence interface; promotion blocked until ACCURACY-2.
+- [ ] **M8-ACCURACY-2 — shared generation evidence and source verification.** PR #27 safety gate is merged at `a28b2b9`. Build a single validated evidence manifest tied to each published generation and shared by dashboard/API/owner/refresh; enforce atomic transitions, source dates, formula-aware checks, joins and rollback/restart consistency. Preserve **zero VERIFIED production metrics** until explicit owner approvals, real-data reconciliation and regression tests. The 2026-10-19 private Kredi workbook (owner-filtered) requires a separate fail-closed source-layout check and date-filter reconciliation, not an automatic production promotion. See `docs/accuracy/release_gate.md` §6 and the 2026-10-19 Kredi source handoff.
 
 ## Next (M8 — accuracy and production launch)
-- [ ] **M8-ACCURACY-2 — First verifiable core metrics** (proposed; `docs/accuracy/release_gate.md` §6). **Mandatory
-  first:** one generation-bound evidence snapshot shared by dashboard, API, owner views and refresh, invalidated on
-  refresh / reload / rollback / restart, with transition and mixed-generation tests (criteria A–F); only then flip
-  `GENERATION_BOUND_API_EVIDENCE`. Then: declared
-  report dates for stock / Cari, formula-aware core evidence, sales join validation, owner-local privacy-safe
-  reconciliation evidence; then, with owner answers, fix DQ-6 / DQ-2 / DQ-1 / zero-substituted amounts and promote
-  the first metrics only if every VERIFIED criterion holds.
 - [ ] **M8-CP1 — Security-first owner/father authentication** (after M8-ACCURACY is merged): server-side authentication and authorization for ALL sensitive UI and API routes, safe account provisioning and revocable sessions, CSRF protection, login rate limits, and synthetic/browser tests. See `docs/m8_father_first_launch.md`; one isolated PR; no public deployment or financial rule changes. Kredi `DURUM` remains unverified until owner clarification. Must keep the accuracy gate in front of every route.
 - [ ] **M8-CP2–CP8** as sequenced in `docs/m8_father_first_launch.md`; the accuracy release gate (`docs/accuracy/release_gate.md` §4) applies in addition. One implementation PR/checkpoint at a time, with tests and verified acceptance; revise count if approved feature-gap work expands.
 - [ ] **Owner: answer `docs/m8_owner_questions_tr.md`**, identify real file-of-record and supply missing exports via a private channel; do not commit real customer data. The original voice-note transcript is not verified in the repo, so signoff on feature coverage is still required.
 - [ ] **Owner: provision approved private cloud hosting, billing, encrypted backup and secure account setup**; verify privacy/transfer handling for Halsa data, plus father usability from Türkiye. Never deploy current unauthenticated app publicly.
 - [ ] **Owner: monthly-report upload acceptance**, including complete source date/revision selection, all affected M7 views, preserved CRM/fair/action state and failure rollback. No local installation for father.
 - [ ] **Later: Kredi DURUM semantics clarification**, one narrow follow-up after 2026-10-19 response. Do not interpret Kapalı as paid before then.
+
+- [ ] **Kredi workbook handoff (private, 2026-10-19):** The owner provided a filtered one-sheet workbook with a two-row header arrangement and Excel SUBTOTAL formula rows, differing from the existing strict header-row-1 importer. Review the source structure with synthetic fixtures only, validate both control/footer and filter-hidden rows, and keep ALL nonzero or anomalous remaining-installment rows visible in exception reconciliation rather than relying on an Excel filter. Source authority, snapshot date and `DURUM` meaning are not yet confirmed. Do not commit private workbook data or amounts.
 
 ## Next (after M7: owner decisions and follow-ups; start each only when moved to *Current*)
 - [ ] **Owner: cross-sell threshold review.** On real data the initial guards give a broad population (78 % of active
@@ -156,6 +145,7 @@ Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi,
   2020 should count, change `QUAL_YEARS` and that test together.
 
 ## Completed
+- [x] 2026-10-19 — PR #27 (M8-ACCURACY fail-closed gate) squash-merged to `main` (`a28b2b9`); head `f6d27b1` passed GitHub CI (1164 passed, 7 skipped, 2 xfailed). The gate withholds all analytical metrics until ACCURACY-2; no finance business rule was changed.
 - [x] 2026-10-18 — Baseline before M8-ACCURACY on `main` @ `7f3202d` (cloud, synthetic): 1058 passed, 7 skipped, 1 xfailed.
 - [x] 2026-10-18 — M8-P0 docs-only launch plan, father questionnaire, D-048 and checkpoint backlog merged as PR #26 (`c34a504`). CI: 1058 passed, 7 skipped, 1 xfailed; no runtime changes or deployment. Next: CP1 authentication.
 - [x] 2026-10-18 — PR #25 post-M7 local readiness squash-merged to `main` (`d67fb0b`): optional `.env.example` paths, privacy-safe `python -m scripts.owner_preflight`, synthetic tests, README and local launch checklist. CI: 1058 passed, 7 skipped, 1 expected failure. Mac/browser acceptance and real-file paths require local owner verification. Kredi `DURUM` stays unresolved.
