@@ -153,3 +153,76 @@ stays withheld everywhere, and the production register cannot certify any metric
 **Residual, documented:** KAPALI safeguards still act server-side and their refusal messages name the reason (they
 restrict an action; they do not present an analysis). Counts of records in the directory, CRM and campaigns, the
 data date (max sales date), file names and data-quality counts (e.g. DQ-4) remain as system information.
+
+## 8. M8-ACCURACY-2 — shared generation evidence (2026-10-19)
+### 8.1 What was built
+- **Source-generation manifest** (`services/generation.py`, schema `halsa-generation/1`). For every core source
+  (stock, sales, aging, and the master `liste` sheet of the sales workbook) and every owner source (Kredi,
+  Gider/Gelir, Bütçe): file basename, **SHA-256 of the original workbook bytes**, size, selection origin, declared
+  dates, observed dates, validation counts and `SourceEvidence`. `core_id` = digest of the policy version and the core
+  identities; `generation_id` = digest of `core_id` and the owner identities. No values, names or paths.
+- **Frozen reads:** each source is read once (`FrozenSource`); the hash, the formula-aware inspection, the pandas
+  frames, the dashboard and the context all use those bytes. Owner Gider/Gelir and Bütçe are re-hashed after parsing
+  (`SourceChanged` if the file changed mid-read).
+- **One manifest everywhere:** the dashboard HTML (`stockagent-generation` = `core_id`), the API gate
+  (`app.accuracy_gate` binds to the fingerprints actually served), the Yönetim views (owner records replaced on
+  reload), the refresh (installs context + manifest together, restores dashboard + manifest on failure) and restart
+  (restored only if dashboard and every core file match; otherwise `restore_reason` is recorded and no evidence binds).
+  Customer 360 checks the generation before and after its build.
+- **Formula-aware core validation** (`services/source_validation.py`): a streaming sheet-XML scan distinguishes literal
+  values, zeros, blanks, cached formula results, formulas without cached results, Excel errors, external references
+  and invalid dates per column; ambiguous and missing headers; unsupported layouts. It never raises.
+- **Join validation:** counts only; nothing is merged or repaired (D-003 preserved; DQ-5, DQ-6 open).
+- **Dates:** declared in `data/sources.json` (§9), checked against the source (future dates, a sales period that
+  contradicts the observed transactions, a report date before the latest transaction, aging buckets newer than the
+  snapshot). The latest transaction date, the declared report date and the file time are separate fields; the file
+  time is information only.
+- **Kredi revised layout + schedule views + owner-local reconciliation command** (`docs/m6_kredi.md`).
+- **Status route:** `GET /api/accuracy/status` (system information; fingerprints, dates, states, codes; no values).
+
+### 8.2 Acceptance criteria §6 A–F
+| | Result |
+|---|---|
+| A. One validated snapshot per published generation, from the exact bytes, shared by dashboard / API / owner / refresh | **pass** (synthetic) |
+| B. Atomic install; invalidated on refresh, owner reload, failure (rollback keeps the previous one) and restart | **pass** (synthetic) |
+| C. Transition, mixed-generation, rollback, restart and dashboard/API agreement tests | **pass** (`tests/test_m8_accuracy2.py`) |
+| D. Formula-aware core evidence and recorded join validation | **pass** (synthetic) |
+| E. `GENERATION_BOUND_API_EVIDENCE = True` | **not done — deliberately.** Requires §8.3 on the real files |
+| F. Production-gate tests independent of the harness | **pass** for the new paths |
+
+### 8.3 Owner real-data acceptance (owner-local; required before E)
+1. Write `data/sources.json` (§9) naming the stock, sales and aging files and their declared business dates.
+2. `python -m scripts.reconcile_sources --core data --evidence-out kanit_core.json` → no FAIL; review each OPEN.
+3. `python -m scripts.reconcile_sources --kredi "<Kredi workbook>" --evidence-out kanit_kredi.json` → no FAIL; each
+   OPEN answered by the owner / accountant (§8.4).
+4. Run the refresh in the app; check `GET /api/accuracy/status`: the `generation_id` is set, every source is `bound`.
+5. Restart the app; the same `generation_id` must be restored.
+6. Only then, in a separate reviewed PR: set the flag, record the evidence (counts only) as `reconciliation_ref`, and
+   promote individual metrics per §2.
+
+### 8.4 Still not verified (nothing was promoted)
+Kredi: DURUM / Kapalı meaning; the 11 positive-remaining installments outside the saved filter; the negative
+residual; the file of record; the snapshot date; payment-record reconciliation. Core: DQ-1, DQ-2, DQ-4, DQ-5, DQ-6;
+no approved definitions besides D-003; the 45-day age limit is provisional. Hedef is not in the manifest. Owner
+sources have no approval mechanism. Field-level audits for Customer 360, queue scoring and fair arithmetic remain.
+
+## 9. `data/sources.json` (private; lives in `data/`, never committed)
+```json
+{
+  "schema": "halsa-source-selection/1",
+  "core": {
+    "stock": {"file": "<stock export>.xlsx", "snapshot_date": "YYYY-MM-DD", "period_complete": true,
+              "approval": {"sha256": "<64 hex of this exact file>", "decision_ref": "D-xxx",
+                           "totals_consistent": true, "mapping_approved": true}},
+    "sales": {"file": "<sales export>.xlsx", "report_date": "YYYY-MM-DD", "period_start": "YYYY-MM-DD",
+              "period_end": "YYYY-MM-DD", "period_complete": true},
+    "aging": {"file": "<aging export>.xlsx", "snapshot_date": "YYYY-MM-DD"}
+  }
+}
+```
+- `file` is a basename inside the data folder; paths, traversal and unknown keys are rejected (the refresh fails).
+- `stock` and `sales` are required. Without the file, the newest files are used and recorded as `mtime_fallback`;
+  nothing can verify then.
+- Dates are business dates declared by the owner. They are never read from file timestamps.
+- `approval` applies **only** to the file with that SHA-256; any other revision gets `fingerprint_mismatch` and the
+  approval is ignored. An approval sets only `totals_consistent` / `mapping_approved`; it cannot promote a metric.

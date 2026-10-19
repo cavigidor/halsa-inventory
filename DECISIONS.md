@@ -778,3 +778,27 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   with the API, owner views and refresh (with transition / rollback / restart tests) is a **mandatory M8-ACCURACY-2
   acceptance criterion** (`docs/accuracy/release_gate.md` §6 A–F).
 - **Unchanged:** no financial calculation or business rule; Kredi DURUM unresolved; DQ-1/2/4/5/6 unresolved.
+
+### D-051 · 2026-10-19 · One source-generation manifest; declared source dates; revised Kredi layout (M8-ACCURACY-2)
+- **One generation, one manifest.** Every published core generation and every loaded owner source is described by a
+  manifest of SHA-256 fingerprints of the **original workbook bytes** plus declared dates, validation counts and
+  `SourceEvidence` (`services/generation.py`). Dashboard, API, Yönetim and refresh use it; evidence binds per source
+  only when the served fingerprint equals the recorded one. Mixed generations never combine.
+  A failed refresh keeps the previous dashboard, manifest, context and evidence. A restart restores only an exact match.
+- **Fingerprints follow bytes, not frames.** A formula, cell type or workbook revision change gives a new generation
+  even when pandas reads identical values (the PR #27 frame hash could not see these).
+- **Dates are declared, never inferred.** `data/sources.json` (private) selects the core files explicitly and declares
+  snapshot / report dates and period completeness. File timestamps are information only. Without the file the
+  modification-time choice is recorded as `mtime_fallback` and cannot verify. The 45-day operational limit is
+  provisional (`operational_freshness`, unapproved).
+- **Fingerprint-bound approvals.** A core source may carry an approval (D-xxx, `totals_consistent`,
+  `mapping_approved`) bound to one SHA-256. It is ignored for any other revision and cannot promote a metric by itself.
+- **Revised Kredi layout.** The owner's filtered `kredi takip` workbook is supported as layout `filtered_takip`
+  (two-row header, ERP control row, SUBTOTAL row, saved date filter). All rows are imported, hidden ones included.
+  Full-source totals are checked against the control row; filtered totals are checked separately against the
+  SUBTOTAL row. Negative remaining amounts and Kapalı rows with remaining amounts are reported, never repaired.
+  The saved filter is a view, never a payment fact. The real workbook was not opened in the cloud; the owner runs
+  `scripts/reconcile_sources.py` locally.
+- **No promotion.** `GENERATION_BOUND_API_EVIDENCE` stays False until the owner's real-data acceptance
+  (`docs/accuracy/release_gate.md` §8.3). No metric is VERIFIED. The Kredi module stays withheld. DURUM semantics,
+  D-003, DQ-5 and DQ-6 are unchanged.

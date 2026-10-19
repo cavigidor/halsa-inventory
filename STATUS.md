@@ -1,9 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-19 (M8-ACCURACY safety gate PR #27 merged at `a28b2b9`; M8-ACCURACY-2 is Current. Owner supplied a newly filtered Kredi workbook for source-validation handoff; no loan or other financial metric has been certified VERIFIED)._
+_Updated 2026-10-19 (M8-ACCURACY-2 on branch `claude/m8-accuracy-2-shared-evidence`, PR open, not merged: one source-generation manifest shared by dashboard / API / owner views / refresh; formula-aware core validation; revised Kredi layout support; owner-local reconciliation command. No metric is VERIFIED; `GENERATION_BOUND_API_EVIDENCE` stays False)._
 
 ## Git
-- **`main`:** M7 complete PR #24; readiness PR #25; M8 planning PR #26; M8-ACCURACY safety gate PR #27 squash merged (`a28b2b9`). M8-ACCURACY-2 is the next implementation checkpoint.
+- **`main`:** M7 complete PR #24; readiness PR #25; M8 planning PR #26; M8-ACCURACY safety gate PR #27 squash merged (`a28b2b9`).
+- **`claude/m8-accuracy-2-shared-evidence`:** M8-ACCURACY-2 (D-051); one PR, not merged.
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
 - **Owner's Mac folder:** current checkout state was not inspected in this checkpoint. Previous notes reported an older checkout; verify `git status` before pulling, protect private `.env`, data and SQLite, and follow `docs/owner_launch_checklist.md`. Browser/real-data acceptance remains owner-local.
 
@@ -18,7 +19,27 @@ forward (D-038) and is merged. M6-5 (Trodat), M6-6 Gider/Gelir and M6-6 Bütçe 
 BLOCKED and is not renumbered.
 **Milestone 7 — Sales Operating System: COMPLETE with M7-6** (PR #24 merged 2026-10-18 @ `de7eb43`). M7-1 (Customer 360), M7-2 (Günlük Satış), M7-3 (cross-sell + opportunity / territory intelligence), M7-4 (Fuar Merkezi) and M7-5 (Takip / CRM) are merged; M7-6 (Yönetim owner view + integration / performance / polish) is done. M6-4 stays blocked by a missing export; that does not block M7 (D-047).
 
-## M8-ACCURACY — factual integrity and fail-closed display (merged PR #27; ACCURACY-2 now Current)
+## M8-ACCURACY-2 — shared generation evidence and source verification (Current; PR open, not merged)
+- **Built (synthetic-verified):** `services/generation.py` (explicit `data/sources.json` selection, frozen source bytes,
+  SHA-256 manifest of core + owner sources, atomic install with the context, rollback, restart restore, owner reload);
+  `services/source_validation.py` (formula-aware core inspection, join counts); `services/accuracy.py` (new evidence
+  fields: declared vs latest-transaction dates, invalid dates, blanks, ambiguous headers, external references, date
+  contradictions, explicit selection; `operational_freshness` definition, provisional 45 days); the API gate binds per
+  request to the published manifest by served fingerprint; `GET /api/accuracy/status`; Kredi `filtered_takip` layout
+  (`services/importers/kredi.py`), schedule views (`services/kredi_schedule.py`) and `scripts/reconcile_sources.py`.
+- **Real files:** not opened in the cloud. The owner's revised Kredi workbook and the core exports must be checked
+  locally (`docs/accuracy/release_gate.md` §8.3); nothing here claims a real-data result.
+- **Not promoted:** no metric is VERIFIED; `GENERATION_BOUND_API_EVIDENCE` is False; Kredi stays withheld (DURUM,
+  11 positive-remaining rows outside the saved filter, negative residual, file of record, snapshot date, payment
+  reconciliation). Hedef is not in the manifest; owner sources have no approval mechanism yet.
+- **Tests (actual, cloud, synthetic, Python 3.12.3):**
+
+| Where | Command | Result |
+|---|---|---|
+| Branch before the new test files | `python -m pytest -q` | **1163 passed, 7 skipped, 2 xfailed** |
+| Branch with `test_m8_accuracy2.py` (29) and `test_m8_kredi_takip.py` (27) | same, also with `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled` | **1219 passed, 7 skipped, 2 xfailed** (skips: owner-local `local_data`; xfails: DQ-1, DQ-6 strict) |
+
+## M8-ACCURACY — factual integrity and fail-closed display (merged PR #27)
 - **Directive:** NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION (D-049). States VERIFIED / NOT_VERIFIED / INVALID;
   only VERIFIED outputs may be displayed.
 - **Implemented:** `services/accuracy.py` (register, definitions, blockers, runtime source evidence, fail-closed gate,

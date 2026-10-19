@@ -44,6 +44,74 @@ lists files and whether their headers fit. It never selects one and never uses m
 installment identities don't describe them, so they need their own rule set. An unknown loan type also fails
 closed.
 
+## Revised "kredi takip" layout (M8-ACCURACY-2, D-051)
+
+On 2026-10-19 the owner described a private, hand-maintained revision of the export (`kredi takip(1).xlsx`). It
+was **not opened in the cloud** (confidential; never sent to an AI provider). Support was built against synthetic
+workbooks that copy its *structure* only (`tests/fixtures/kredi_takip_synth.py`). The owner verifies the real file
+locally with `scripts/reconcile_sources.py` (below).
+
+| | `erp_export` (original) | `filtered_takip` (revised) |
+|---|---|---|
+| Row 1 | the 23 headers | summary formulas only: `SUBTOTAL(…)` or a reference to the SUBTOTAL row |
+| Headers | row 1 | row 2 (same 23 headers) |
+| Installments | rows 2…n | rows 3…n |
+| ERP control-total row | optional last row | required, after the installments |
+| SUBTOTAL row | none | required, the last row (totals of the **visible** rows only) |
+| Saved filter | none | AutoFilter on `VADE TARİHİ`; hidden rows |
+
+**Layout detection** (`probe_layout`) is deterministic and fails closed:
+- both row 1 and row 2 look like headers → `layout_ambiguous`;
+- row 2 has the headers but row 1 is not all summary formulas, or the last row is not all `SUBTOTAL` →
+  `layout_unsupported`; a row-1 formula of any other kind → `unsupported_summary_formula`;
+- no headers in row 1 or row 2 → the strict original checks (`header_missing`).
+
+**Rules for the revised layout:**
+- Every installment row is imported and validated, **including the rows the saved filter hides**. Hiding is a view:
+  each row carries `hidden_in_source`, and it is never read as "paid", "excluded" or "settled".
+- The control-total row is checked against **all** installment rows (`control_totals_mismatch` is an error; a
+  missing control row is `control_total_row_missing`). Neither the control row nor the SUBTOTAL row is ever counted
+  as an installment.
+- The SUBTOTAL row is checked separately against the **visible** rows (Excel `SUBTOTAL` functions 9/109, 2/102 and
+  3/103 are emulated). A mismatch is a warning (`filtered_subtotal_mismatch`); a missing cached value is
+  `filtered_subtotal_unverified`. Filtered totals never replace full-source totals.
+- Contract × installment-number uniqueness, the arithmetic invariants and missing-cache / error-cell checks are the
+  same as for the original layout.
+- Exceptions are reported, never repaired: a negative `KALAN TAKSİT TUTARI` (`negative_remaining_amount`), any other
+  negative amount (`negative_amount`), and `DURUM = Kapalı` with a positive remaining amount
+  (`status_closed_with_remaining`, info). Kapalı is **not** read as paid; a negative residual is **not** zeroed.
+- The summary adds layout, header row, saved-filter flag, filtered column names, hidden / visible counts, SUBTOTAL
+  and row-1 check counts, and the exception counts — still no codes, names or amounts.
+
+**Schedule views** (`services/kredi_schedule.py`, not displayed): year / month / lender / due-date breakdowns of
+principal, interest, BSMV, KKDF, installment total, paid and remaining amount. The currency is always the first group
+key, so currencies are never merged. A missing value makes its group total unknown (`None`) and is counted. Categories:
+A all installments; B a user-defined filter (`select`; the saved filter is ignored unless `visible_only` is asked for
+explicitly); C future with remaining > 0; D past due with remaining > 0; E due today with remaining > 0; F invalid or
+contradictory (negative / unknown amounts, Kapalı with a positive remaining amount). A date-range total is a selection
+total, not the company's complete debt, and a schedule is not a cash-flow forecast.
+
+**Owner-local reconciliation** (read-only; never writes the workbook):
+
+```
+python -m scripts.reconcile_sources --kredi "data/kredi takip(1).xlsx" --today 2026-10-19 \
+    [--snapshot-date YYYY-MM-DD] [--expect-sha256 <hash>] [--show-values] [--evidence-out kanit.json]
+```
+
+It prints the SHA-256 of the file and PASS / FAIL / OPEN checks: layout; full import (hidden rows included); saved
+filter visible / hidden counts; control totals vs all rows; SUBTOTAL vs visible rows; installment and paid + remaining
+identities; hidden rows that still record a positive remaining amount (past due / due today / future); negative
+remaining; Kapalı with positive remaining; past-due and due-today positive remaining; snapshot date (OPEN unless
+declared — the file time is shown as information only); currencies; visible rows per month (counts). Amounts appear
+**only** with `--show-values`, on the local console. `--evidence-out` writes fingerprints, counts and results only.
+Exit codes: 0 = no technical failure (OPEN business questions may remain), 1 = a technical check failed, 2 = unreadable
+input. A PASS is technical consistency, never financial approval.
+
+**Still open for the revised workbook** (the owner's description, recorded without values): 11 installments with a
+positive remaining amount in 2026 are outside the saved filter (10 due before 2026-10-19, 1 due on it); one Kapalı row
+records a negative remaining amount; DURUM / Kapalı meaning; why those rows were excluded; which workbook is the file
+of record; the business snapshot date; reconciliation against bank / payment records. The Kredi module stays withheld.
+
 ## Fields (SourceSpec `kredi_installments`)
 
 | Normalized | Exact header | Confidence | Policy |
@@ -152,7 +220,7 @@ verification check fails the import if a contract or lender code appears in it.
 - An Owner / Yönetim tab or API.
 - FX.
 - Revolving loans.
-- Which Kredi export is authoritative (Feb 2026 vs June 2026).
+- Which Kredi export is authoritative (Feb 2026 vs June 2026 vs the owner's revised `kredi takip` workbook).
 - Combination with receivables or other owner sources.
 
 D-026 applies: only legitimate, recorded company financing is modeled.
