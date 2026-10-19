@@ -39,7 +39,9 @@ def full(source="src", **kw):
     base = dict(available=True, layout_supported=True, report_date=rd, report_date_origin="declared",
                 period_start=dt.date(2025, 1, 1), period_end=rd, period_complete=True, error_cells=0,
                 missing_cached_formulas=0, missing_required_values=0, duplicate_records=0, join_unmatched=0,
-                join_ambiguous=0, joins_validated=True, totals_consistent=True, mapping_approved=True)
+                join_ambiguous=0, joins_validated=True, totals_consistent=True, mapping_approved=True,
+                blank_amount_cells=0, invalid_dates=0, ambiguous_headers=0, external_references=0, date_contradictions=0,
+                selection_explicit=True)
     base.update(kw)
     return ACC.SourceEvidence(source, **base)
 
@@ -198,14 +200,14 @@ def test_duplicate_header_columns_cannot_be_inspected_and_fail_closed():
 
 
 def test_collectors_never_assert_what_they_did_not_check():
-    frames = {"stock": SE.stock_frame(), "sales": pd.DataFrame(SE.sales_rows()), "aging": SE.aging_frame()}
-    snap = ACC.collect_snapshot(frames, TODAY)
-    for ev in snap.evidence.values():
+    evs = ACC.collect_core_evidence(SE.stock_frame(), pd.DataFrame(SE.sales_rows()), SE.aging_frame(), today=TODAY)
+    for ev in evs.values():
         assert ev.joins_validated is None and ev.totals_consistent is None
         assert ev.period_complete is None and ev.mapping_approved is None
         assert ev.missing_cached_formulas is None                        # pandas cannot tell; never claimed as 0
-    assert snap.evidence["aging"].missing_required_values is None
-    assert snap.evidence["stock"].report_date is None and snap.evidence["aging"].report_date is None
+        assert ev.selection_explicit is None and ev.external_references is None
+    assert evs["aging"].missing_required_values is None
+    assert all(ev.report_date is None for ev in evs.values())         # no declared date → unknown
 
 
 def test_default_evidence_is_never_clean():
@@ -242,11 +244,16 @@ def test_a_promoted_metric_would_still_be_withheld_by_the_api(monkeypatch):
 def test_production_register_refuses_promotion_until_generation_bound_api_evidence():
     assert ACC.GENERATION_BOUND_API_EVIDENCE is False
     reg = dict(ACC.REGISTER)
-    reg["stock.reorder"] = dataclasses.replace(reg["stock.reorder"], blockers=(), definitions=(), certified=S,
+    reg["stock.reorder"] = dataclasses.replace(reg["stock.reorder"], blockers=(),
+                                               definitions=("operational_freshness",), certified=S,
                                                approval_refs=("D-999",), regression_tests=("t",),
                                                reconciliation_ref="synthetic")
+    defs = dict(ACC.DEFINITIONS, operational_freshness=ACC.Definition("operational_freshness", "x", True, "D-999"))
     with pytest.raises(ACC.RegisterError, match="generation-bound"):
-        ACC.validate_register(reg, production=True)
+        ACC.validate_register(reg, defs, production=True)
+    reg["stock.reorder"] = dataclasses.replace(reg["stock.reorder"], definitions=())
+    with pytest.raises(ACC.RegisterError, match="freshness"):          # the 45-day rule is not an approved policy
+        ACC.validate_register(reg, defs, production=True)
 
 
 def test_evidence_from_another_generation_never_certifies():
@@ -268,17 +275,6 @@ def test_bound_to_drops_evidence_of_an_older_generation():
     assert g2.decide("t.m").state == NV
     with pytest.raises(TypeError):
         g2.snapshot.evidence["src"] = full()                             # immutable snapshot
-
-
-def test_generation_id_follows_the_data_not_the_file_name():
-    frames = {"stock": SE.stock_frame(), "sales": pd.DataFrame(SE.sales_rows()), "aging": SE.aging_frame()}
-    again = {"stock": SE.stock_frame(), "sales": pd.DataFrame(SE.sales_rows()), "aging": SE.aging_frame()}
-    gid = ACC.generation_id(frames)
-    assert gid and gid == ACC.generation_id(again)
-    changed = dict(again)
-    changed["stock"] = again["stock"].copy()
-    changed["stock"].loc[0, "TOPLAM STOK MİKTAR "] = 6                      # one cell
-    assert ACC.generation_id(changed) != gid
 
 
 def test_refresh_with_changed_sources_publishes_a_new_generation(tmp_path):

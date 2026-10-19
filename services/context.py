@@ -57,6 +57,10 @@ class AgentContext(dict):
     sales_c360_handoff = None
     # M7-6: structural data-quality counts for the Yönetim known-issues panel (counts only, no rows)
     data_quality = None
+    # M8-ACCURACY-2: the source generation this context was computed from: {"core_id": …, "served": {source: sha256}}.
+    # None for a context not built from a frozen, recorded selection (it then receives no verification evidence).
+    generation = None
+    generation_manifest = None
 
 
 def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sources=None, frames=None):

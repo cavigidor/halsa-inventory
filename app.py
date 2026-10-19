@@ -27,6 +27,7 @@ from services import fair_center as FC
 from services import crm as CRM
 from services import owner_view as OV
 from services import accuracy as ACC
+from services import generation as GEN
 from services import action_sources  # noqa: F401  (registers the built-in deterministic sources)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -72,11 +73,34 @@ def _route_template(scope):
     return None
 
 
+def served_fingerprints():
+    """Fingerprints of the source revisions the API is SERVING right now: the live context's generation (core) and the
+    owner views currently installed. Evidence binds only to these (services/generation.Manifest.bound_snapshot)."""
+    served = {}
+    try:
+        repo = app.dependency_overrides.get(get_repo, get_repo)()
+        ctx = repo.current() if repo is not None else None
+        served.update(((getattr(ctx, "generation", None) or {}).get("served")) or {})
+    except Exception:
+        pass
+    try:
+        owner = app.dependency_overrides.get(get_owner, get_owner)()
+        for k, e in owner.snapshot().items():
+            served[k] = e.get("fingerprint")
+    except Exception:
+        pass
+    return served
+
+
 def accuracy_gate():
-    """The gate for this request (production: services.accuracy.current_gate; no runtime switch exists).
-    No evidence snapshot is passed: until M8-ACCURACY-2 shares the published generation's snapshot with the API
-    (ACC.GENERATION_BOUND_API_EVIDENCE), every source-bound metric is withheld here, whatever the dashboard shows."""
-    return ACC.current_gate()
+    """The gate for this request (production: services.accuracy.current_gate; no runtime switch exists), bound to the
+    ONE published generation (M8-ACCURACY-2): evidence only for sources whose served data has the recorded fingerprint.
+    No published generation → no evidence → every source-bound output withheld."""
+    store = getattr(app.state, "generations", None)
+    m = store.current() if store is not None else None
+    if m is None:
+        return ACC.current_gate()
+    return ACC.current_gate(snapshot=m.bound_snapshot(served_fingerprints()), expected_generation=m.generation_id)
 
 
 @app.middleware("http")
@@ -127,13 +151,18 @@ def _warm_up(repo, c360=None):
 @app.on_event("startup")
 def _startup():
     ST.init_db()
-    app.state.repo = ContextRepository(data_folder=DATA_FOLDER, inflation_rate=INFLATION)
+    # M8-ACCURACY-2: restore the published generation only if the dashboard and every source still match it
+    app.state.generations = GEN.GenerationStore()
+    app.state.generations.restore(GEN.manifest_path(DASHBOARD_PATH), DASHBOARD_PATH, DATA_FOLDER)
+    app.state.repo = ContextRepository(data_folder=DATA_FOLDER, inflation_rate=INFLATION,
+                                       generation_store=app.state.generations)
     app.state.provider = get_provider()
     app.state.agent = BusinessActionAgent(app.state.provider)
     app.state.c360 = C360.Customer360Repository(DATA_FOLDER, app.state.repo, hedef_path=HEDEF_PATH,
                                                 hedef_snapshot=HEDEF_SNAPSHOT_DATE, background=True)
     # M7-6 Yönetim: owner sources only from explicit env paths; loaded lazily when the tab is first opened.
-    app.state.owner = OV.OwnerRepository(OV.config_from_env(), background=True)
+    app.state.owner = OV.OwnerRepository(OV.config_from_env(), background=True,
+                                         on_record=lambda k, r: app.state.generations.replace_owner(k, r))
     if WARMUP_CONTEXT:
         threading.Thread(target=_warm_up, args=(app.state.repo, app.state.c360), name="context-warmup",
                          daemon=True).start()
@@ -258,10 +287,47 @@ def context_refresh(repo: ContextRepository = Depends(get_repo)):
     `python -m services.refresh`. Deterministic: never calls the AI provider; action state and AI cache stay.
     On success the verified context is installed in this server and dashboard.html is replaced atomically."""
     rep = RF.run_refresh(DATA_FOLDER, DASHBOARD_PATH, previous_context=repo.current(),
-                         install=repo.replace_context, inflation_rate=INFLATION)
+                         install=lambda staged: _install_generation(repo, staged), inflation_rate=INFLATION)
     rep = ACC.redact_refresh_report(rep, accuracy_gate())          # M8-ACCURACY: no unverified totals in the report
     body = S.RefreshReport(**rep).model_dump()
     return JSONResponse(status_code=409 if rep["step"] == "busy" else 200, content=body)
+
+
+def _install_generation(repo, staged):
+    """Install the verified context AND its generation together (M8-ACCURACY-2). If the generation cannot be
+    installed, the previous context is put back, so context and evidence never diverge."""
+    store = getattr(app.state, "generations", None)
+    previous = repo.current()
+    repo.replace_context(staged)
+    if store is None:
+        return
+    try:
+        store.install(getattr(staged, "generation_manifest", None))
+    except Exception:
+        if previous is not None:
+            repo.replace_context(previous)
+        raise
+
+
+@app.get("/api/accuracy/status")
+def accuracy_status():
+    """System information: the published generation (fingerprints, declared dates, validation counts — no values) and
+    the verification state of every registered output for the data being served. No business number."""
+    store = getattr(app.state, "generations", None)
+    m = store.current() if store is not None else None
+    gate = accuracy_gate()
+    served = served_fingerprints()
+    sources = []
+    for r in ((*m.core, *m.owner) if m is not None else ()):
+        sources.append({"key": r.key, "role": r.role, "source_type": r.source_type, "date_kind": r.date_kind,
+                        "file": r.file, "sha256": r.sha256, "selection_origin": r.selection_origin,
+                        "declared": GEN._jsonable(r.declared), "bound": served.get(r.key) == r.sha256})
+    return {"generation_id": m.generation_id if m else None, "core_id": m.core_id if m else None,
+            "selection_origin": m.selection_origin if m else None,
+            "restore_reason": getattr(store, "restore_reason", None) if store else None,
+            "generation_bound_api_evidence": ACC.GENERATION_BOUND_API_EVIDENCE, "sources": sources,
+            "metrics": [{"key": k, "state": gate.decide(k).state.value, "codes": list(gate.decide(k).codes)}
+                        for k in ACC.REGISTER], "ai_used": False}
 
 
 # ---------------- daily actions ----------------

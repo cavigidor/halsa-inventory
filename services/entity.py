@@ -9,10 +9,11 @@ from services import context as CTX
 
 
 class ContextRepository:
-    def __init__(self, data_folder=None, context=None, inflation_rate=None):
+    def __init__(self, data_folder=None, context=None, inflation_rate=None, generation_store=None):
         self._folder = data_folder
         self._ctx = context
         self._infl = inflation_rate
+        self._generations = generation_store   # M8-ACCURACY-2: build from the restored generation's exact bytes
         self._cust_idx = None
         self._prod_idx = None
         self._lock = threading.Lock()   # warm-up thread and requests never build twice in parallel
@@ -32,13 +33,38 @@ class ContextRepository:
                     self.last_error = "Veri klasörü ayarlı değil."
                     raise RuntimeError(self.last_error)
                 try:
-                    self._ctx = CTX.build_context(self._folder, inflation_rate=self._infl)
+                    self._ctx = self._build()
                 except Exception as e:
                     self.last_error = f"{type(e).__name__}: {str(e)[:200]}"
                     raise
                 self.last_error = None
                 self._cust_idx = self._prod_idx = None
         return self._ctx
+
+    def _build(self):
+        """With a restored generation: freeze the recorded files, require their recorded fingerprints, and build from
+        those bytes (the context then carries that generation). Otherwise (no generation, or a file changed since it
+        was published): the legacy build, which carries no generation and therefore receives no evidence."""
+        store = self._generations
+        m = store.current() if store is not None else None
+        if m is not None and m.core:
+            from services import generation as GEN
+            recs = {r.key: r for r in m.core if r.key != "liste"}
+            paths = {k: (os.path.join(self._folder, recs[k].file) if k in recs else None) for k in GEN.CORE_KEYS}
+            try:
+                frozen = GEN.freeze(paths)
+                same = all(frozen[k].sha256 == recs[k].sha256 for k in recs) and set(frozen) == set(recs)
+            except OSError:
+                same = False
+            if same:
+                frames = GEN.frames_from_frozen(frozen)
+                ctx = CTX.build_context(self._folder, inflation_rate=self._infl, sources=paths, frames=frames)
+                ctx.generation = {"core_id": m.core_id, "served": {r.key: r.sha256 for r in m.core}}
+                ctx.generation_manifest = m
+                return ctx
+            store.install(None, keep_owner=False)          # the published generation no longer matches the files
+            store.restore_reason = "source_changed"
+        return CTX.build_context(self._folder, inflation_rate=self._infl)
 
     def refresh(self):
         return self.context(refresh=True)

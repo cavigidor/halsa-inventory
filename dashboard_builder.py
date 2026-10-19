@@ -224,12 +224,15 @@ def m_collections(path,df=None):
     return rows, owed_map
 
 # ---------- oluştur ----------
-def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True,own_panel=True,gate=None):
+def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True,own_panel=True,gate=None,manifest=None):
     """sources/frames (M5-5): a frozen source selection and the already-read raw frames, so a controlled
     refresh builds from exactly what it validated. stats_out (dict): filled with build totals for verification.
     gate (M8-ACCURACY): the factual-integrity gate; default = the production gate (services/accuracy.py). Every
     module, stat card and server-driven panel whose metric is not VERIFIED is WITHHELD from the HTML: its rows are
-    never embedded, only a neutral notice. The computations themselves are unchanged."""
+    never embedded, only a neutral notice. The computations themselves are unchanged.
+    manifest (M8-ACCURACY-2): the source generation whose frozen bytes `frames` were parsed from (the controlled
+    refresh passes both from one frozen read). Evidence is taken ONLY from it; without a manifest there is no evidence
+    and every source-bound output is withheld."""
     from services import accuracy as ACC
     today=today or dt.date.today()
     src=sources or select_sources(data_folder); fr=dict(frames or {})
@@ -238,9 +241,10 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     if fr.get('stock') is None: fr['stock']=read_stock(sp)
     if ep and fr.get('sales') is None: fr['sales']=read_sales_raw(ep)
     if ap and fr.get('aging') is None: fr['aging']=read_aging_raw(ap)
-    # Evidence is bound to THIS generation (a content hash of exactly these frames); evidence held for any other
-    # generation is dropped, never reused (services/accuracy.Gate.bound_to).
-    snapshot=ACC.collect_snapshot({'stock':fr.get('stock'),'sales':fr.get('sales'),'aging':fr.get('aging')},today=today)
+    # Evidence only from the generation these frames came from (services/generation.Manifest); evidence held for any
+    # other generation is dropped, never reused (services/accuracy.Gate.bound_to).
+    snapshot=manifest.core_snapshot() if manifest is not None else ACC.EvidenceSnapshot(None,{})
+    core_gen=manifest.core_id if manifest is not None else ''
     gate=(gate or ACC.current_gate(today=today)).bound_to(snapshot)
     low,over,total=m_stock(sp,fr.get('stock'))
     coll,owed=([],{})
@@ -329,14 +333,14 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     meta={'date':d_tr,'stock':os.path.basename(sp) if sp else '','sales':os.path.basename(ep) if ep else '',
           'aging':os.path.basename(ap) if ap else '','tiers':tier_counts,'total':total,'has_aging':has_aging,
           'asof':_asof_iso(sdf),'show_tiers':show_tiers,'withheld_stats':withheld_stats,
-          'withheld_panels':panel_notice,'accuracy_policy':ACC.POLICY_VERSION,'generation':snapshot.generation_id or ''}
+          'withheld_panels':panel_notice,'accuracy_policy':ACC.POLICY_VERSION,'generation':core_gen}
     with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel,opp_panel=opp_panel,fair_panel=fair_panel,crm_panel=crm_panel,own_panel=own_panel))
     if stats_out is not None:
         # Internal build totals for the refresh's context ↔ dashboard reconciliation (never displayed as such).
         stats_out.update({'asof':meta['asof'],'overdue_total':overdue_total,'overstock_value':over_val,
                           'tabs':list(modules.keys()),'products':total,'lapsed':len(lap),'low':len(low),
                           'over':len(over),'coll':len(coll),'sources':{k:(os.path.basename(v) if v else None) for k,v in src.items()},
-                          'accuracy':{k:d.state.value for k,d in decisions.items()},'generation':snapshot.generation_id})
+                          'accuracy':{k:d.state.value for k,d in decisions.items()},'generation':core_gen or None})
     return out_path,{'low':len(low),'over':len(over),'lapsed':len(lap),'coll':len(coll),
                      'momentum':len(momentum),'margin':len(margin),'ordersize':len(ordersize),
                      'osmove':len(osmove),'risk':len(risk)}

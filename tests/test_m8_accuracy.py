@@ -55,7 +55,9 @@ def clean(source="src", **kw):
     base = dict(available=True, layout_supported=True, report_date=rd, report_date_origin="declared",
                 period_start=dt.date(2025, 1, 1), period_end=rd, period_complete=True, error_cells=0,
                 missing_cached_formulas=0, missing_required_values=0, duplicate_records=0, join_unmatched=0,
-                join_ambiguous=0, joins_validated=True, totals_consistent=True, mapping_approved=True)
+                join_ambiguous=0, joins_validated=True, totals_consistent=True, mapping_approved=True,
+                blank_amount_cells=0, invalid_dates=0, ambiguous_headers=0, external_references=0, date_contradictions=0,
+                selection_explicit=True)
     base.update(kw)
     return ACC.SourceEvidence(source, **base)
 
@@ -253,7 +255,8 @@ def test_sales_evidence_counts_missing_amounts_duplicates_and_reports_the_data_d
     df = pd.concat([df, df.iloc[[3]]], ignore_index=True)          # exact duplicate line
     ev = ACC.collect_core_evidence(sales_df=df)["sales"]
     assert ev.missing_required_values == 1 and ev.duplicate_records == 1
-    assert ev.report_date == SE.AS_OF and ev.report_date_origin == "max_transaction_date"
+    # M8-ACCURACY-2: the newest transaction date is an OBSERVED fact, never the report date
+    assert ev.latest_transaction_date == SE.AS_OF and ev.report_date is None and ev.report_date_origin is None
     assert ev.joins_validated is None and ev.totals_consistent is None      # never assumed
 
 
@@ -355,17 +358,28 @@ def test_unaffected_verified_metric_renders_unchanged_beside_an_invalid_one(tmp_
     ACC.validate_register(reg)                                  # a synthetic copy: not the production register
     with pytest.raises(ACC.RegisterError):                      # …the production rules refuse any promotion today
         ACC.validate_register(reg, production=True)
-    gid = ACC.generation_id(_frames(data))
-    g = ACC.Gate(reg, ACC.DEFINITIONS, ACC.EvidenceSnapshot(gid, {"stock": clean("stock")}), TODAY, gid)
+    from services import generation as GEN
+    src = db.select_sources(data)
+    frozen = GEN.freeze(src)
+    frames = GEN.frames_from_frozen(frozen)
+    m = GEN.build_manifest(frozen, frames, {}, "explicit", TODAY)
+    clean_snap = ACC.EvidenceSnapshot(m.generation_id, {"stock": clean("stock")})
+    g = ACC.Gate(reg, ACC.DEFINITIONS, clean_snap, TODAY, m.generation_id)
+    m_clean = GEN.Manifest(m.created_at, tuple(dataclasses.replace(r, evidence=clean(r.key)) if r.key == "stock" else r
+                                               for r in m.core), selection_origin="explicit")
     out = str(tmp_path / "d.html")
-    db.build(data, out, today=TODAY, gate=g)
+    db.build(data, out, today=TODAY, gate=ACC.Gate(reg, ACC.DEFINITIONS, None, TODAY), frames=frames, sources=src,
+             manifest=m_clean)
     blob = _data_blob(open(out, encoding="utf-8").read())
-    low, _, _ = db.m_stock(db.select_sources(data)["stock"])
+    low, _, _ = db.m_stock(src["stock"])
     assert blob["reorder"]["rows"] == json.loads(json.dumps(low)) and "withheld" not in blob["reorder"]
     assert blob["margin"]["rows"] == [] and blob["margin"]["withheld"]["verification"] == "invalid"
-    # the collected evidence (real frames) would NOT have verified it: stock has no report date, nothing reconciled
-    g_real = ACC.Gate(reg, ACC.DEFINITIONS, None, TODAY).bound_to(ACC.collect_snapshot(_frames(data)))
-    assert g_real.decide("stock.reorder").state == NV
+    # the evidence actually collected from the synthetic files would NOT verify it (no declared date, joins unknown…)
+    out2 = str(tmp_path / "d2.html")
+    db.build(data, out2, today=TODAY, gate=ACC.Gate(reg, ACC.DEFINITIONS, None, TODAY), frames=frames, sources=src,
+             manifest=m)
+    assert _data_blob(open(out2, encoding="utf-8").read())["reorder"]["rows"] == []
+    assert g.decide("stock.reorder").state == S                    # (the gate itself accepts clean bound evidence)
 
 
 def _frames(data):

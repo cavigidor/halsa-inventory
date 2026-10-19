@@ -2,9 +2,12 @@
 
 One implementation behind both `POST /api/context/refresh` and `python -m services.refresh`.
 
-- Frozen sources: the stock, sales and (optional) aging workbooks are selected once and read once. The
-  same in-memory raw frames feed validation, the staged context and the staged dashboard, so all three
-  come from exactly the same content.
+- Frozen sources: the stock, sales and (optional) aging workbooks are selected once (explicitly via
+  `data/sources.json`, else the legacy modification-time choice, recorded as not explicit) and their BYTES are read
+  once (M8-ACCURACY-2). Validation, the formula-aware inspection, the staged context, the staged dashboard and the
+  generation manifest all come from those same bytes.
+- The manifest (`<dashboard>.generation.json`: fingerprints, dates, validation counts and evidence; no values) is
+  swapped together with the dashboard and installed together with the context; a failure keeps all three previous.
 - Only the current M5 sources are refreshed. No M6 report is ingested.
 - Nothing live changes before verification. The staged dashboard is written next to the live one
   (`dashboard.html.new`) and moved in with os.replace; the staged context is installed through
@@ -31,6 +34,7 @@ if ROOT not in sys.path:
 import config as C                     # noqa: E402
 import dashboard_builder as db         # noqa: E402
 from services import context as CTX    # noqa: E402
+from services import generation as GEN  # noqa: E402
 
 log = logging.getLogger("refresh")
 
@@ -65,8 +69,10 @@ class StepError(Exception):
 
 def paths_for(dashboard_path):
     root, ext = os.path.splitext(dashboard_path)
+    mpath = GEN.manifest_path(dashboard_path)
     return {"live": dashboard_path, "staged": dashboard_path + ".new", "prev": f"{root}.prev{ext or '.html'}",
-            "prev_tmp": f"{root}.prev{ext or '.html'}.tmp", "lock": dashboard_path + ".refresh.lock"}
+            "prev_tmp": f"{root}.prev{ext or '.html'}.tmp", "lock": dashboard_path + ".refresh.lock",
+            "manifest": mpath, "manifest_staged": mpath + ".new", "manifest_prev_tmp": mpath + ".prev.tmp"}
 
 
 # ---------------- one refresh at a time (server and CLI) ----------------
@@ -107,9 +113,9 @@ def _check(checks, name, ok, detail=""):
     return ok
 
 
-def _read(checks, errors, label, path, reader):
+def _read(checks, errors, label, path, reader, frozen=None):
     try:
-        df = reader(path)
+        df = reader(frozen.stream() if frozen is not None else path)   # M8-ACCURACY-2: the frozen bytes
     except Exception as e:                 # not an Excel workbook, corrupt, locked …
         log.warning("refresh: cannot read %s (%s)", os.path.basename(path), type(e).__name__)
         _check(checks, f"{label}: okunabilir Excel", False, os.path.basename(path))
@@ -137,15 +143,17 @@ def live_dashboard_date(dashboard_path):
         return None
 
 
-def validate(sources, previous_date=None, today=None):
-    """Validate the frozen selection. Returns dict(ok, checks, errors, warnings, frames, as_of_data_date)."""
+def validate(sources, previous_date=None, today=None, frozen=None):
+    """Validate the frozen selection. Returns dict(ok, checks, errors, warnings, frames, as_of_data_date).
+    `frozen` ({key: FrozenSource}): parse these bytes instead of re-reading the files."""
     checks, errors, warnings, frames = [], [], [], {}
+    frozen = frozen or {}
     today = today or dt.date.today()
     sp, ep, ap = sources.get("stock"), sources.get("sales"), sources.get("aging")
 
     # stock (header on row 4, as dashboard_builder reads it)
     if _check(checks, "Stok dosyası seçildi", bool(sp), os.path.basename(sp) if sp else ""):
-        st = _read(checks, errors, "Stok", sp, db.read_stock)
+        st = _read(checks, errors, "Stok", sp, db.read_stock, frozen.get("stock"))
         if st is not None and _columns(checks, errors, "Stok", st, STOCK_REQUIRED,
                                        f" Başlık satırı {db.STOCK_HEADER_ROW + 1}. satırda olmalı."):
             n = int(st[db.SC["code"]].notna().sum())
@@ -159,7 +167,7 @@ def validate(sources, previous_date=None, today=None):
     # sales
     as_of = None
     if _check(checks, "Satış dosyası seçildi", bool(ep), os.path.basename(ep) if ep else ""):
-        sa = _read(checks, errors, "Satış", ep, db.read_sales_raw)
+        sa = _read(checks, errors, "Satış", ep, db.read_sales_raw, frozen.get("sales"))
         if sa is not None and _columns(checks, errors, "Satış", sa, SALES_REQUIRED):
             opt_missing = [c for c in SALES_OPTIONAL if c not in sa.columns]
             if opt_missing:
@@ -186,7 +194,7 @@ def validate(sources, previous_date=None, today=None):
 
     # aging (optional, as today; validated when selected)
     if ap:
-        ag = _read(checks, errors, "Cari (yaşlandırma)", ap, db.read_aging_raw)
+        ag = _read(checks, errors, "Cari (yaşlandırma)", ap, db.read_aging_raw, frozen.get("aging"))
         if ag is not None:
             cols = [str(c).strip() for c in ag.columns]
             view = ag.copy()
@@ -253,6 +261,11 @@ def verify(ctx, stats, html_path, expected_as_of, previous_context=None, drop=PL
             errors.append(f"Bağlam ve pano tutmuyor: {label}.")
     if not stats.get("products"):
         errors.append("Oluşturulan veride ürün yok.")
+    # M8-ACCURACY-2: the staged dashboard, the staged context and the manifest describe one generation
+    m = getattr(ctx, "generation_manifest", None)
+    if m is not None:
+        if (getattr(ctx, "generation", None) or {}).get("core_id") != m.core_id or stats.get("generation") != m.core_id:
+            errors.append("Pano, bağlam ve kaynak üretimi (manifest) aynı veri üretimine ait değil.")
     # staged dashboard structure
     try:
         size = os.path.getsize(html_path)
@@ -296,6 +309,21 @@ def _report(**kw):
     return base
 
 
+def _restore_previous(p, had_live, had_manifest):
+    """Put the previous dashboard AND its manifest back (they describe one generation). True when restored."""
+    ok = True
+    for live, tmp, had in (("live", "prev_tmp", had_live), ("manifest", "manifest_prev_tmp", had_manifest)):
+        try:
+            if had and os.path.exists(p[tmp]):
+                os.replace(p[tmp], p[live])
+            elif not had:
+                _remove(p[live])
+        except Exception:
+            log.exception("refresh: could not restore the previous %s", live)
+            ok = False
+    return ok and had_live
+
+
 def _remove(path):
     try:
         os.remove(path)
@@ -335,15 +363,27 @@ def _prev_date(previous_context, dashboard_path):
 
 def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, drop):
     prev_date = _prev_date(previous_context, p["live"])
-    sources = db.select_sources(data_folder)                       # frozen for the whole refresh
-    names = {k: (os.path.basename(v) if v else None) for k, v in sources.items()}
-    common = {"sources": names, "previous_as_of_data_date": prev_date, "as_of_data_date": prev_date}
+    common = {"sources": {"stock": None, "sales": None, "aging": None}, "previous_as_of_data_date": prev_date,
+              "as_of_data_date": prev_date}
     warnings = []
-    _remove(p["staged"])
-    _remove(p["prev_tmp"])
+    for k in ("staged", "prev_tmp", "manifest_staged", "manifest_prev_tmp"):
+        _remove(p[k])
     try:
+        # 0. explicit selection, one frozen read of every selected workbook (M8-ACCURACY-2)
+        try:
+            sources, declarations, origin = GEN.select_core(data_folder)
+        except GEN.SelectionError as e:
+            raise StepError("validate", f"Kaynak seçimi geçersiz: {e}.") from None
+        common["sources"] = {k: (os.path.basename(v) if v else None) for k, v in sources.items()}
+        try:
+            frozen = GEN.freeze(sources)
+        except OSError:
+            raise StepError("validate", "Seçilen kaynak dosyalarından biri okunamadı.") from None
+        if origin != "explicit":
+            warnings.append("Kaynak dosyalar açıkça seçilmedi (data/sources.json yok); dosya değişiklik tarihine "
+                            "göre seçim yapıldı. Bu üretim doğrulama kanıtı sayılmaz.")
         # 1. validate — nothing live is touched
-        v = validate(sources, prev_date, today)
+        v = validate(sources, prev_date, today, frozen=frozen)
         common.update(candidate_as_of_data_date=v["as_of_data_date"], checks=v["checks"])
         if not v["ok"]:
             raise StepError("validate", v["errors"][0] if len(v["errors"]) == 1
@@ -353,9 +393,14 @@ def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, 
 
         # 2. build into staging (in memory + dashboard.html.new)
         try:
+            manifest = GEN.build_manifest(frozen, frames, declarations, origin, today)
             staged = CTX.build_context(data_folder, inflation_rate=inflation_rate, sources=sources, frames=frames)
+            staged.generation = {"core_id": manifest.core_id, "served": {r.key: r.sha256 for r in manifest.core}}
+            staged.generation_manifest = manifest
             stats = {}
-            db.build(data_folder, p["staged"], today=today, sources=sources, frames=frames, stats_out=stats)
+            db.build(data_folder, p["staged"], today=today, sources=sources, frames=frames, stats_out=stats,
+                     manifest=manifest)
+            GEN.write_manifest(p["manifest_staged"], manifest)
         except Exception as e:
             log.exception("refresh: build failed")
             raise StepError("build", f"Bağlam veya pano oluşturulamadı ({type(e).__name__}).") from None
@@ -370,25 +415,24 @@ def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, 
 
         # 4. swap: dashboard atomically, then the context; keep the previous dashboard
         had_live = os.path.exists(p["live"])
+        had_manifest = os.path.exists(p["manifest"])
         try:
             if had_live:
                 shutil.copy2(p["live"], p["prev_tmp"])
+            if had_manifest:
+                shutil.copy2(p["manifest"], p["manifest_prev_tmp"])
             os.replace(p["staged"], p["live"])
+            os.replace(p["manifest_staged"], p["manifest"])
         except Exception as e:
             log.exception("refresh: dashboard swap failed")
+            _restore_previous(p, had_live, had_manifest)
             raise StepError("swap", f"Pano değiştirilemedi ({type(e).__name__}).") from None
         if install is not None:
             try:
                 install(staged)
             except Exception as e:
                 log.exception("refresh: context install failed")
-                restored = False
-                if had_live and os.path.exists(p["prev_tmp"]):
-                    try:
-                        os.replace(p["prev_tmp"], p["live"])     # put the previous dashboard back: no mismatch
-                        restored = True
-                    except Exception:
-                        log.exception("refresh: could not restore the previous dashboard")
+                restored = _restore_previous(p, had_live, had_manifest)
                 raise StepError("swap", f"Yeni bağlam devreye alınamadı ({type(e).__name__}); "
                                 + ("önceki pano geri yüklendi." if restored else "pano geri yüklenemedi.")) from None
         if had_live:
@@ -407,8 +451,8 @@ def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, 
         log.exception("refresh: unexpected failure")
         return _report(step="build", message=f"Beklenmeyen hata ({type(e).__name__}).", **common)
     finally:
-        _remove(p["staged"])
-        _remove(p["prev_tmp"])
+        for k in ("staged", "prev_tmp", "manifest_staged", "manifest_prev_tmp"):
+            _remove(p[k])
 
 
 # ---------------- CLI ----------------

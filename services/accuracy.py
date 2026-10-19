@@ -23,9 +23,9 @@ How the decision is made (``Gate.decide``), always fail-closed:
    required values, duplicates, join problems, partial periods, contradictory totals, unsupported layouts, unapproved
    mappings) can only DOWNGRADE that ceiling. Missing evidence is itself a downgrade (NOT_VERIFIED).
 3. A combined output is the worst of its own state and the state of every output it depends on.
-4. Evidence is bound to ONE source generation (`EvidenceSnapshot.generation_id`, a content hash of the exact frames
-   the outputs were computed from). A gate uses evidence only when the snapshot's generation equals the generation it
-   is deciding for; evidence from another (earlier) generation never certifies anything.
+4. Evidence is bound to ONE source generation (`services/generation.Manifest`: SHA-256 of every selected workbook's
+   original bytes). A consumer gets evidence for a source only when the data it SERVES came from exactly the recorded
+   bytes (`Manifest.bound_snapshot`); evidence from another generation never certifies anything.
 5. Time: an OPERATIONAL output (current state, e.g. stock levels, receivables) also needs a fresh source; a HISTORICAL
    output (a closed past period) needs a complete, dated period but no age limit. Age never approves anything.
 
@@ -35,6 +35,7 @@ metric is a reviewed code change that certifies it with its evidence.
 """
 from __future__ import annotations
 
+import dataclasses as _dc
 import datetime as dt
 import enum
 import hashlib
@@ -51,11 +52,12 @@ WITHHELD_CODE = "accuracy_withheld"
 WITHHELD_HTTP_STATUS = 409          # the resource exists; its verification state conflicts with displaying it
 MAX_REASONS_SHOWN = 4               # keep the father-facing notice short
 POLICY_VERSION = "m8-accuracy-1"    # embedded in every gated dashboard build (served `/` checks it)
-DEFAULT_OPERATIONAL_MAX_AGE_DAYS = 45
+DEFAULT_OPERATIONAL_MAX_AGE_DAYS = 45      # PROVISIONAL engineering default, not an owner-approved policy
 TEMPORAL_KINDS = ("operational", "historical")
-# M8-ACCURACY-2 acceptance criterion (mandatory): one generation-bound evidence snapshot shared by the dashboard, the
-# API, the owner-source views and the refresh, replaced atomically with each published generation. Until that exists,
-# the production register refuses any VERIFIED certification (validate_register) and API routes get no evidence.
+# M8-ACCURACY-2: the generation-bound evidence mechanism (services/generation.py) is implemented and shared by the
+# dashboard, the API, the owner views and the refresh, with synthetic transition tests. It stays False until the owner
+# has run the documented real-data acceptance (docs/accuracy/release_gate.md §8): while False, the production register
+# refuses any VERIFIED certification (validate_register), so no production metric can be promoted.
 GENERATION_BOUND_API_EVIDENCE = False
 
 
@@ -143,6 +145,8 @@ DEFINITIONS: dict[str, Definition] = {d.key: d for d in (
     Definition("trodat_sku_mapping", "Trodat model → Halsa stok kodu eşlemesi ve birimi", question_ref=f"{_Q} #6"),
     Definition("last_order_date_basis", "'Son sipariş tarihi' esası (iptal / teslim edilmemiş siparişler)",
                question_ref=f"{_Q} #3"),
+    Definition("operational_freshness", "Güncel durum analizleri için kaynak güncelliği politikası (45 gün geçici)",
+               question_ref="docs/accuracy/release_gate.md"),
 )}
 
 
@@ -330,6 +334,18 @@ REGISTER: dict[str, Metric] = {m.key: m for m in (
        ("liste",), ("kapali_attribute_source",), blockers=(B_MASTER_STATUS, B_REAL)),
 )}
 
+def _with_freshness(reg: dict[str, Metric]) -> dict[str, Metric]:
+    """Every operational, source-bound metric depends on the (unapproved) freshness policy definition."""
+    out = {}
+    for k, m in reg.items():
+        if m.temporal == "operational" and m.sources and "operational_freshness" not in m.definitions:
+            m = _dc.replace(m, definitions=m.definitions + ("operational_freshness",))
+        out[k] = m
+    return out
+
+
+REGISTER = _with_freshness(REGISTER)
+
 # Dashboard overview stat cards → the metric that owns the number (dashboard_builder.build `stats`).
 STAT_METRIC = {"min altı": "stock.reorder", "maks üstü": "stock.overstock", "fazla stok değeri": "stock.overstock",
                "kayıp müşteri": "customers.winback", "vadesi geçen toplam": "receivables.collections",
@@ -364,6 +380,7 @@ ROUTES: dict[tuple[str, str], tuple[str, str | tuple[str, ...] | None]] = {
     ("GET", "/api/agent/categories"): ("system", None),
     ("GET", "/api/ai/calls"): ("system", None),
     ("GET", "/api/macro"): ("system", None),
+    ("GET", "/api/accuracy/status"): ("system", None),      # verification states + generation identity; no values
     ("GET", "/api/context"): ("metric", "context.full"),
     ("POST", "/api/context/refresh"): ("redacted", ("refresh.counts",)),
     ("GET", "/api/agent/actions"): ("metric", "actions.queue"),
@@ -454,6 +471,8 @@ def validate_register(register: dict[str, Metric] | None = None,
             if not b.reason_tr.strip():
                 raise RegisterError(f"{k}: blocker {b.code} without a reason")
         if m.certified == State.VERIFIED:
+            if production and m.temporal == "operational" and m.sources and "operational_freshness" not in m.definitions:
+                raise RegisterError(f"{k}: an operational metric needs the approved freshness policy definition")
             if m.blockers:
                 raise RegisterError(f"{k}: certified VERIFIED with open blockers")
             unapproved = [dk for dk in m.definitions if not defs[dk].approved]
@@ -501,8 +520,11 @@ class SourceEvidence:
     source: str
     available: bool | None = None
     layout_supported: bool | None = None
-    report_date: dt.date | None = None
-    report_date_origin: str | None = None          # "declared", "max_transaction_date", …
+    report_date: dt.date | None = None             # the source's business date: DECLARED snapshot / report date only
+    report_date_origin: str | None = None          # "declared" (never a file timestamp, never a transaction date)
+    date_kind: str | None = None                   # current_state_snapshot / transaction_history / …
+    latest_transaction_date: dt.date | None = None  # OBSERVED: newest transaction row (not a report date)
+    earliest_transaction_date: dt.date | None = None
     period_start: dt.date | None = None
     period_end: dt.date | None = None
     period_complete: bool | None = None
@@ -515,6 +537,12 @@ class SourceEvidence:
     joins_validated: bool | None = None
     totals_consistent: bool | None = None
     mapping_approved: bool | None = None
+    blank_amount_cells: int | None = None           # empty amount cells (distinct from a recorded numeric zero)
+    invalid_dates: int | None = None
+    ambiguous_headers: int | None = None            # a required header that appears more than once
+    external_references: int | None = None          # external workbook links + formula references
+    date_contradictions: int | None = None          # declared dates contradicting observed dates / today
+    selection_explicit: bool | None = None          # the file was named explicitly (not picked by modification time)
     inspection_failures: tuple[str, ...] = ()       # inspections that could not run (fail closed)
     notes: tuple[str, ...] = ()
 
@@ -527,6 +555,20 @@ class SourceEvidence:
             out.append((NV, "Kaynağın okunduğu doğrulanmadı."))
         if self.inspection_failures:
             out.append((INV, "Kaynak denetimi tamamlanamadı."))
+        if self.selection_explicit is not True:
+            out.append((NV, "Kaynak dosya açıkça seçilmedi (değişiklik tarihine göre seçim kanıt sayılmaz)."))
+        for value, bad_state, bad, unknown in (
+                (self.external_references, INV, "Kaynak dış çalışma kitaplarına bağlı.", "Dış bağlantı denetimi yapılmadı."),
+                (self.invalid_dates, INV, "Kaynakta geçersiz tarihler var.", "Tarih denetimi yapılmadı."),
+                (self.date_contradictions, INV, "Beyan edilen tarihler kaynakla çelişiyor.",
+                 "Tarih tutarlılığı denetlenmedi."),
+                (self.ambiguous_headers, NV, "Kaynakta yinelenen başlıklar var.", "Başlık denetimi yapılmadı."),
+                (self.blank_amount_cells, NV, "Tutar alanlarında boş hücreler var (sıfır sayılması onaylanmadı).",
+                 "Boş tutar denetimi yapılmadı.")):
+            if value is None:
+                out.append((NV, unknown))
+            elif value:
+                out.append((bad_state, bad))
         if self.layout_supported is False:
             out.append((INV, "Kaynak dosyanın düzeni desteklenmiyor."))
         elif self.layout_supported is None:
@@ -588,25 +630,11 @@ class EvidenceSnapshot:
     generation_id: str | None
     evidence: Mapping[str, SourceEvidence]
     collected_on: dt.date | None = None
+    unbound: frozenset[str] = frozenset()      # recorded sources whose served data is NOT the recorded revision
 
     def __post_init__(self):
         object.__setattr__(self, "evidence", types.MappingProxyType(dict(self.evidence)))
-
-
-def generation_id(frames: dict) -> str | None:
-    """Content hash of the source frames as read (column names + every cell). None if any frame cannot be hashed.
-    Two builds of the same bytes share an id; any change in any source gives a new id."""
-    try:
-        import pandas as pd
-        h = hashlib.sha256()
-        for key in sorted(k for k, v in frames.items() if v is not None):
-            df = frames[key]
-            h.update(key.encode())
-            h.update("\x1f".join(map(str, df.columns)).encode())
-            h.update(pd.util.hash_pandas_object(df.astype(str), index=True).values.tobytes())
-        return h.hexdigest()
-    except Exception:
-        return None
+        object.__setattr__(self, "unbound", frozenset(self.unbound))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -665,7 +693,7 @@ class Gate:
         if (self.snapshot is not None and collected.generation_id is not None
                 and self.snapshot.generation_id == collected.generation_id):
             ev.update(self.snapshot.evidence)
-        snap = EvidenceSnapshot(collected.generation_id, ev, collected.collected_on)
+        snap = EvidenceSnapshot(collected.generation_id, ev, collected.collected_on, collected.unbound)
         return type(self)(self.register, self.definitions, snap, self.today, collected.generation_id)
 
     def _evidence(self) -> tuple[Mapping[str, SourceEvidence], str | None]:
@@ -707,13 +735,15 @@ class Gate:
                 reasons.append(f"Tanım onaylanmadı: {d.title_tr if d else dk}.")
                 codes.append(f"DEF:{dk}")
         evidence, unbound = self._evidence()
+        stale = self.snapshot.unbound if (self.snapshot is not None and unbound is None) else frozenset()
         for src in m.sources:
             ev = evidence.get(src)
             if ev is None:
+                code = unbound or ("EVIDENCE-GENERATION" if src in stale else "NO-EVIDENCE")
                 states.append(NV)
-                reasons.append("Kanıt başka bir veri üretimine ait." if unbound == "EVIDENCE-GENERATION"
+                reasons.append("Kanıt başka bir veri üretimine ait." if code == "EVIDENCE-GENERATION"
                                else "Kaynak doğrulama kanıtı yok.")
-                codes.append(f"{unbound or 'NO-EVIDENCE'}:{src}")
+                codes.append(f"{code}:{src}")
                 continue
             for st, why in ev.problems() + temporal_problems(m, ev, self.today):
                 states.append(st)
@@ -734,8 +764,9 @@ class Gate:
 
 
 # The production gate. Tests that exercise preserved algorithms replace this factory from tests/ only.
-# The API calls it WITHOUT a snapshot (GENERATION_BOUND_API_EVIDENCE is False): every source-bound metric is withheld
-# there until M8-ACCURACY-2 shares the published generation's snapshot with the API.
+# M8-ACCURACY-2: the API passes the published generation's snapshot, bound to the fingerprints it is serving
+# (app.accuracy_gate). No metric can be VERIFIED in production regardless, because validate_register refuses any
+# VERIFIED certification while GENERATION_BOUND_API_EVIDENCE is False (owner real-data acceptance pending).
 def current_gate(today: dt.date | None = None, snapshot: EvidenceSnapshot | None = None,
                  expected_generation: str | None = None) -> Gate:
     return Gate(REGISTER, DEFINITIONS, snapshot, today, expected_generation)
@@ -795,11 +826,13 @@ def _sales_evidence(df, declared) -> SourceEvidence:
     miss = (int(amt.isna().sum()) + int(dates.isna().sum())) if (amt is not None and dates is not None) else None
     dup = int(df.duplicated().sum())
     asof = dates.max() if dates is not None else None
-    rd = declared.get("sales") or (asof.date() if asof is not None and pd.notna(asof) else None)
+    latest = asof.date() if asof is not None and pd.notna(asof) else None
+    rd = declared.get("sales")
+    # The newest transaction date is an OBSERVED fact, never the report date (M8-ACCURACY-2, Task 5).
     return SourceEvidence("sales", available=True, layout_supported=len(have) == len(req), error_cells=errs,
                           missing_required_values=miss, duplicate_records=dup, report_date=rd,
-                          report_date_origin="declared" if declared.get("sales") else
-                          ("max_transaction_date" if rd else None), inspection_failures=tuple(fails))
+                          report_date_origin="declared" if rd else None, latest_transaction_date=latest,
+                          inspection_failures=tuple(fails))
 
 
 _AY = ("Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık")
@@ -836,14 +869,6 @@ def collect_core_evidence(stock_df=None, sales_df=None, aging_df=None, today: dt
         except Exception as e:      # fail closed: the source is not shown as clean
             out[key] = SourceEvidence(key, inspection_failures=(f"collector:{type(e).__name__}",))
     return out
-
-
-def collect_snapshot(frames: dict, today: dt.date | None = None,
-                     declared_dates: dict[str, dt.date] | None = None) -> EvidenceSnapshot:
-    """The immutable evidence snapshot of exactly these frames (one generation)."""
-    ev = collect_core_evidence(frames.get("stock"), frames.get("sales"), frames.get("aging"), today=today,
-                               declared_dates=declared_dates)
-    return EvidenceSnapshot(generation_id(frames), ev, today)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -970,7 +995,7 @@ def accuracy_known_issues() -> list[dict]:
 validate_register()
 
 __all__ = ["State", "Definition", "Blocker", "Metric", "SourceEvidence", "EvidenceSnapshot", "Decision", "Gate",
-           "current_gate", "collect_core_evidence", "collect_snapshot", "generation_id", "temporal_problems",
+           "current_gate", "collect_core_evidence", "temporal_problems",
            "redact_directory", "GENERATION_BOUND_API_EVIDENCE", "validate_register", "RegisterError", "REGISTER", "DEFINITIONS", "ROUTES",
            "STAT_METRIC", "MODULE_METRIC", "accuracy_known_issues", "PANEL_METRIC", "REFRESH_COUNT_METRIC", "WITHHELD_MESSAGE",
            "WITHHELD_CODE", "WITHHELD_HTTP_STATUS", "POLICY_VERSION", "worst"]

@@ -195,7 +195,9 @@ def test_validation_and_build_use_the_same_frozen_sources(env, monkeypatch):
     reads, seen = [], {}
     for name in ("read_stock", "read_sales_raw", "read_aging_raw"):
         orig = getattr(DB, name)
-        monkeypatch.setattr(DB, name, (lambda o, n: lambda p: (reads.append((n, os.path.basename(p))), o(p))[1])(orig, name))
+        # M8-ACCURACY-2: readers receive the frozen bytes (a stream), never the path again
+        monkeypatch.setattr(DB, name, (lambda o, n: lambda p: (reads.append((n, os.path.basename(p) if isinstance(p, str)
+                                                                             else "<frozen>")), o(p))[1])(orig, name))
     orig_validate, orig_ctx, orig_build = RF.validate, CTX.build_context, DB.build
 
     def validate_then_drop_newer(sources, *a, **k):

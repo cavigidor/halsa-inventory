@@ -37,6 +37,7 @@ import pandas as pd  # noqa: E402
 import dashboard_builder as db  # noqa: E402
 from services import sales_projection as SP  # noqa: E402
 from services.importers.base import run_import  # noqa: E402
+from services import generation as GEN  # noqa: E402
 from services.importers.models import Audience, Confidence, Severity  # noqa: E402
 from services.importers.spec import FieldSpec, FieldType, SourceSpec, TableLayout  # noqa: E402
 
@@ -259,6 +260,22 @@ class Customer360Snapshot:
 # ---------------------------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------------------------
+def _same_generation(data_folder: str, ctx, sig, t0: float | None = None) -> int:
+    """Customer 360 reads the sales / Cari files itself (formula-aware imports). When the context carries a source
+    generation, each file must have the recorded fingerprint before AND after the build; otherwise the snapshot is
+    refused (never a mix of revisions). Returns the elapsed build time in ms (for the snapshot)."""
+    served = ((getattr(ctx, "generation", None) or {}).get("served")) or {}
+    for key, fname in (("sales", sig.sales), ("aging", sig.aging)):
+        exp = served.get(key)
+        if not exp or not fname:
+            continue
+        p = _in_folder(data_folder, fname)
+        if p is None or GEN.sha256_file(p) != exp:
+            raise Customer360Error("source_changed", "Kaynak dosya, panonun veri üretiminden sonra değişmiş; "
+                                                     "verileri yenileyin.")
+    return int((time.monotonic() - t0) * 1000) if t0 is not None else 0
+
+
 def build_snapshot(data_folder: str, ctx: dict, *, hedef_path: str | None = None,
                    hedef_snapshot: str | None = None) -> Customer360Snapshot:
     t0 = time.monotonic()
@@ -267,6 +284,7 @@ def build_snapshot(data_folder: str, ctx: dict, *, hedef_path: str | None = None
     if sales_path is None:
         raise Customer360Error("sales_source_missing", "Canlı panonun satış dosyası veri klasöründe bulunamadı; "
                                                        "verileri yenileyin.")
+    _same_generation(data_folder, ctx, sig)          # M8-ACCURACY-2: the files are still the context's revisions
     handoff = getattr(ctx, "sales_c360_handoff", None)
     df = handoff.take(os.path.basename(sales_path)) if handoff is not None else None
     if df is None:
@@ -324,7 +342,7 @@ def build_snapshot(data_folder: str, ctx: dict, *, hedef_path: str | None = None
 
     snap = Customer360Snapshot(
         signature=sig, as_of=asof_d, sales_file=os.path.basename(sales_path), aging_file=sig.aging,
-        built_ms=int((time.monotonic() - t0) * 1000), customers=customers, search_rows=search_rows, years=years,
+        built_ms=_same_generation(data_folder, ctx, sig, t0), customers=customers, search_rows=search_rows, years=years,
         products=products, categories=categories, groups=groups, accounts=accounts,
         account_customers=account_customers, account_names=account_names, salespeople=salespeople,
         master_status=master_status, master=master, aging_status=aging_status, aging=aging,
