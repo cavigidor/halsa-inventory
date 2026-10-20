@@ -102,10 +102,11 @@ def refresh_to(w, data, *, fail_install=False, monkeypatch=None):
     def act():
         Path(w.folder, SE.STOCK_FILE).write_bytes(data)
         if fail_install:
-            monkeypatch.setattr(w.store, "install", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("synthetic")))
-            rep = RF.run_refresh(w.folder, w.dash, inflation_rate=0.40, today=TODAY, previous_context=w.repo.live(),
-                                 install=lambda staged: APP._install_generation(w.repo, staged))
-            monkeypatch.undo()
+            with monkeypatch.context() as mp:             # scoped: never undo the fixtures' DB isolation
+                mp.setattr(w.store, "install", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("synthetic")))
+                rep = RF.run_refresh(w.folder, w.dash, inflation_rate=0.40, today=TODAY,
+                                     previous_context=w.repo.live(),
+                                     install=lambda staged: APP._install_generation(w.repo, staged))
             assert not rep["ok"] and rep["step"] == "swap"
         else:
             rep = RF.run_refresh(w.folder, w.dash, inflation_rate=0.40, today=TODAY, previous_context=w.repo.live(),
@@ -409,7 +410,8 @@ def _reseal(d):
     """What a deliberate editor can do: recompute the (unkeyed) ids over the edited content."""
     m = GEN.Manifest(created_at=d["created_at"], core=tuple(GEN.SourceRecord.from_dict(x) for x in d["core"]),
                      owner=tuple(GEN.SourceRecord.from_dict(x) for x in d.get("owner") or ()), joins=d["joins"],
-                     selection_origin=d["selection_origin"], policy_version=d["policy_version"])
+                     selection_origin=d["selection_origin"], policy_version=d["policy_version"],
+                     dashboard_sha256=d.get("dashboard_sha256"))
     return m.to_dict()
 
 
@@ -461,10 +463,13 @@ def test_resealed_evidence_and_dashboard_fail_closed_on_rederivation(world, publ
     file as a candidate only and re-derives the evaluation from the original bytes; the difference fails closed."""
     d = json.loads(json.dumps(published["raw"]))
     MUTATIONS[field](d)
-    sealed = _reseal(d)
-    json.dump(sealed, open(published["path"], "w", encoding="utf-8"))
-    html = open(world.dash, encoding="utf-8").read().replace(published["raw"]["core_id"], sealed["core_id"])
+    core_id = _reseal(d)["core_id"]                                           # (core_id excludes the HTML digest)
+    html = open(world.dash, encoding="utf-8").read().replace(published["raw"]["core_id"], core_id)
     open(world.dash, "w", encoding="utf-8").write(html)
+    d["dashboard_sha256"] = GEN.sha256_file(world.dash)                       # the editor re-records the HTML too
+    sealed = _reseal(d)
+    assert sealed["core_id"] == core_id
+    json.dump(sealed, open(published["path"], "w", encoding="utf-8"))
     w, cand = _restart(world)
     assert cand is not None and w.store.restore_reason == "pending_revalidation"
     assert w.store.current() is None                                          # a candidate gives no evidence

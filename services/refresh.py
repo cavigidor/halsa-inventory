@@ -16,6 +16,7 @@ One implementation behind both `POST /api/context/refresh` and `python -m servic
 - Deterministic: no AI provider is imported or called. Action state, history and the AI cache are untouched.
 """
 import argparse
+import dataclasses
 import datetime as dt
 import fcntl
 import logging
@@ -405,6 +406,9 @@ def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, 
             stats = {}
             db.build(data_folder, p["staged"], today=today, sources=sources, frames=frames, stats_out=stats,
                      manifest=manifest)
+            # the exact HTML bytes published with this generation (GET / serves only these bytes for it)
+            manifest = dataclasses.replace(manifest, dashboard_sha256=GEN.sha256_file(p["staged"]))
+            staged.generation_manifest = manifest
             GEN.write_manifest(p["manifest_staged"], manifest)
         except Exception as e:
             log.exception("refresh: build failed")

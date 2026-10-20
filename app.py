@@ -264,13 +264,46 @@ def dashboard():
         return HTMLResponse(status_code=503, content=(
             "<!doctype html><meta charset='utf-8'><p>Bu pano doğrulama kuralları uygulanmadan oluşturulmuş; "
             "gösterilmiyor. Verileri yenileyin veya panoyu yeniden oluşturun.</p>"))
-    with RP.PUBLISH_LOCK:                              # never a dashboard file mid-publication
+    store = getattr(app.state, "generations", None)
+    with RP.PUBLISH_LOCK:                              # the bytes and the generation are captured as one step
         try:
             with open(path, "rb") as fh:
                 body = fh.read()
         except OSError:
             return HTMLResponse(status_code=404, content="<!doctype html><meta charset='utf-8'><p>Pano okunamadı.</p>")
-    return HTMLResponse(content=body)
+        m = store.current() if store is not None else None
+    ok, reason, gen_id = _dashboard_authorized(body, m)
+    if not ok:
+        log.info("dashboard withheld: %s", reason)
+        return HTMLResponse(status_code=503, headers={"X-Halsa-Dashboard": reason}, content=(
+            "<!doctype html><meta charset='utf-8'><p>Pano şu anda doğrulanamadı; doğrulanmamış sonuçlar "
+            "gösterilmiyor. Verileri yenileyin (Yenile) veya sunucunun hazırlanmasını bekleyin.</p>"))
+    return HTMLResponse(content=body, headers={"X-Halsa-Generation": gen_id or "none"})
+
+
+def _dashboard_authorized(body: bytes, m) -> tuple[bool, str, str | None]:
+    """May these exact HTML bytes be served now? (M8-ACCURACY-2, fail closed)
+
+    The HTML lists every metric whose output it embeds (`stockagent-displayed`). Evidence binds to it only when the
+    ACCEPTED (re-validated) generation is the one the HTML was built from (`stockagent-generation` = `core_id`) and the
+    bytes are exactly the bytes published with it (`dashboard_sha256`). Then the CURRENT gate — today's freshness,
+    current register — must authorize every displayed metric. A pending, rejected, missing or mismatched generation
+    gives the gate no evidence, so any embedded source-bound metric is refused (an HTML that displays nothing
+    source-bound is still served: it embeds no metric data)."""
+    gen, displayed = GEN.dashboard_markers(body)
+    if displayed is None:
+        return False, "displayed_marker_missing", None
+    bound = (m is not None and bool(m.core) and gen is not None and gen == m.core_id
+             and m.dashboard_sha256 is not None and GEN.sha256_bytes(body) == m.dashboard_sha256)
+    gate = (ACC.current_gate(snapshot=m.core_snapshot(), expected_generation=m.generation_id) if bound
+            else ACC.current_gate())
+    try:
+        refused = [k for k in displayed if not gate.decide(k).displayable]
+    except Exception:
+        return False, "authorization_error", None
+    if refused:
+        return False, ("not_authorized" if bound else "evidence_unavailable"), None
+    return True, "ok", (m.generation_id if bound else None)
 
 
 def _gated_dashboard(path):

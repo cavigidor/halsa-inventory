@@ -288,6 +288,7 @@ class Manifest:
     joins: dict = field(default_factory=dict)
     selection_origin: str = "mtime_fallback"
     policy_version: str = ACC.POLICY_VERSION
+    dashboard_sha256: str | None = None          # the exact HTML bytes published with this generation (GET / checks)
 
     @property
     def core_id(self) -> str:
@@ -298,7 +299,7 @@ class Manifest:
     @property
     def generation_id(self) -> str:
         recs = sorted((r.content() for r in self.owner), key=lambda c: (c["key"], c["sha256"]))
-        return _digest([self.core_id, recs])
+        return _digest([self.core_id, self.dashboard_sha256, recs])
 
     def record(self, key: str) -> SourceRecord | None:
         for r in (*self.core, *self.owner):
@@ -330,7 +331,8 @@ class Manifest:
     def to_dict(self) -> dict:
         return {"schema": MANIFEST_SCHEMA, "created_at": self.created_at, "policy_version": self.policy_version,
                 "selection_origin": self.selection_origin, "core_id": self.core_id,
-                "generation_id": self.generation_id, "core": [r.to_dict() for r in self.core],
+                "generation_id": self.generation_id, "dashboard_sha256": self.dashboard_sha256,
+                "core": [r.to_dict() for r in self.core],
                 "owner": [r.to_dict() for r in self.owner], "joins": self.joins}
 
     @classmethod
@@ -340,7 +342,7 @@ class Manifest:
         m = cls(created_at=d["created_at"], core=tuple(SourceRecord.from_dict(x) for x in d.get("core") or ()),
                 owner=tuple(SourceRecord.from_dict(x) for x in d.get("owner") or ()), joins=d.get("joins") or {},
                 selection_origin=d.get("selection_origin") or "mtime_fallback",
-                policy_version=d.get("policy_version") or "")
+                policy_version=d.get("policy_version") or "", dashboard_sha256=d.get("dashboard_sha256"))
         if m.core_id != d.get("core_id") or m.generation_id != d.get("generation_id"):
             raise ValueError("manifest identity mismatch")       # corrupted (unkeyed checksum): never a candidate
         return m
@@ -547,6 +549,24 @@ def manifest_path(dashboard_path: str) -> str:
 _GEN_RE = re.compile(r'<meta name="stockagent-generation" content="([0-9a-f]*)"')
 
 
+_DISPLAYED_RE = re.compile(rb'<meta name="stockagent-displayed" content="([^"]*)"')
+_GEN_RE_B = re.compile(rb'<meta name="stockagent-generation" content="([0-9a-f]*)"')
+
+
+def dashboard_markers(body: bytes) -> tuple[str | None, tuple[str, ...] | None]:
+    """(generation core_id, displayed metric keys) read from the exact HTML bytes. `displayed` is None when the
+    marker is absent (a dashboard built before this rule: its contents cannot be re-authorized)."""
+    head = body[:16384]
+    g = _GEN_RE_B.search(head)
+    d = _DISPLAYED_RE.search(head)
+    gen = (g.group(1).decode() or None) if g else None
+    if d is None:
+        return gen, None
+    import html as _html
+    raw = _html.unescape(d.group(1).decode("utf-8", "replace"))
+    return gen, tuple(k for k in raw.split(",") if k)
+
+
 def dashboard_generation(dashboard_path: str) -> str | None:
     try:
         with open(dashboard_path, encoding="utf-8") as fh:
@@ -618,6 +638,8 @@ class GenerationStore:
                 return None
             if self._m is not None and not rederived.owner:
                 rederived = dataclasses.replace(rederived, owner=self._m.owner)
+            # the dashboard published with the candidate: its bytes are checked again on every GET /
+            rederived = dataclasses.replace(rederived, dashboard_sha256=candidate.dashboard_sha256)
             self._m, self._pending = rederived, None
             self.restore_reason = None
             return rederived
@@ -666,6 +688,9 @@ class GenerationStore:
         if dashboard_generation(dashboard_path) != m.core_id:
             self.restore_reason = "dashboard_generation_mismatch"
             return None
+        if not m.dashboard_sha256 or sha256_file(dashboard_path) != m.dashboard_sha256:
+            self.restore_reason = "dashboard_bytes_mismatch"      # not the HTML published with this generation
+            return None
         for r in m.core:
             if r.key == "liste":
                 continue
@@ -681,6 +706,6 @@ class GenerationStore:
 
 
 __all__ = ["FrozenSource", "SourceRecord", "Manifest", "GenerationStore", "SelectionError", "load_selection",
-           "select_core", "freeze", "build_core_records", "build_manifest", "rederive_core", "owner_record", "manifest_path",
+           "select_core", "freeze", "build_core_records", "build_manifest", "rederive_core", "dashboard_markers", "owner_record", "manifest_path",
            "write_manifest", "read_manifest", "dashboard_generation", "sha256_bytes", "sha256_file", "CORE_KEYS",
            "OWNER_KEYS", "SELECTION_FILE", "SELECTION_SCHEMA"]

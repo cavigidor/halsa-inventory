@@ -252,12 +252,18 @@ def test_root_serves_dashboard_file(mk, tmp_path, monkeypatch):
     f = tmp_path / "dashboard.html"
     # M8-ACCURACY: `/` serves only dashboards built with the factual-integrity gate (policy marker in <head>).
     from services import accuracy as ACC
+    # M8-ACCURACY-2: it also lists the metrics it embeds; this page embeds none, so it needs no evidence.
     f.write_text(f'<!doctype html><meta name="stockagent-accuracy" content="{ACC.POLICY_VERSION}">'
+                 '<meta name="stockagent-displayed" content="">'
                  "<title>Şirket Panosu — test</title>", encoding="utf-8")
     monkeypatch.setattr(APP, "DASHBOARD_PATH", str(f))
     c, _ = mk(headers={})
     r = c.get("/")
     assert r.status_code == 200 and "Şirket Panosu" in r.text and r.headers["content-type"].startswith("text/html")
+    f.write_text(f'<!doctype html><meta name="stockagent-accuracy" content="{ACC.POLICY_VERSION}">'
+                 "<title>Şirket Panosu — test</title>", encoding="utf-8")       # no displayed marker: cannot be judged
+    r = c.get("/")
+    assert r.status_code == 503 and "Şirket Panosu" not in r.text
 
 
 def test_root_without_dashboard_gives_build_hint(mk, tmp_path, monkeypatch):
