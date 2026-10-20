@@ -202,8 +202,8 @@ data date (max sales date), file names and data-quality counts (e.g. DQ-4) remai
 4. Run the refresh in the app; check `GET /api/accuracy/status`: the `generation_id` is set, every source is `bound`.
 5. Restart the app; after the warm-up, `restore_pending` is false, `restore_reason` is null and the same `core_id` is
    published (re-derived from the bytes). `evidence_mismatch` or `source_changed` means: refresh again, nothing binds.
-   `GET /` must then return 200 with an `X-Halsa-Generation` header equal to the status `generation_id`; a 503 with
-   `X-Halsa-Dashboard` names why the page is withheld (§11.2).
+   `GET /` must then return 200 with an `X-Halsa-Generation` header equal to the status `generation_id` (the page is
+   re-built by the server after the restart, §12); a 503 with `X-Halsa-Dashboard` names why it is withheld.
 6. Only then, in a separate reviewed PR: set the flag, record the evidence (counts only) as `reconciliation_ref`, and
    promote individual metrics per §2.
 
@@ -320,8 +320,8 @@ is unchanged. Inputs are only ever opened read-only.
   CURRENT gate (today's freshness, current register) must then authorize every displayed metric. Otherwise 503 with
   a neutral notice and `X-Halsa-Dashboard` = `evidence_unavailable` / `not_authorized` / `displayed_marker_missing`.
   No embedded data is returned.
-- A dashboard that displays nothing source-bound (the production register today: the marker is empty) is served
-  without evidence. It contains no metric data. A dashboard without the marker (built before this rule) is refused.
+- ~~A dashboard that displays nothing source-bound is served without evidence~~ — **superseded by §12**: no on-disk
+  page is served without an exact match to the accepted generation, whatever its markers claim.
 - HTTP tests (`tests/test_m8_accuracy2_review2.py`) cover:
   - source changed + restart (the reproduction);
   - pending revalidation, then a successful restore with identical bytes;
@@ -337,3 +337,48 @@ is unchanged. Inputs are only ever opened read-only.
 | **Technical foundation** (manifest, request pinning, publish lock, re-derived restart, dashboard authorization, fail-closed reconciliation) | Ready for review / merge as a foundation: both review rounds' findings are fixed and covered by synthetic production-gate tests. Every production metric is still withheld. |
 | **Owner-local real-data acceptance** (§8.3) | **Not started.** The real ERP exports and `kredi takip(1).xlsx` have not been run through this code. Required before `GENERATION_BOUND_API_EVIDENCE` may become True. |
 | **Individual metric promotion** (§2) | **None.** Each metric needs owner decisions (D-xxx), real-data reconciliation evidence and regression tests, one reviewed PR each, after the flag. Kredi additionally needs the DURUM / Kapalı meaning, the 11 excluded positive-remaining rows, the negative residual, the file of record, the snapshot date and payment reconciliation. |
+
+## 12. Third review pass on PR #28 (2026-10-20): the page's own claims are never evidence
+**Root cause.** `_dashboard_authorized()` computed whether the page was bound to the accepted generation, but refused
+only when a metric listed in `stockagent-displayed` failed the gate. A page whose marker was EMPTY passed with no
+accepted generation, with other bytes, or after editing — the marker is a claim of the HTML file, not evidence. An
+edited page could inject values while declaring that it displays nothing. `_gated_dashboard()` also read the file
+outside the publication lock.
+
+**Correction (`app.py`, `services/entity.py`, `services/generation.py`).**
+- The on-disk HTML is served only if ALL hold, evaluated on the bytes captured under `PUBLISH_LOCK` together with
+  the accepted generation:
+  1. an accepted, re-validated generation exists;
+  2. the page's policy marker is current;
+  3. its generation marker equals the accepted `core_id`;
+  4. the SHA-256 of the bytes equals the digest **recorded by this process when it published them**;
+  5. the displayed marker is present and the current gate authorizes every metric in it.
+  An empty list is accepted only after steps 1–4. Everything else gets a server-generated neutral Turkish page
+  (503, `X-Halsa-Dashboard` = reason: `no_accepted_generation`, `policy_marker_missing`, `generation_mismatch`,
+  `bytes_mismatch`, `displayed_marker_missing`, `not_authorized`); the file is never returned. The pre-lock
+  `_gated_dashboard()` read is gone.
+- **Publication provenance after a restart.** The dashboard digest in the saved manifest cannot be re-derived from the
+  workbooks, so an editor of both files could otherwise re-record it. After a restart the accepted, re-derived
+  generation therefore starts with NO dashboard digest. The server re-builds the dashboard from the re-derived evidence
+  and the same frozen bytes, and publishes page + manifest + digest as one locked step
+  (`app._republish_dashboard`). Only those bytes are served. If the re-build fails, nothing is served. The pre-restart
+  file is never served. `GET /` waits for a pending candidate's re-validation instead of serving anything meanwhile.
+- A plain `python dashboard_builder.py data` build has no publication record and is not served; publish with
+  `python -m services.refresh` (or the dashboard's refresh button). README and the launch checklist are updated.
+
+**Tests (`tests/test_m8_accuracy2_review3.py`, 19, production gate, HTTP):**
+1. a valid accepted empty dashboard (the real register) is served, live and after a restart;
+2. an edited empty dashboard with injected data is refused; editing page and manifest together still serves only the
+   server-rebuilt page;
+3. an empty dashboard without an accepted generation (source changed, no store, CLI build, a candidate that fails
+   re-validation) is not served;
+4. an authorized synthetic metric is served, live and after a restart;
+5. tampered markers (list altered or emptied, a duplicate marker, generation marker, policy marker, renamed marker)
+   are refused;
+6. refresh publishes new bytes, rollback keeps the previous, a failed re-publication after restart withholds, the
+   re-published pair restores again;
+7. no production metric is VERIFIED and the flag is off;
+8. no AI provider is called.
+
+**Readiness:** technical foundation — ready for final technical review; owner-local real-data acceptance — not started;
+metric promotion — none (§11.3).

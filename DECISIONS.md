@@ -827,3 +827,13 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **Readiness is reported on three levels:** technical foundation / owner-local real-data acceptance / individual
   metric promotion (`docs/accuracy/release_gate.md` §11.3).
 - **Unchanged:** `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; Kredi questions, DQ-1 … DQ-6, D-003 open.
+
+### D-054 · 2026-10-20 · GET / serves only bytes this server published for the accepted generation
+- A dashboard file's own markers (policy, generation, displayed metrics — including an empty list) are claims, never
+  evidence. The on-disk HTML is served only when an accepted, re-validated generation exists, the markers match it,
+  the bytes equal the digest this process recorded when publishing them, and the current gate authorizes every
+  displayed metric. Otherwise a server-generated neutral page (503); the file is never returned.
+- After a restart the re-derived generation gets no dashboard digest from the saved manifest. The server re-builds the
+  dashboard from the re-derived evidence and publishes page + manifest + digest as one locked step.
+- A plain `dashboard_builder.py` build is not served; publication goes through the refresh.
+- **Unchanged:** `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; Kredi DURUM, D-003, DQ-1 … DQ-6 open.

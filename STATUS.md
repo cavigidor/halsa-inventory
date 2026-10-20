@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-20 (M8-ACCURACY-2 second review pass on PR #28, not merged: `GET /` authorizes the exact dashboard bytes; reconciliation output can never overwrite an input. Technical foundation ready for review; owner-local real-data acceptance NOT started; no metric promoted; `GENERATION_BOUND_API_EVIDENCE` stays False)._
+_Updated 2026-10-20 (M8-ACCURACY-2 third review pass on PR #28, not merged: GET / serves only dashboard bytes this server published for the accepted, re-validated generation — never on the page's own markers; after a restart the dashboard is re-built from re-derived evidence. Technical foundation ready for final technical review; owner-local real-data acceptance NOT started; no metric promoted; `GENERATION_BOUND_API_EVIDENCE` stays False)._
 
 ## Git
 - **`main`:** M7 complete PR #24; readiness PR #25; M8 planning PR #26; M8-ACCURACY safety gate PR #27 squash merged (`a28b2b9`).
@@ -46,7 +46,12 @@ BLOCKED and is not renumbered.
 - **Second review pass (2026-10-20, D-053; `docs/accuracy/release_gate.md` §11).** Both findings were reproduced on `bc01577` first:
   1. **Evidence output.** `--evidence-out` equal to `--kredi` replaced the synthetic workbook with JSON. Now refused when the destination is or aliases any input (symlink, `..`, symlinked folder, hard link) or already exists. Files are created with `O_EXCL`; a failed write exits 4 and leaves nothing.
   2. **`GET /`.** After a source change and restart (`source_changed`) it returned 200 with 2 VERIFIED reorder rows. Now it checks the exact HTML bytes (SHA recorded at publication, generation marker) against the accepted, re-validated generation, and re-authorizes every embedded metric with the current gate. Otherwise 503 with no data. HTTP tests cover every case listed in §11.2.
-- **Readiness:** technical foundation ready for review. Owner-local real-data acceptance not started. Individual metric promotion: none.
+- **Third review pass (2026-10-20, D-054; `release_gate.md` §12):**
+  - **Problem:** a dashboard whose displayed marker was empty was served without an accepted generation or byte match. The marker is a claim of the file.
+  - **Now:** `GET /` serves the file only when an accepted generation, the markers and the digest recorded by this process at publication all match, and the gate authorizes every displayed metric. Otherwise a neutral page (503).
+  - **After a restart:** the server re-builds and re-publishes the dashboard from the re-derived evidence; the pre-restart file is never served.
+  - **Tests:** 19 new HTTP tests.
+- **Readiness:** technical foundation ready for final technical review. Owner-local real-data acceptance not started. Individual metric promotion: none.
 - **Tests (actual, cloud, synthetic, Python 3.12.3):**
 
 | Where | Command | Result |
@@ -55,6 +60,7 @@ BLOCKED and is not renumbered.
 | Branch with `test_m8_accuracy2.py` (29) and `test_m8_kredi_takip.py` (27) | same, also with `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled` | **1219 passed, 7 skipped, 2 xfailed** (skips: owner-local `local_data`; xfails: DQ-1, DQ-6 strict) |
 | After the review corrections (+48 in `tests/test_m8_accuracy2_review.py`, +3 in `tests/test_m8_kredi_takip.py`) | same, `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled` | **1270 passed, 7 skipped, 2 xfailed** |
 | After the second review pass (+31 in `tests/test_m8_accuracy2_review2.py`) | same | **1301 passed, 7 skipped, 2 xfailed** |
+| After the third review pass (+19 in `tests/test_m8_accuracy2_review3.py`) | same | **1320 passed, 7 skipped, 2 xfailed** |
 
 ## M8-ACCURACY — factual integrity and fail-closed display (merged PR #27)
 - **Directive:** NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION (D-049). States VERIFIED / NOT_VERIFIED / INVALID;

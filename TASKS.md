@@ -11,6 +11,7 @@ Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi,
   - [ ] Approve or replace the provisional 45-day operational age limit (`operational_freshness`).
   - [x] 2026-10-20 — Review of PR #28: request-pinned generations (no cross-generation response) and re-derived restart evidence (edited manifests never trusted); private evidence paths; PASS / OPEN / FAIL result (D-052, `release_gate.md` §10).
   - [x] 2026-10-20 — Second review pass on PR #28: `GET /` authorizes the exact dashboard bytes against the accepted generation and the current gate; reconciliation evidence can never overwrite an input or an existing file (D-053, `release_gate.md` §11).
+  - [x] 2026-10-20 — Third review pass on PR #28: GET / never serves on-disk HTML on the page's own markers; only bytes this server published for the accepted, re-validated generation (re-built after a restart) (D-054, `release_gate.md` §12).
   - [ ] Before any promotion: cross-response consistency in the dashboard page (the `X-Halsa-Generation` header is not yet checked by the page) and a single-process deployment constraint (or shared locking) for M8 deployment.
 
 ## Next (M8 — accuracy and production launch)
