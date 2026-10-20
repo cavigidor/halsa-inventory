@@ -149,6 +149,10 @@ Owner questions are numbered as in `docs/m8_owner_questions_tr.md` (Q#). "Withhe
   `operational_freshness`, unapproved).
 - **Joins (measured, not repaired):** order-source ↔ master ↔ invoice account, aging ↔ master, sales ↔ stock and product
   naming are counted (`validate_joins`); a join problem withholds the dependent sources. D-003 is unchanged.
+- **Review of PR #28 (fixed 2026-10-20):** request-level generation consistency (request-pinned views + one gate per
+  request + publish lock) and persisted-evidence integrity (ids cover the evaluation; restart re-derives from the bytes).
+  Remaining limits: consistency across separate responses, multi-process deployments, and the integrity of the input
+  files / served HTML (access control) — `release_gate.md` §10.
 - **Hedef** is not part of the generation manifest yet; outputs that use it stay without evidence.
 - **Owner-source approvals:** core sources can carry a fingerprint-bound approval (§9); owner sources (Kredi,
   Gider/Gelir, Bütçe) have no approval mechanism yet, so their outputs cannot verify.

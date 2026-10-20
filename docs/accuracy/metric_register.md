@@ -35,8 +35,10 @@ most four short reasons (no numbers, names, paths or exception text).
    (`stockagent-generation`); the API binds each request to the published manifest **only for the sources whose
    served fingerprint equals the recorded one** (`Manifest.bound_snapshot`); any other source gets no evidence and the
    code `EVIDENCE-GENERATION:<source>`. A refresh installs the context and the manifest together and restores both on
-   failure; an owner reload replaces only that owner record; a restart restores the manifest only if the dashboard and
-   every core file still match it. `GET /api/accuracy/status` shows the generation and the per-metric state (no
+   failure; an owner reload replaces only that owner record; a restart treats the saved manifest only as a candidate
+   and re-derives the whole evaluation from the original bytes before any evidence binds (`release_gate.md` §10.2).
+   **Request pinning:** each HTTP request reads the context, owner views and Customer 360 snapshot once and builds its
+   gate once from them, so the authorizing evidence always belongs to the returned data (`release_gate.md` §10.1). `GET /api/accuracy/status` shows the generation and the per-metric state (no
    values). `validate_register(production=True)` still refuses any VERIFIED certification while
    `GENERATION_BOUND_API_EVIDENCE` is False — it stays False until the owner's real-data acceptance
    (`release_gate.md` §8.3).

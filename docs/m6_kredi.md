@@ -95,7 +95,7 @@ total, not the company's complete debt, and a schedule is not a cash-flow foreca
 
 ```
 python -m scripts.reconcile_sources --kredi "data/kredi takip(1).xlsx" --today 2026-10-19 \
-    [--snapshot-date YYYY-MM-DD] [--expect-sha256 <hash>] [--show-values] [--evidence-out kanit.json]
+    [--snapshot-date YYYY-MM-DD] [--expect-sha256 <hash>] [--show-values] [--evidence-out [PATH]]
 ```
 
 It prints the SHA-256 of the file and PASS / FAIL / OPEN checks: layout; full import (hidden rows included); saved
@@ -103,9 +103,11 @@ filter visible / hidden counts; control totals vs all rows; SUBTOTAL vs visible 
 identities; hidden rows that still record a positive remaining amount (past due / due today / future); negative
 remaining; Kapalı with positive remaining; past-due and due-today positive remaining; snapshot date (OPEN unless
 declared — the file time is shown as information only); currencies; visible rows per month (counts). Amounts appear
-**only** with `--show-values`, on the local console. `--evidence-out` writes fingerprints, counts and results only.
-Exit codes: 0 = no technical failure (OPEN business questions may remain), 1 = a technical check failed, 2 = unreadable
-input. A PASS is technical consistency, never financial approval.
+**only** with `--show-values`, on the local console. `--evidence-out` writes fingerprints, counts and results only;
+without a path to the git-ignored `data/reconciliation/`, and an explicit path inside the repository must be under
+`data/`. The last line is `GENEL SONUÇ: PASS / OPEN / FAIL`.
+Exit codes: 0 = PASS, 1 = FAIL (a technical check failed), 2 = unreadable input / usage, 3 = OPEN (no technical failure,
+business questions remain). A PASS is technical consistency, never financial approval.
 
 **Still open for the revised workbook** (the owner's description, recorded without values): 11 installments with a
 positive remaining amount in 2026 are outside the saved filter (10 due before 2026-10-19, 1 due on it); one Kapalı row

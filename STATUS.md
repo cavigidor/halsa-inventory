@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-19 (M8-ACCURACY-2 on branch `claude/m8-accuracy-2-shared-evidence`, PR open, not merged: one source-generation manifest shared by dashboard / API / owner views / refresh; formula-aware core validation; revised Kredi layout support; owner-local reconciliation command. No metric is VERIFIED; `GENERATION_BOUND_API_EVIDENCE` stays False)._
+_Updated 2026-10-20 (M8-ACCURACY-2 review corrections on PR #28, not merged: request-pinned generations + publish lock; manifest ids cover the full evaluation; restart re-derives evidence from the original bytes; private evidence paths. No metric is VERIFIED; `GENERATION_BOUND_API_EVIDENCE` stays False)._
 
 ## Git
 - **`main`:** M7 complete PR #24; readiness PR #25; M8 planning PR #26; M8-ACCURACY safety gate PR #27 squash merged (`a28b2b9`).
@@ -32,12 +32,24 @@ BLOCKED and is not renumbered.
 - **Not promoted:** no metric is VERIFIED; `GENERATION_BOUND_API_EVIDENCE` is False; Kredi stays withheld (DURUM,
   11 positive-remaining rows outside the saved filter, negative residual, file of record, snapshot date, payment
   reconciliation). Hedef is not in the manifest; owner sources have no approval mechanism yet.
+- **Review corrections (2026-10-20, D-052; `docs/accuracy/release_gate.md` §10):**
+  1. Request-level TOCTOU fixed. `services/request_pin.py` pins the context, owner views, Customer 360 snapshot and the
+     gate once per request. `PUBLISH_LOCK` makes dashboard + manifest + context (and owner view + record) one step.
+     Interleaving tests force a refresh, a failed refresh and an owner reload between authorization and the endpoint's
+     reads. A negative control reproduces the race with pinning disabled. A concurrency test ran 109 requests during 6
+     alternating refreshes: 59 verified, all generation A with A's data; 50 withheld; none mixed.
+  2. Persisted-evidence integrity fixed. The ids cover the full evaluation (an unkeyed checksum against corruption). A
+     restart re-derives from the bytes. 11 field mutations with fingerprints unchanged, each in 3 variants: plain edit,
+     resealed ids, and resealed ids plus an edited dashboard marker. All 33 fail closed.
+  3. The manifest beside the dashboard is now git-ignored. Reconciliation evidence defaults to `data/reconciliation/`.
+     The command's final line is `GENEL SONUÇ: PASS / OPEN / FAIL` (exit codes 0 / 3 / 1; 2 = unreadable).
 - **Tests (actual, cloud, synthetic, Python 3.12.3):**
 
 | Where | Command | Result |
 |---|---|---|
 | Branch before the new test files | `python -m pytest -q` | **1163 passed, 7 skipped, 2 xfailed** |
 | Branch with `test_m8_accuracy2.py` (29) and `test_m8_kredi_takip.py` (27) | same, also with `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled` | **1219 passed, 7 skipped, 2 xfailed** (skips: owner-local `local_data`; xfails: DQ-1, DQ-6 strict) |
+| After the review corrections (+48 in `tests/test_m8_accuracy2_review.py`, +3 in `tests/test_m8_kredi_takip.py`) | same, `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled` | **1270 passed, 7 skipped, 2 xfailed** |
 
 ## M8-ACCURACY — factual integrity and fail-closed display (merged PR #27)
 - **Directive:** NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION (D-049). States VERIFIED / NOT_VERIFIED / INVALID;

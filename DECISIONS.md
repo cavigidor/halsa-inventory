@@ -802,3 +802,17 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **No promotion.** `GENERATION_BOUND_API_EVIDENCE` stays False until the owner's real-data acceptance
   (`docs/accuracy/release_gate.md` §8.3). No metric is VERIFIED. The Kredi module stays withheld. DURUM semantics,
   D-003, DQ-5 and DQ-6 are unchanged.
+
+### D-052 · 2026-10-20 · Request-pinned generations; the saved evaluation is never trusted (review of PR #28)
+- **One request, one view.** Inside an HTTP request the context, the owner-source entries and the Customer 360 snapshot
+  are read once and frozen, and the accuracy gate is built once from the published manifest and those views'
+  fingerprints. Endpoints return the pinned objects, so the evidence that authorizes a response belongs to its data.
+  A publication during a request affects later requests only. Publication (dashboard + manifest + context, or owner
+  view + owner record) and the capture of a request's gate inputs share one lock.
+- **Ids cover the evaluation.** `core_id` / `generation_id` digest full record content (validation results, evidence,
+  joins), not only source identity. This unkeyed checksum detects corruption; it is not presented as tamper protection.
+- **Restart re-derives.** A persisted manifest is only a candidate; evidence is re-derived from the original bytes and
+  the current selection file and accepted only if it reproduces the recorded `core_id`. Otherwise no evidence.
+- **Reconciliation output** stays private: evidence defaults to `data/reconciliation/`; the manifest beside the
+  dashboard is git-ignored. Overall result PASS / OPEN / FAIL with distinct exit codes.
+- **Unchanged:** `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; DQ-1 … DQ-6, D-003, Kredi DURUM open.

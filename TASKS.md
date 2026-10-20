@@ -9,6 +9,8 @@ Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi,
   - [ ] Kredi owner answers: DURUM / Kapalı meaning; why 11 positive-remaining 2026 rows are outside the saved filter; the negative residual; file of record; snapshot date; payment-record reconciliation.
   - [ ] Bind Hedef into the generation manifest; an approval mechanism for owner sources (Kredi / Gider-Gelir / Bütçe).
   - [ ] Approve or replace the provisional 45-day operational age limit (`operational_freshness`).
+  - [x] 2026-10-20 — Review of PR #28: request-pinned generations (no cross-generation response) and re-derived restart evidence (edited manifests never trusted); private evidence paths; PASS / OPEN / FAIL result (D-052, `release_gate.md` §10).
+  - [ ] Before any promotion: cross-response consistency in the dashboard page (the `X-Halsa-Generation` header is not yet checked by the page) and a single-process deployment constraint (or shared locking) for M8 deployment.
 
 ## Next (M8 — accuracy and production launch)
 - [ ] **M8-CP1 — Security-first owner/father authentication** (after ACCURACY-2 acceptance): server-side authentication and authorization for ALL sensitive UI and API routes, safe account provisioning and revocable sessions, CSRF protection, login rate limits, and synthetic/browser tests. See `docs/m8_father_first_launch.md`; one isolated PR; no public deployment or financial rule changes. Kredi `DURUM` remains unverified until owner clarification. Must keep the accuracy gate in front of every route.
