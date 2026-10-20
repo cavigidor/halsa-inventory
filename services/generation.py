@@ -15,9 +15,19 @@ the owner importers) parses those same bytes, so validation and calculation can 
 
 Binding (no evidence crosses a generation): a consumer gets evidence for a source only when the data it SERVES was
 computed from bytes with exactly the recorded fingerprint (`Manifest.bound_snapshot`). The dashboard build, the API,
-the Yönetim owner views and the refresh all go through this one object (`GenerationStore`). On restart a persisted
-manifest is restored only if every recorded source still has its recorded fingerprint and the served dashboard was
-built from that same generation.
+the Yönetim owner views and the refresh all go through this one object (`GenerationStore`).
+
+Identity covers the evaluation, not only the sources (review of PR #28 issue 2): `core_id` digests the policy version,
+every core record's FULL content (source identity, declarations, observed dates, validation results, evidence) and the
+join report; `generation_id` adds the owner records' full content. `file_modified` and `created_at` are informational
+and excluded. A manifest file whose content does not reproduce its recorded ids is rejected as corrupted — this is an
+UNKEYED checksum: it detects accidental corruption, not deliberate edits (whoever can edit the file can recompute it).
+
+Restart therefore never trusts the saved evaluation: a persisted manifest is only a CANDIDATE (dashboard built from
+it, every source file still has its recorded fingerprint). The first context build re-derives every validation result
+and all evidence from the original workbook bytes and the current selection file (`rederive_core`) and accepts the
+generation only if the re-derived manifest has exactly the recorded `core_id`; the re-derived manifest — never the
+file's content — is what gets installed. Any difference fails closed (no evidence).
 
 Manifests contain hashes, basenames, dates and counts only — never workbook values, names, amounts or paths.
 """
@@ -243,7 +253,14 @@ class SourceRecord:
     file_modified: str | None = None            # informational only
 
     def identity(self) -> list:
+        """Which source revision this is (key, fingerprint, selection, declarations)."""
         return [self.key, self.sha256, self.selection_origin, _jsonable(self.declared)]
+
+    def content(self) -> dict:
+        """Everything the record asserts, incl. validation results and evidence (not the informational file time)."""
+        d = self.to_dict()
+        d.pop("file_modified", None)
+        return d
 
     def to_dict(self) -> dict:
         d = {f.name: _jsonable(getattr(self, f.name)) for f in dataclasses.fields(self) if f.name != "evidence"}
@@ -274,11 +291,14 @@ class Manifest:
 
     @property
     def core_id(self) -> str:
-        return _digest([self.policy_version, sorted(r.identity() for r in self.core)])
+        """Digest of the policy, every core record's full content and the join report (see the module docstring)."""
+        recs = sorted((r.content() for r in self.core), key=lambda c: (c["key"], c["sha256"]))
+        return _digest([self.policy_version, self.selection_origin, recs, _jsonable(self.joins)])
 
     @property
     def generation_id(self) -> str:
-        return _digest([self.core_id, sorted(r.identity() for r in self.owner)])
+        recs = sorted((r.content() for r in self.owner), key=lambda c: (c["key"], c["sha256"]))
+        return _digest([self.core_id, recs])
 
     def record(self, key: str) -> SourceRecord | None:
         for r in (*self.core, *self.owner):
@@ -322,7 +342,7 @@ class Manifest:
                 selection_origin=d.get("selection_origin") or "mtime_fallback",
                 policy_version=d.get("policy_version") or "")
         if m.core_id != d.get("core_id") or m.generation_id != d.get("generation_id"):
-            raise ValueError("manifest identity mismatch")       # edited or corrupted: never restored
+            raise ValueError("manifest identity mismatch")       # corrupted (unkeyed checksum): never a candidate
         return m
 
 
@@ -434,7 +454,34 @@ def build_core_records(frozen: Mapping[str, FrozenSource], frames: Mapping[str, 
 
 def build_manifest(frozen, frames, declarations, origin, today=None, owner: tuple[SourceRecord, ...] = ()) -> Manifest:
     core, joins = build_core_records(frozen, frames, declarations, origin, today)
-    return Manifest(dt.datetime.now().isoformat(timespec="seconds"), core, tuple(owner), joins, origin)
+    return Manifest(dt.datetime.now().isoformat(timespec="seconds"), core, tuple(owner), _jsonable(joins), origin)
+
+
+def rederive_core(data_folder: str, candidate: Manifest, today: dt.date | None = None):
+    """Re-derive a candidate generation's core evaluation from the ORIGINAL bytes (restart / rebuild).
+
+    Returns (manifest, paths, frames) built from the files the current selection names — or None when the selection
+    no longer names the recorded files, a file is missing, or a fingerprint differs. The caller compares the returned
+    manifest's `core_id` with the candidate's; nothing from the candidate's saved validation or evidence is reused."""
+    recs = {r.key: r for r in candidate.core if r.key != "liste"}
+    try:
+        paths, declarations, origin = select_core(data_folder)
+    except SelectionError:
+        return None
+    if origin != candidate.selection_origin:
+        return None
+    chosen = {k: p for k, p in paths.items() if p}
+    if set(chosen) != set(recs) or any(os.path.basename(chosen[k]) != recs[k].file for k in recs):
+        return None
+    try:
+        frozen = freeze(chosen)
+    except OSError:
+        return None
+    if any(frozen[k].sha256 != recs[k].sha256 for k in recs):
+        return None
+    frames = frames_from_frozen(frozen)
+    m = build_manifest(frozen, frames, declarations, origin, today)
+    return m, {k: paths.get(k) for k in CORE_KEYS}, frames
 
 
 # ---------------------------------------------------------------------------------------------
@@ -532,16 +579,62 @@ def read_manifest(path: str) -> Manifest | None:
 
 class GenerationStore:
     """The ONE current manifest. Installed atomically with the context it describes; owner records replaced as the
-    owner repository publishes them. Readers get an immutable Manifest (never a half-updated one)."""
+    owner repository publishes them. Readers get an immutable Manifest (never a half-updated one).
+
+    A manifest read from disk at restart is only a `pending` candidate: it gives no evidence until the context build
+    re-derives it from the original bytes and `accept_rederived` installs the re-derived one."""
 
     def __init__(self, manifest: Manifest | None = None) -> None:
         self._lock = threading.Lock()
         self._m = manifest
+        self._pending: Manifest | None = None
         self.restore_reason: str | None = None
 
     def current(self) -> Manifest | None:
         with self._lock:
             return self._m
+
+    @property
+    def pending(self) -> Manifest | None:
+        with self._lock:
+            return self._pending
+
+    def candidate(self) -> Manifest | None:
+        """The generation a context build should re-derive: a restart candidate, else the published one."""
+        with self._lock:
+            return self._pending or self._m
+
+    def accept_rederived(self, candidate: Manifest, rederived: Manifest) -> Manifest | None:
+        """Install `rederived` iff it reproduces the candidate's identity exactly (sources, declarations, validation,
+        evidence, joins). Otherwise fail closed: no core generation, reason `evidence_mismatch`."""
+        with self._lock:
+            if candidate is not self._pending and candidate is not self._m:
+                return None                                       # superseded meanwhile (a refresh published)
+            if rederived.core_id != candidate.core_id:
+                self._pending = None
+                if candidate is self._m:
+                    self._m = self._owner_only(self._m)
+                self.restore_reason = "evidence_mismatch"
+                return None
+            if self._m is not None and not rederived.owner:
+                rederived = dataclasses.replace(rederived, owner=self._m.owner)
+            self._m, self._pending = rederived, None
+            self.restore_reason = None
+            return rederived
+
+    def reject_candidate(self, candidate: Manifest, reason: str) -> None:
+        with self._lock:
+            if candidate is self._pending:
+                self._pending = None
+            if candidate is self._m:
+                self._m = self._owner_only(self._m)
+            self.restore_reason = reason
+
+    @staticmethod
+    def _owner_only(m: Manifest | None) -> Manifest | None:
+        if m is None or not m.owner:
+            return None
+        return Manifest(dt.datetime.now().isoformat(timespec="seconds"), (), m.owner)
 
     def install(self, manifest: Manifest | None, *, keep_owner: bool = True) -> Manifest | None:
         """A new CORE generation. Owner records of the previous manifest are carried over only as records of their own
@@ -550,6 +643,7 @@ class GenerationStore:
             if manifest is not None and keep_owner and self._m is not None and not manifest.owner:
                 manifest = dataclasses.replace(manifest, owner=self._m.owner)
             self._m = manifest
+            self._pending = None                                  # a published generation supersedes a candidate
             return manifest
 
     def replace_owner(self, key: str, record: SourceRecord | None) -> Manifest:
@@ -561,12 +655,13 @@ class GenerationStore:
             return self._m
 
     def restore(self, path: str, dashboard_path: str, data_folder: str) -> Manifest | None:
-        """Restart: restore only a manifest whose every core file still has its recorded fingerprint and whose
-        generation is the one the served dashboard was built from. Owner records are not restored (the owner sources
-        are re-read and re-recorded on their first load)."""
+        """Restart: a manifest becomes a PENDING candidate only if it is intact, the served dashboard was built from
+        it and every core file still has its recorded fingerprint. It provides no evidence until the context build
+        re-derives it (`ContextRepository._build` → `rederive_core` → `accept_rederived`). Owner records are not
+        restored (the owner sources are re-read and re-recorded on their first load)."""
         m = read_manifest(path)
         if m is None:
-            self.restore_reason = "no_manifest"
+            self.restore_reason = "no_manifest_or_corrupted" if os.path.exists(path) else "no_manifest"
             return None
         if dashboard_generation(dashboard_path) != m.core_id:
             self.restore_reason = "dashboard_generation_mismatch"
@@ -580,12 +675,12 @@ class GenerationStore:
                 return None
         m = dataclasses.replace(m, owner=())
         with self._lock:
-            self._m = m
-        self.restore_reason = None
+            self._pending = m
+        self.restore_reason = "pending_revalidation"
         return m
 
 
 __all__ = ["FrozenSource", "SourceRecord", "Manifest", "GenerationStore", "SelectionError", "load_selection",
-           "select_core", "freeze", "build_core_records", "build_manifest", "owner_record", "manifest_path",
+           "select_core", "freeze", "build_core_records", "build_manifest", "rederive_core", "owner_record", "manifest_path",
            "write_manifest", "read_manifest", "dashboard_generation", "sha256_bytes", "sha256_file", "CORE_KEYS",
            "OWNER_KEYS", "SELECTION_FILE", "SELECTION_SCHEMA"]

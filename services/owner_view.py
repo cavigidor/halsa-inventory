@@ -32,6 +32,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from services import request_pin as RP
+
 SOURCES = ("kredi", "gider_gelir", "butce")
 SOURCE_LABELS = {"kredi": "Şirket Finansmanı / Kredi Takibi", "gider_gelir": "Gider / Gelir", "butce": "Bütçe"}
 NOT_CONFIGURED, LOADING, READY, FAILED = "not_configured", "loading", "ready", "failed"
@@ -438,7 +440,11 @@ class OwnerRepository:
         return {"started": True, "generation": gen}
 
     def snapshot(self) -> dict[str, dict]:
-        """A consistent copy of every source entry (views are immutable once built)."""
+        """A consistent copy of every source entry (views are immutable once built). Pinned per HTTP request
+        (services/request_pin): a reload during a request never changes what that request returns."""
+        return RP.pinned(self, "owner", self._snapshot_now)
+
+    def _snapshot_now(self) -> dict[str, dict]:
         with self._lock:
             return {k: dict(v) for k, v in self._entries.items()}
 
@@ -477,15 +483,17 @@ class OwnerRepository:
                 if not cfg.configured:
                     continue
                 entry = self._load_one(k, cfg)
-                with self._lock:
-                    if gen != self._gen:            # a newer load started: never overwrite it
-                        return
-                    self._entries[k] = entry
-                if self._on_record is not None:     # after the view swap; until then the record does not bind
-                    try:
-                        self._on_record(k, entry.get("record"))
-                    except Exception:
-                        pass
+                # the view and its generation record are published together (one step for every reader)
+                with RP.PUBLISH_LOCK:
+                    with self._lock:
+                        if gen != self._gen:            # a newer load started: never overwrite it
+                            return
+                        self._entries[k] = entry
+                    if self._on_record is not None:
+                        try:
+                            self._on_record(k, entry.get("record"))
+                        except Exception:
+                            pass
         finally:
             with self._lock:
                 if gen == self._gen:

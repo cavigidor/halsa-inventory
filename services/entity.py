@@ -6,6 +6,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 from services import context as CTX
+from services import request_pin as RP
 
 
 class ContextRepository:
@@ -16,6 +17,8 @@ class ContextRepository:
         self._generations = generation_store   # M8-ACCURACY-2: build from the restored generation's exact bytes
         self._cust_idx = None
         self._prod_idx = None
+        self._idx_ctx = None
+        self._idx_lock = threading.Lock()   # indices only; never held during a context build
         self._lock = threading.Lock()   # warm-up thread and requests never build twice in parallel
         self.last_error = None          # short description of the last failed build (for /api/health)
 
@@ -25,6 +28,13 @@ class ContextRepository:
         return self._ctx is not None
 
     def context(self, refresh=False):
+        """The live context (built on first use). Inside an HTTP request the context is pinned: every read in that
+        request returns the same object, even if a refresh installs a newer one meanwhile (services/request_pin)."""
+        if refresh:
+            return self._context_unpinned(refresh=True)
+        return RP.pinned(self, "ctx", self._context_unpinned)
+
+    def _context_unpinned(self, refresh=False):
         if self._ctx is not None and not refresh:
             return self._ctx
         with self._lock:
@@ -42,35 +52,37 @@ class ContextRepository:
         return self._ctx
 
     def _build(self):
-        """With a restored generation: freeze the recorded files, require their recorded fingerprints, and build from
-        those bytes (the context then carries that generation). Otherwise (no generation, or a file changed since it
-        was published): the legacy build, which carries no generation and therefore receives no evidence."""
+        """With a published or restart candidate generation: freeze the recorded files, require their recorded
+        fingerprints, RE-DERIVE every validation result and all evidence from those bytes and the current selection
+        file, and accept the generation only if the re-derived manifest has exactly the recorded identity (which covers
+        the evidence). The saved manifest file is never trusted as evidence (review of PR #28 issue 2). Otherwise: the
+        legacy build, which carries no generation and therefore receives no evidence."""
         store = self._generations
-        m = store.current() if store is not None else None
-        if m is not None and m.core:
+        cand = store.candidate() if store is not None else None
+        if cand is not None and cand.core:
             from services import generation as GEN
-            recs = {r.key: r for r in m.core if r.key != "liste"}
-            paths = {k: (os.path.join(self._folder, recs[k].file) if k in recs else None) for k in GEN.CORE_KEYS}
-            try:
-                frozen = GEN.freeze(paths)
-                same = all(frozen[k].sha256 == recs[k].sha256 for k in recs) and set(frozen) == set(recs)
-            except OSError:
-                same = False
-            if same:
-                frames = GEN.frames_from_frozen(frozen)
-                ctx = CTX.build_context(self._folder, inflation_rate=self._infl, sources=paths, frames=frames)
-                ctx.generation = {"core_id": m.core_id, "served": {r.key: r.sha256 for r in m.core}}
-                ctx.generation_manifest = m
-                return ctx
-            store.install(None, keep_owner=False)          # the published generation no longer matches the files
-            store.restore_reason = "source_changed"
+            built = GEN.rederive_core(self._folder, cand)
+            if built is not None:
+                m, paths, frames = built
+                m = store.accept_rederived(cand, m)
+                if m is not None:
+                    ctx = CTX.build_context(self._folder, inflation_rate=self._infl, sources=paths, frames=frames)
+                    ctx.generation = {"core_id": m.core_id, "served": {r.key: r.sha256 for r in m.core}}
+                    ctx.generation_manifest = m
+                    return ctx
+            else:
+                store.reject_candidate(cand, "source_changed")    # the generation no longer matches the files
         return CTX.build_context(self._folder, inflation_rate=self._infl)
 
     def refresh(self):
         return self.context(refresh=True)
 
     def current(self):
-        """The live context or None. Never builds (M5-5: the refresh compares against it)."""
+        """The live context or None. Never builds (M5-5: the refresh compares against it). Pinned per request."""
+        return RP.pinned(self, "ctx", lambda: self._ctx)
+
+    def live(self):
+        """The live context, never pinned (background maintenance only; never for a response)."""
         return self._ctx
 
     def replace_context(self, staged_ctx):
@@ -85,8 +97,24 @@ class ContextRepository:
         return self._ctx
 
     # ---- indices built from the assembled context (no Excel re-read) ----
-    def _build_indices(self):
+    def _indices(self):
+        """Indices of the context THIS caller sees (pinned in a request). Cached only for the live context, so a
+        request pinned to an older generation can never leave its index behind for newer requests."""
         ctx = self.context()
+        with self._idx_lock:
+            if self._idx_ctx is ctx and self._cust_idx is not None:
+                return self._cust_idx, self._prod_idx
+        cust, prod = self._compute_indices(ctx)
+        with self._idx_lock:
+            if ctx is self._ctx:
+                self._idx_ctx, self._cust_idx, self._prod_idx = ctx, cust, prod
+        return cust, prod
+
+    def _build_indices(self):
+        """Build (and cache, for the live context) the indices."""
+        self._indices()
+
+    def _compute_indices(self, ctx):
         cust = self._customer_index(ctx.get("winback", []), ctx.get("shrinking", []), ctx.get("collections", []),
                                     ctx.get("risk", []), ctx.get("action_customers") or {})
         # M7-2: customers of the private sales-queue candidates that the public index does not know. Fallback only:
@@ -109,7 +137,7 @@ class ContextRepository:
             d.update({"status": "overstock", "stock": r.get("stock"),
                       "inventory_value": r.get("inv"), "historical_buyer_count": r.get("buyers"),
                       "ranked_buyers": r.get("top_buyers", [])})
-        self._cust_idx, self._prod_idx = cust, prod
+        return cust, prod
 
     @staticmethod
     def _customer_index(winback, shrinking, collections, risk, extra):
@@ -143,11 +171,7 @@ class ContextRepository:
         return cust
 
     def customer(self, code):
-        if self._cust_idx is None:
-            self._build_indices()
-        return self._cust_idx.get(str(code))
+        return self._indices()[0].get(str(code))
 
     def product(self, code):
-        if self._prod_idx is None:
-            self._build_indices()
-        return self._prod_idx.get(str(code))
+        return self._indices()[1].get(str(code))

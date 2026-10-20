@@ -38,6 +38,7 @@ import dashboard_builder as db  # noqa: E402
 from services import sales_projection as SP  # noqa: E402
 from services.importers.base import run_import  # noqa: E402
 from services import generation as GEN  # noqa: E402
+from services import request_pin as RP  # noqa: E402
 from services.importers.models import Audience, Confidence, Severity  # noqa: E402
 from services.importers.spec import FieldSpec, FieldType, SourceSpec, TableLayout  # noqa: E402
 
@@ -572,7 +573,10 @@ class Customer360Repository:
 
     # -- live signature ---------------------------------------------------------------------
     def _live(self) -> tuple[dict | None, SourceSignature | None]:
-        ctx = self._ctx_repo.current()
+        # maintenance uses the LIVE context (never a request's pinned one), so a request pinned to an older
+        # generation cannot discard the snapshot of the newer one
+        live = getattr(self._ctx_repo, "live", None)
+        ctx = live() if callable(live) else self._ctx_repo.current()
         if ctx is None:
             return None, None
         return ctx, signature_of(ctx, self._hedef_path, self._hedef_snapshot)
@@ -589,6 +593,11 @@ class Customer360Repository:
             return {"state": "error", "error_code": e.code, "message": e.message}
 
     def snapshot(self) -> Customer360Snapshot:
+        """The current snapshot. Pinned per HTTP request (services/request_pin); endpoints still compare its signature
+        with the (pinned) context and refuse a mismatch."""
+        return RP.pinned(self, "c360", self._snapshot_now)
+
+    def _snapshot_now(self) -> Customer360Snapshot:
         ctx, sig = self._live()
         with self._lock:
             if self._snap is not None and (sig is None or self._snap.signature != sig):

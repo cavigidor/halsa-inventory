@@ -35,6 +35,7 @@ import config as C                     # noqa: E402
 import dashboard_builder as db         # noqa: E402
 from services import context as CTX    # noqa: E402
 from services import generation as GEN  # noqa: E402
+from services import request_pin as RP  # noqa: E402
 
 log = logging.getLogger("refresh")
 
@@ -324,6 +325,10 @@ def _restore_previous(p, had_live, had_manifest):
     return ok and had_live
 
 
+def _after_manifest_swap():
+    """Test seam between the two file replacements (a crash here leaves a new manifest beside the old dashboard)."""
+
+
 def _remove(path):
     try:
         os.remove(path)
@@ -413,28 +418,33 @@ def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, 
             common["errors"] = ver["errors"]
             raise StepError("verify", ver["errors"][0])
 
-        # 4. swap: dashboard atomically, then the context; keep the previous dashboard
+        # 4. publish: dashboard, manifest and context as ONE step for every in-process reader (request_pin
+        #    PUBLISH_LOCK — a request captures its gate inputs under the same lock). On any failure the previous
+        #    dashboard, manifest and context are restored inside the same step. Another process (a restart) can see
+        #    the two files mid-swap; restore then refuses the pair (dashboard / manifest generation mismatch).
         had_live = os.path.exists(p["live"])
         had_manifest = os.path.exists(p["manifest"])
-        try:
-            if had_live:
-                shutil.copy2(p["live"], p["prev_tmp"])
-            if had_manifest:
-                shutil.copy2(p["manifest"], p["manifest_prev_tmp"])
-            os.replace(p["staged"], p["live"])
-            os.replace(p["manifest_staged"], p["manifest"])
-        except Exception as e:
-            log.exception("refresh: dashboard swap failed")
-            _restore_previous(p, had_live, had_manifest)
-            raise StepError("swap", f"Pano değiştirilemedi ({type(e).__name__}).") from None
-        if install is not None:
+        with RP.PUBLISH_LOCK:
             try:
-                install(staged)
+                if had_live:
+                    shutil.copy2(p["live"], p["prev_tmp"])
+                if had_manifest:
+                    shutil.copy2(p["manifest"], p["manifest_prev_tmp"])
+                os.replace(p["manifest_staged"], p["manifest"])
+                _after_manifest_swap()
+                os.replace(p["staged"], p["live"])
             except Exception as e:
-                log.exception("refresh: context install failed")
-                restored = _restore_previous(p, had_live, had_manifest)
-                raise StepError("swap", f"Yeni bağlam devreye alınamadı ({type(e).__name__}); "
-                                + ("önceki pano geri yüklendi." if restored else "pano geri yüklenemedi.")) from None
+                log.exception("refresh: dashboard swap failed")
+                _restore_previous(p, had_live, had_manifest)
+                raise StepError("swap", f"Pano değiştirilemedi ({type(e).__name__}).") from None
+            if install is not None:
+                try:
+                    install(staged)
+                except Exception as e:
+                    log.exception("refresh: context install failed")
+                    restored = _restore_previous(p, had_live, had_manifest)
+                    raise StepError("swap", f"Yeni bağlam devreye alınamadı ({type(e).__name__}); "
+                                    + ("önceki pano geri yüklendi." if restored else "pano geri yüklenemedi.")) from None
         if had_live:
             try:
                 os.replace(p["prev_tmp"], p["prev"])

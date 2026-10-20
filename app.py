@@ -28,6 +28,7 @@ from services import crm as CRM
 from services import owner_view as OV
 from services import accuracy as ACC
 from services import generation as GEN
+from services import request_pin as RP  # noqa: E402
 from services import action_sources  # noqa: F401  (registers the built-in deterministic sources)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -92,19 +93,49 @@ def served_fingerprints():
     return served
 
 
+def _build_gate():
+    """(manifest, served fingerprints, gate), captured together under the publish lock so no publication can fall
+    between reading the manifest and reading the views being served."""
+    store = getattr(app.state, "generations", None)
+    with RP.PUBLISH_LOCK:
+        m = store.current() if store is not None else None
+        served = served_fingerprints()
+    if m is None:
+        return None, served, ACC.current_gate()
+    return m, served, ACC.current_gate(snapshot=m.bound_snapshot(served), expected_generation=m.generation_id)
+
+
 def accuracy_gate():
     """The gate for this request (production: services.accuracy.current_gate; no runtime switch exists), bound to the
     ONE published generation (M8-ACCURACY-2): evidence only for sources whose served data has the recorded fingerprint.
-    No published generation → no evidence → every source-bound output withheld."""
-    store = getattr(app.state, "generations", None)
-    m = store.current() if store is not None else None
-    if m is None:
-        return ACC.current_gate()
-    return ACC.current_gate(snapshot=m.bound_snapshot(served_fingerprints()), expected_generation=m.generation_id)
+    No published generation → no evidence → every source-bound output withheld.
+
+    Request-pinned (review of PR #28 issue 1): built ONCE per request, from the context / owner views that this request
+    pins (services/request_pin). The endpoint then reads those same pinned objects, so the evidence that authorized the
+    response always belongs to the data in it, even if a refresh or an owner reload publishes meanwhile."""
+    v = RP.current_view()
+    if v is None:
+        return _build_gate()[2]
+    with v.lock():
+        if v.gate is None:
+            v.manifest, v.served, v.gate = _build_gate()
+        return v.gate
 
 
 @app.middleware("http")
 async def _accuracy_gate(request: Request, call_next):
+    token = RP.begin()                                # one pinned view per request (services/request_pin)
+    try:
+        resp = await _accuracy_decide(request, call_next)
+        v = RP.current_view()
+        if v is not None and v.gate is not None:      # which generation authorized this response (no values)
+            resp.headers["X-Halsa-Generation"] = v.manifest.generation_id if v.manifest is not None else "none"
+        return resp
+    finally:
+        RP.end(token)
+
+
+async def _accuracy_decide(request: Request, call_next):
     method = "GET" if request.method == "HEAD" else request.method
     tpl = _route_template(request.scope)
     if tpl is None or method == "OPTIONS":
@@ -233,7 +264,13 @@ def dashboard():
         return HTMLResponse(status_code=503, content=(
             "<!doctype html><meta charset='utf-8'><p>Bu pano doğrulama kuralları uygulanmadan oluşturulmuş; "
             "gösterilmiyor. Verileri yenileyin veya panoyu yeniden oluşturun.</p>"))
-    return FileResponse(path, media_type="text/html")
+    with RP.PUBLISH_LOCK:                              # never a dashboard file mid-publication
+        try:
+            with open(path, "rb") as fh:
+                body = fh.read()
+        except OSError:
+            return HTMLResponse(status_code=404, content="<!doctype html><meta charset='utf-8'><p>Pano okunamadı.</p>")
+    return HTMLResponse(content=body)
 
 
 def _gated_dashboard(path):
@@ -294,19 +331,22 @@ def context_refresh(repo: ContextRepository = Depends(get_repo)):
 
 
 def _install_generation(repo, staged):
-    """Install the verified context AND its generation together (M8-ACCURACY-2). If the generation cannot be
-    installed, the previous context is put back, so context and evidence never diverge."""
+    """Install the verified context AND its generation together (M8-ACCURACY-2), under the publish lock (the refresh
+    holds it around the file swap too). If the generation cannot be installed, the previous context is put back, so
+    context and evidence never diverge."""
     store = getattr(app.state, "generations", None)
-    previous = repo.current()
-    repo.replace_context(staged)
-    if store is None:
-        return
-    try:
-        store.install(getattr(staged, "generation_manifest", None))
-    except Exception:
-        if previous is not None:
-            repo.replace_context(previous)
-        raise
+    with RP.PUBLISH_LOCK:
+        live = getattr(repo, "live", None)
+        previous = live() if callable(live) else repo.current()      # the LIVE context, not this request's pin
+        repo.replace_context(staged)
+        if store is None:
+            return
+        try:
+            store.install(getattr(staged, "generation_manifest", None))
+        except Exception:
+            if previous is not None:
+                repo.replace_context(previous)
+            raise
 
 
 @app.get("/api/accuracy/status")
@@ -314,9 +354,9 @@ def accuracy_status():
     """System information: the published generation (fingerprints, declared dates, validation counts — no values) and
     the verification state of every registered output for the data being served. No business number."""
     store = getattr(app.state, "generations", None)
-    m = store.current() if store is not None else None
     gate = accuracy_gate()
-    served = served_fingerprints()
+    v = RP.current_view()                                  # the manifest and fingerprints this gate was built from
+    m, served = (v.manifest, v.served or {}) if v is not None else _build_gate()[:2]
     sources = []
     for r in ((*m.core, *m.owner) if m is not None else ()):
         sources.append({"key": r.key, "role": r.role, "source_type": r.source_type, "date_kind": r.date_kind,
@@ -325,6 +365,7 @@ def accuracy_status():
     return {"generation_id": m.generation_id if m else None, "core_id": m.core_id if m else None,
             "selection_origin": m.selection_origin if m else None,
             "restore_reason": getattr(store, "restore_reason", None) if store else None,
+            "restore_pending": bool(store is not None and store.pending is not None),
             "generation_bound_api_evidence": ACC.GENERATION_BOUND_API_EVIDENCE, "sources": sources,
             "metrics": [{"key": k, "state": gate.decide(k).state.value, "codes": list(gate.decide(k).codes)}
                         for k in ACC.REGISTER], "ai_used": False}
