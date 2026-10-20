@@ -778,3 +778,62 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   with the API, owner views and refresh (with transition / rollback / restart tests) is a **mandatory M8-ACCURACY-2
   acceptance criterion** (`docs/accuracy/release_gate.md` §6 A–F).
 - **Unchanged:** no financial calculation or business rule; Kredi DURUM unresolved; DQ-1/2/4/5/6 unresolved.
+
+### D-051 · 2026-10-19 · One source-generation manifest; declared source dates; revised Kredi layout (M8-ACCURACY-2)
+- **One generation, one manifest.** Every published core generation and every loaded owner source is described by a
+  manifest of SHA-256 fingerprints of the **original workbook bytes** plus declared dates, validation counts and
+  `SourceEvidence` (`services/generation.py`). Dashboard, API, Yönetim and refresh use it; evidence binds per source
+  only when the served fingerprint equals the recorded one. Mixed generations never combine.
+  A failed refresh keeps the previous dashboard, manifest, context and evidence. A restart restores only an exact match.
+- **Fingerprints follow bytes, not frames.** A formula, cell type or workbook revision change gives a new generation
+  even when pandas reads identical values (the PR #27 frame hash could not see these).
+- **Dates are declared, never inferred.** `data/sources.json` (private) selects the core files explicitly and declares
+  snapshot / report dates and period completeness. File timestamps are information only. Without the file the
+  modification-time choice is recorded as `mtime_fallback` and cannot verify. The 45-day operational limit is
+  provisional (`operational_freshness`, unapproved).
+- **Fingerprint-bound approvals.** A core source may carry an approval (D-xxx, `totals_consistent`,
+  `mapping_approved`) bound to one SHA-256. It is ignored for any other revision and cannot promote a metric by itself.
+- **Revised Kredi layout.** The owner's filtered `kredi takip` workbook is supported as layout `filtered_takip`
+  (two-row header, ERP control row, SUBTOTAL row, saved date filter). All rows are imported, hidden ones included.
+  Full-source totals are checked against the control row; filtered totals are checked separately against the
+  SUBTOTAL row. Negative remaining amounts and Kapalı rows with remaining amounts are reported, never repaired.
+  The saved filter is a view, never a payment fact. The real workbook was not opened in the cloud; the owner runs
+  `scripts/reconcile_sources.py` locally.
+- **No promotion.** `GENERATION_BOUND_API_EVIDENCE` stays False until the owner's real-data acceptance
+  (`docs/accuracy/release_gate.md` §8.3). No metric is VERIFIED. The Kredi module stays withheld. DURUM semantics,
+  D-003, DQ-5 and DQ-6 are unchanged.
+
+### D-052 · 2026-10-20 · Request-pinned generations; the saved evaluation is never trusted (review of PR #28)
+- **One request, one view.** Inside an HTTP request the context, the owner-source entries and the Customer 360 snapshot
+  are read once and frozen, and the accuracy gate is built once from the published manifest and those views'
+  fingerprints. Endpoints return the pinned objects, so the evidence that authorizes a response belongs to its data.
+  A publication during a request affects later requests only. Publication (dashboard + manifest + context, or owner
+  view + owner record) and the capture of a request's gate inputs share one lock.
+- **Ids cover the evaluation.** `core_id` / `generation_id` digest full record content (validation results, evidence,
+  joins), not only source identity. This unkeyed checksum detects corruption; it is not presented as tamper protection.
+- **Restart re-derives.** A persisted manifest is only a candidate; evidence is re-derived from the original bytes and
+  the current selection file and accepted only if it reproduces the recorded `core_id`. Otherwise no evidence.
+- **Reconciliation output** stays private: evidence defaults to `data/reconciliation/`; the manifest beside the
+  dashboard is git-ignored. Overall result PASS / OPEN / FAIL with distinct exit codes.
+- **Unchanged:** `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; DQ-1 … DQ-6, D-003, Kredi DURUM open.
+
+### D-053 · 2026-10-20 · Dashboard bytes are authorized like an API response; evidence output never touches an input
+- **`GET /` is gated.** The HTML lists the metrics it embeds. The manifest records the SHA-256 of the exact published HTML.
+  `GET /` captures the bytes and the accepted generation under the publish lock and binds evidence only when both match
+  the accepted, re-validated generation. The current gate must authorize every embedded metric; otherwise 503, no
+  data. A page that embeds no source-bound metric needs no evidence; a page without the marker is refused.
+- **Reconciliation never writes over inputs.** A destination that is, or aliases, an input, or that already exists,
+  is refused. Evidence files are created exclusively (no truncation possible), and write failures are reported (exit 4).
+- **Readiness is reported on three levels:** technical foundation / owner-local real-data acceptance / individual
+  metric promotion (`docs/accuracy/release_gate.md` §11.3).
+- **Unchanged:** `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; Kredi questions, DQ-1 … DQ-6, D-003 open.
+
+### D-054 · 2026-10-20 · GET / serves only bytes this server published for the accepted generation
+- A dashboard file's own markers (policy, generation, displayed metrics — including an empty list) are claims, never
+  evidence. The on-disk HTML is served only when an accepted, re-validated generation exists, the markers match it,
+  the bytes equal the digest this process recorded when publishing them, and the current gate authorizes every
+  displayed metric. Otherwise a server-generated neutral page (503); the file is never returned.
+- After a restart the re-derived generation gets no dashboard digest from the saved manifest. The server re-builds the
+  dashboard from the re-derived evidence and publishes page + manifest + digest as one locked step.
+- A plain `dashboard_builder.py` build is not served; publication goes through the refresh.
+- **Unchanged:** `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; Kredi DURUM, D-003, DQ-1 … DQ-6 open.

@@ -32,6 +32,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from services import request_pin as RP
+
 SOURCES = ("kredi", "gider_gelir", "butce")
 SOURCE_LABELS = {"kredi": "Şirket Finansmanı / Kredi Takibi", "gider_gelir": "Gider / Gelir", "butce": "Bütçe"}
 NOT_CONFIGURED, LOADING, READY, FAILED = "not_configured", "loading", "ready", "failed"
@@ -325,31 +327,52 @@ def build_butce_view(res) -> ButceView:
 # ---------------------------------------------------------------------------------------------
 # loaders (the existing importer contracts, called through their modules so tests can observe them)
 # ---------------------------------------------------------------------------------------------
+class SourceChanged(RuntimeError):
+    """The workbook changed while it was being read (fingerprint before ≠ after)."""
+
+
 def _load_kredi(cfg: OwnerSourceConfig):
+    """M8-ACCURACY-2: the bytes are frozen once; the importer parses exactly those bytes; the record carries their
+    fingerprint and the validation evidence."""
+    from services import generation as GEN
     from services.importers import kredi as KR
     snap = _opt_date(cfg.options.get("snapshot_date"))
-    res = KR.import_kredi(cfg.path, snapshot_date=snap)
-    return res, (build_kredi_view(res) if res.ok else None)
+    fs = GEN.FrozenSource.read("kredi", cfg.path)
+    res = KR.import_kredi(cfg.path, snapshot_date=snap, content=fs.data)
+    rec = GEN.owner_record("kredi", fs, res, declared={"snapshot_date": snap}, today=dt.date.today())
+    return res, (build_kredi_view(res) if res.ok else None), rec
+
+
+def _guarded(key: str, cfg: OwnerSourceConfig, run, declared: dict):
+    """Importers that read from a path: the fingerprint is taken before and after; a change in between fails."""
+    from services import generation as GEN
+    fs = GEN.FrozenSource.read(key, cfg.path)
+    res = run()
+    if GEN.sha256_file(cfg.path) != fs.sha256:
+        raise SourceChanged(key)
+    return res, GEN.owner_record(key, fs, res, declared=declared, today=dt.date.today())
 
 
 def _load_gider_gelir(cfg: OwnerSourceConfig):
     from services.importers import gider_gelir as GG
     year = _opt_year(cfg.options.get("report_year"))
-    res = GG.import_gider_gelir(cfg.path, report_year=year)
-    return res, (build_gider_gelir_view(res) if res.ok else None)
+    res, rec = _guarded("gider_gelir", cfg, lambda: GG.import_gider_gelir(cfg.path, report_year=year), {})
+    return res, (build_gider_gelir_view(res) if res.ok else None), rec
 
 
 def _load_butce(cfg: OwnerSourceConfig):
     from services.importers import butce as BU
     year = _opt_year(cfg.options.get("planning_year"))
     snap = _opt_date(cfg.options.get("snapshot_date"))
-    res = BU.import_butce(cfg.path, planning_year=year, snapshot_date=snap)
-    return res, (build_butce_view(res) if res.ok else None)
+    res, rec = _guarded("butce", cfg, lambda: BU.import_butce(cfg.path, planning_year=year, snapshot_date=snap),
+                        {"snapshot_date": snap})
+    return res, (build_butce_view(res) if res.ok else None), rec
 
 
 LOADERS: dict[str, Callable] = {"kredi": _load_kredi, "gider_gelir": _load_gider_gelir, "butce": _load_butce}
 FAIL_MESSAGES = {"config_invalid": "Yapılandırma değeri geçersiz (tarih YYYY-AA-GG, yıl YYYY olmalı).",
                  "file_missing": "Yapılandırılan dosya bulunamadı.",
+                 "source_changed": "Dosya okunurken değişti; yeniden yükleyin.",
                  "exception": "Kaynak okunamadı.",
                  "import_failed": "Kaynak doğrulanamadı; hiçbir değer kullanılmadı."}
 
@@ -378,8 +401,9 @@ class OwnerRepository:
     """
 
     def __init__(self, configs: dict[str, OwnerSourceConfig] | None = None, *, background: bool = True,
-                 loaders: dict[str, Callable] | None = None) -> None:
+                 loaders: dict[str, Callable] | None = None, on_record: Callable | None = None) -> None:
         self._configs = configs if configs is not None else config_from_env()
+        self._on_record = on_record        # M8-ACCURACY-2: publishes each loaded source's record to the generation
         self._background = background
         self._loaders = loaders or LOADERS
         self._lock = threading.Lock()
@@ -390,7 +414,8 @@ class OwnerRepository:
         for k in SOURCES:
             cfg = self._configs.get(k) or OwnerSourceConfig(k, None)
             self._entries[k] = {"state": NOT_CONFIGURED if not cfg.configured else LOADING, "view": None,
-                                "error_code": None, "issue_codes": [], "loaded_at": None, "reloading": False}
+                                "error_code": None, "issue_codes": [], "loaded_at": None, "reloading": False,
+                                "fingerprint": None, "record": None}
         self.loads: dict[str, int] = {k: 0 for k in SOURCES}
 
     # -- public --------------------------------------------------------------------------
@@ -415,7 +440,11 @@ class OwnerRepository:
         return {"started": True, "generation": gen}
 
     def snapshot(self) -> dict[str, dict]:
-        """A consistent copy of every source entry (views are immutable once built)."""
+        """A consistent copy of every source entry (views are immutable once built). Pinned per HTTP request
+        (services/request_pin): a reload during a request never changes what that request returns."""
+        return RP.pinned(self, "owner", self._snapshot_now)
+
+    def _snapshot_now(self) -> dict[str, dict]:
         with self._lock:
             return {k: dict(v) for k, v in self._entries.items()}
 
@@ -454,10 +483,17 @@ class OwnerRepository:
                 if not cfg.configured:
                     continue
                 entry = self._load_one(k, cfg)
-                with self._lock:
-                    if gen != self._gen:            # a newer load started: never overwrite it
-                        return
-                    self._entries[k] = entry
+                # the view and its generation record are published together (one step for every reader)
+                with RP.PUBLISH_LOCK:
+                    with self._lock:
+                        if gen != self._gen:            # a newer load started: never overwrite it
+                            return
+                        self._entries[k] = entry
+                    if self._on_record is not None:
+                        try:
+                            self._on_record(k, entry.get("record"))
+                        except Exception:
+                            pass
         finally:
             with self._lock:
                 if gen == self._gen:
@@ -465,20 +501,27 @@ class OwnerRepository:
 
     def _load_one(self, key: str, cfg: OwnerSourceConfig) -> dict:
         base = {"view": None, "issue_codes": [], "loaded_at": dt.datetime.now().isoformat(timespec="seconds"),
-                "reloading": False}
+                "reloading": False, "fingerprint": None, "record": None}
         if not os.path.isfile(cfg.path):
             return {**base, "state": FAILED, "error_code": "file_missing"}
         try:
             self.loads[key] += 1
-            res, view = self._loaders[key](cfg)
+            out = self._loaders[key](cfg)
         except _ConfigError:
             return {**base, "state": FAILED, "error_code": "config_invalid"}
+        except SourceChanged:
+            return {**base, "state": FAILED, "error_code": "source_changed"}
         except Exception:                            # never a stack trace, path or cell content
             return {**base, "state": FAILED, "error_code": "exception"}
+        res, view = out[0], out[1]
+        record = out[2] if len(out) > 2 else None
+        base["record"] = record
         if view is None:
             return {**base, "state": FAILED, "error_code": "import_failed", "issue_codes": _issue_codes(res),
                     "failed_step": getattr(res, "failed_step", None)}
-        return {**base, "state": READY, "error_code": None, "view": view}
+        # the served view's fingerprint: evidence binds only while this exact revision is served
+        return {**base, "state": READY, "error_code": None, "view": view,
+                "fingerprint": record.sha256 if record is not None else None}
 
 
 # ---------------------------------------------------------------------------------------------

@@ -27,6 +27,8 @@ from services import fair_center as FC
 from services import crm as CRM
 from services import owner_view as OV
 from services import accuracy as ACC
+from services import generation as GEN
+from services import request_pin as RP  # noqa: E402
 from services import action_sources  # noqa: F401  (registers the built-in deterministic sources)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -72,15 +74,68 @@ def _route_template(scope):
     return None
 
 
+def served_fingerprints():
+    """Fingerprints of the source revisions the API is SERVING right now: the live context's generation (core) and the
+    owner views currently installed. Evidence binds only to these (services/generation.Manifest.bound_snapshot)."""
+    served = {}
+    try:
+        repo = app.dependency_overrides.get(get_repo, get_repo)()
+        ctx = repo.current() if repo is not None else None
+        served.update(((getattr(ctx, "generation", None) or {}).get("served")) or {})
+    except Exception:
+        pass
+    try:
+        owner = app.dependency_overrides.get(get_owner, get_owner)()
+        for k, e in owner.snapshot().items():
+            served[k] = e.get("fingerprint")
+    except Exception:
+        pass
+    return served
+
+
+def _build_gate():
+    """(manifest, served fingerprints, gate), captured together under the publish lock so no publication can fall
+    between reading the manifest and reading the views being served."""
+    store = getattr(app.state, "generations", None)
+    with RP.PUBLISH_LOCK:
+        m = store.current() if store is not None else None
+        served = served_fingerprints()
+    if m is None:
+        return None, served, ACC.current_gate()
+    return m, served, ACC.current_gate(snapshot=m.bound_snapshot(served), expected_generation=m.generation_id)
+
+
 def accuracy_gate():
-    """The gate for this request (production: services.accuracy.current_gate; no runtime switch exists).
-    No evidence snapshot is passed: until M8-ACCURACY-2 shares the published generation's snapshot with the API
-    (ACC.GENERATION_BOUND_API_EVIDENCE), every source-bound metric is withheld here, whatever the dashboard shows."""
-    return ACC.current_gate()
+    """The gate for this request (production: services.accuracy.current_gate; no runtime switch exists), bound to the
+    ONE published generation (M8-ACCURACY-2): evidence only for sources whose served data has the recorded fingerprint.
+    No published generation → no evidence → every source-bound output withheld.
+
+    Request-pinned (review of PR #28 issue 1): built ONCE per request, from the context / owner views that this request
+    pins (services/request_pin). The endpoint then reads those same pinned objects, so the evidence that authorized the
+    response always belongs to the data in it, even if a refresh or an owner reload publishes meanwhile."""
+    v = RP.current_view()
+    if v is None:
+        return _build_gate()[2]
+    with v.lock():
+        if v.gate is None:
+            v.manifest, v.served, v.gate = _build_gate()
+        return v.gate
 
 
 @app.middleware("http")
 async def _accuracy_gate(request: Request, call_next):
+    token = RP.begin()                                # one pinned view per request (services/request_pin)
+    try:
+        resp = await _accuracy_decide(request, call_next)
+        v = RP.current_view()
+        if v is not None and v.gate is not None:      # which generation authorized this response (no values)
+            resp.headers["X-Halsa-Generation"] = v.manifest.generation_id if v.manifest is not None else "none"
+        return resp
+    finally:
+        RP.end(token)
+
+
+async def _accuracy_decide(request: Request, call_next):
     method = "GET" if request.method == "HEAD" else request.method
     tpl = _route_template(request.scope)
     if tpl is None or method == "OPTIONS":
@@ -127,13 +182,19 @@ def _warm_up(repo, c360=None):
 @app.on_event("startup")
 def _startup():
     ST.init_db()
-    app.state.repo = ContextRepository(data_folder=DATA_FOLDER, inflation_rate=INFLATION)
+    # M8-ACCURACY-2: restore the published generation only if the dashboard and every source still match it
+    app.state.generations = GEN.GenerationStore()
+    app.state.generations.restore(GEN.manifest_path(DASHBOARD_PATH), DASHBOARD_PATH, DATA_FOLDER)
+    app.state.repo = ContextRepository(data_folder=DATA_FOLDER, inflation_rate=INFLATION,
+                                       generation_store=app.state.generations,
+                                       on_generation_accepted=_republish_dashboard)
     app.state.provider = get_provider()
     app.state.agent = BusinessActionAgent(app.state.provider)
     app.state.c360 = C360.Customer360Repository(DATA_FOLDER, app.state.repo, hedef_path=HEDEF_PATH,
                                                 hedef_snapshot=HEDEF_SNAPSHOT_DATE, background=True)
     # M7-6 Yönetim: owner sources only from explicit env paths; loaded lazily when the tab is first opened.
-    app.state.owner = OV.OwnerRepository(OV.config_from_env(), background=True)
+    app.state.owner = OV.OwnerRepository(OV.config_from_env(), background=True,
+                                         on_record=lambda k, r: app.state.generations.replace_owner(k, r))
     if WARMUP_CONTEXT:
         threading.Thread(target=_warm_up, args=(app.state.repo, app.state.c360), name="context-warmup",
                          daemon=True).start()
@@ -193,27 +254,138 @@ def _action_out(a, status, cached=None):
 # ---------------- health / context ----------------
 @app.get("/", include_in_schema=False)
 def dashboard():
-    """Same-origin dashboard (D-020): open http://127.0.0.1:8000/ instead of the file."""
+    """Same-origin dashboard (D-020): open http://127.0.0.1:8000/ instead of the file.
+
+    M8-ACCURACY-2 (fail closed, review of PR #28): the on-disk HTML is served ONLY when its exact bytes, its generation
+    marker and its publication record match the currently ACCEPTED (re-validated) manifest, and the current gate
+    authorizes every metric it embeds. Anything else — no accepted generation, a pending restart candidate that does
+    not re-validate, other bytes, a missing marker — gets a server-generated neutral page; the file is never returned.
+    Claims inside the HTML (e.g. "displays no metric") are never trusted on their own."""
     path = DASHBOARD_PATH
-    if not os.path.isfile(path):
-        return HTMLResponse(status_code=404, content=(
-            "<!doctype html><meta charset='utf-8'><p>dashboard.html bulunamadı. "
-            "Önce panoyu oluşturun: <code>python dashboard_builder.py data</code></p>"))
-    # M8-ACCURACY: never serve a dashboard built before the factual-integrity gate (it embeds unverified rows).
-    if not _gated_dashboard(path):
-        return HTMLResponse(status_code=503, content=(
-            "<!doctype html><meta charset='utf-8'><p>Bu pano doğrulama kuralları uygulanmadan oluşturulmuş; "
-            "gösterilmiyor. Verileri yenileyin veya panoyu yeniden oluşturun.</p>"))
-    return FileResponse(path, media_type="text/html")
+    store = getattr(app.state, "generations", None)
+    if store is not None and store.pending is not None and store.current() is None:
+        _await_revalidation()                         # restart: re-derive the candidate (and re-publish) first
+    with RP.PUBLISH_LOCK:                              # bytes and accepted generation captured as ONE step
+        m = store.current() if store is not None else None
+        try:
+            with open(path, "rb") as fh:
+                body = fh.read()
+        except FileNotFoundError:
+            body = None
+        except OSError:
+            return _dashboard_unavailable("unreadable")
+    if body is None:
+        return HTMLResponse(status_code=404, content=_neutral_page(
+            "Pano henüz yayımlanmadı.",
+            "Verileri yenileyerek panoyu oluşturun: <code>python -m services.refresh</code> veya panodaki Yenile."))
+    ok, reason, gen_id = _dashboard_authorized(body, m)
+    if not ok:
+        log.info("dashboard withheld: %s", reason)
+        return _dashboard_unavailable(reason)
+    return HTMLResponse(content=body, headers={"X-Halsa-Generation": gen_id})
 
 
-def _gated_dashboard(path):
-    marker = f'<meta name="stockagent-accuracy" content="{ACC.POLICY_VERSION}">'.encode()
+def _republish_dashboard(manifest, paths, frames):
+    """After a restart the re-derived generation is accepted, but the dashboard file on disk is from before the
+    restart (its recorded digest came from the untrusted saved manifest). Build a NEW dashboard from the re-derived
+    evidence and the same frozen bytes, then publish it, its manifest and its digest as ONE step. Only bytes this
+    process published are ever served (`_dashboard_authorized`)."""
+    import dashboard_builder as db
+    store = getattr(app.state, "generations", None)
+    if store is None:
+        return
+    dash, folder = DASHBOARD_PATH, DATA_FOLDER
+    staged = dash + ".restore.new"
+    mstaged = GEN.manifest_path(dash) + ".restore.new"
     try:
-        with open(path, "rb") as f:
-            return marker in f.read(4096)
-    except OSError:
-        return False
+        db.build(folder, staged, sources=paths, frames=frames, manifest=manifest)
+        digest = GEN.sha256_file(staged)
+        with RP.PUBLISH_LOCK:
+            cur = store.current()
+            if cur is None or cur.core_id != manifest.core_id:   # a refresh published meanwhile: keep that one
+                return
+            GEN.write_manifest(mstaged, GEN.Manifest(cur.created_at, cur.core, (), cur.joins, cur.selection_origin,
+                                                     cur.policy_version, digest))
+            os.replace(staged, dash)
+            os.replace(mstaged, GEN.manifest_path(dash))
+            store.set_dashboard(cur.core_id, digest)
+        log.info("dashboard re-published after restart (generation %s)", manifest.core_id[:12])
+    except Exception as e:
+        log.warning("dashboard re-publication failed (%s); GET / stays withheld", type(e).__name__)
+    finally:
+        for f in (staged, mstaged):
+            try:
+                os.remove(f)
+            except OSError:
+                pass
+
+
+def _await_revalidation():
+    """A restart leaves the published manifest as a pending candidate; the context build re-derives it from the
+    original bytes (services/entity). Wait for that (the warm-up thread may already be doing it). Never raises."""
+    try:
+        app.dependency_overrides.get(get_repo, get_repo)().context()
+    except Exception as e:                              # recorded on the repository; the page stays withheld
+        log.info("dashboard: revalidation failed (%s)", type(e).__name__)
+
+
+def _neutral_page(title: str, detail: str) -> str:
+    """Server-generated status page: fixed Turkish text, no file content, no values, no paths."""
+    return ("<!doctype html><html lang=\"tr\"><head><meta charset=\"utf-8\"><title>Pano durumu</title>"
+            "</head><body><h1>" + title + "</h1><p>" + detail + "</p><p>Sahip yönergesi: doğrulanmış kanıt yoksa "
+            "iş sonucu gösterilmez.</p></body></html>")
+
+
+_UNAVAILABLE_TEXT = {
+    "no_accepted_generation": "Yayımlanmış ve doğrulanmış bir veri kuşağı yok (ör. kaynak değişti, yeniden doğrulama "
+                              "başarısız oldu). Verileri yenileyin.",
+    "generation_mismatch": "Diskteki pano, doğrulanmış veri kuşağına ait değil. Verileri yenileyin.",
+    "bytes_mismatch": "Diskteki pano, yayımlandığı halinden farklı. Verileri yenileyin.",
+    "policy_marker_missing": "Bu pano doğrulama kuralları uygulanmadan oluşturulmuş. Verileri yenileyin.",
+    "displayed_marker_missing": "Bu pano doğrulama kuralları uygulanmadan oluşturulmuş. Verileri yenileyin.",
+    "not_authorized": "Panodaki bazı sonuçlar artık doğrulanmış sayılmıyor (ör. kaynak tarihi eskidi). Verileri "
+                      "yenileyin.",
+}
+
+
+def _dashboard_unavailable(reason: str):
+    return HTMLResponse(status_code=503, headers={"X-Halsa-Dashboard": reason}, content=_neutral_page(
+        "Pano şu anda gösterilemiyor.",
+        _UNAVAILABLE_TEXT.get(reason, "Pano doğrulanamadı; doğrulanmamış sonuçlar gösterilmiyor. Verileri yenileyin "
+                                      "veya sunucunun hazırlanmasını bekleyin.")))
+
+
+def _dashboard_authorized(body: bytes, m) -> tuple[bool, str, str | None]:
+    """May these exact HTML bytes (captured under the publish lock together with `m`) be served now?
+
+    Every condition is required, in this order (fail closed):
+    1. an ACCEPTED, re-validated generation exists (`m`; a pending restart candidate is not accepted);
+    2. the page's policy marker is the current policy (replaces the old pre-lock `_gated_dashboard` read);
+    3. the page's generation marker equals `m.core_id`;
+    4. the SHA-256 of the exact bytes equals `m.dashboard_sha256` (recorded at publication) — so neither the content
+       nor the `stockagent-displayed` marker can have been edited;
+    5. the displayed marker is present, and the CURRENT gate, bound to `m`'s evidence, authorizes every metric in it
+       (today's freshness, current register). An empty list passes step 5 only because steps 1–4 proved the page is
+       the published one."""
+    if m is None or not m.core:
+        return False, "no_accepted_generation", None
+    if f'<meta name="stockagent-accuracy" content="{ACC.POLICY_VERSION}">'.encode() not in body[:4096]:
+        return False, "policy_marker_missing", None
+    gen, displayed = GEN.dashboard_markers(body)
+    if gen is None or gen != m.core_id:
+        return False, "generation_mismatch", None
+    if not m.dashboard_sha256 or GEN.sha256_bytes(body) != m.dashboard_sha256:
+        return False, "bytes_mismatch", None
+    if displayed is None:
+        return False, "displayed_marker_missing", None
+    try:
+        gate = ACC.current_gate(snapshot=m.core_snapshot(), expected_generation=m.generation_id)
+        refused = [k for k in displayed if not gate.decide(k).displayable]
+    except Exception:
+        return False, "authorization_error", None
+    if refused:
+        return False, "not_authorized", None
+    return True, "ok", m.generation_id
 
 
 @app.get("/api/health", response_model=S.Health)
@@ -258,10 +430,51 @@ def context_refresh(repo: ContextRepository = Depends(get_repo)):
     `python -m services.refresh`. Deterministic: never calls the AI provider; action state and AI cache stay.
     On success the verified context is installed in this server and dashboard.html is replaced atomically."""
     rep = RF.run_refresh(DATA_FOLDER, DASHBOARD_PATH, previous_context=repo.current(),
-                         install=repo.replace_context, inflation_rate=INFLATION)
+                         install=lambda staged: _install_generation(repo, staged), inflation_rate=INFLATION)
     rep = ACC.redact_refresh_report(rep, accuracy_gate())          # M8-ACCURACY: no unverified totals in the report
     body = S.RefreshReport(**rep).model_dump()
     return JSONResponse(status_code=409 if rep["step"] == "busy" else 200, content=body)
+
+
+def _install_generation(repo, staged):
+    """Install the verified context AND its generation together (M8-ACCURACY-2), under the publish lock (the refresh
+    holds it around the file swap too). If the generation cannot be installed, the previous context is put back, so
+    context and evidence never diverge."""
+    store = getattr(app.state, "generations", None)
+    with RP.PUBLISH_LOCK:
+        live = getattr(repo, "live", None)
+        previous = live() if callable(live) else repo.current()      # the LIVE context, not this request's pin
+        repo.replace_context(staged)
+        if store is None:
+            return
+        try:
+            store.install(getattr(staged, "generation_manifest", None))
+        except Exception:
+            if previous is not None:
+                repo.replace_context(previous)
+            raise
+
+
+@app.get("/api/accuracy/status")
+def accuracy_status():
+    """System information: the published generation (fingerprints, declared dates, validation counts — no values) and
+    the verification state of every registered output for the data being served. No business number."""
+    store = getattr(app.state, "generations", None)
+    gate = accuracy_gate()
+    v = RP.current_view()                                  # the manifest and fingerprints this gate was built from
+    m, served = (v.manifest, v.served or {}) if v is not None else _build_gate()[:2]
+    sources = []
+    for r in ((*m.core, *m.owner) if m is not None else ()):
+        sources.append({"key": r.key, "role": r.role, "source_type": r.source_type, "date_kind": r.date_kind,
+                        "file": r.file, "sha256": r.sha256, "selection_origin": r.selection_origin,
+                        "declared": GEN._jsonable(r.declared), "bound": served.get(r.key) == r.sha256})
+    return {"generation_id": m.generation_id if m else None, "core_id": m.core_id if m else None,
+            "selection_origin": m.selection_origin if m else None,
+            "restore_reason": getattr(store, "restore_reason", None) if store else None,
+            "restore_pending": bool(store is not None and store.pending is not None),
+            "generation_bound_api_evidence": ACC.GENERATION_BOUND_API_EVIDENCE, "sources": sources,
+            "metrics": [{"key": k, "state": gate.decide(k).state.value, "codes": list(gate.decide(k).codes)}
+                        for k in ACC.REGISTER], "ai_used": False}
 
 
 # ---------------- daily actions ----------------

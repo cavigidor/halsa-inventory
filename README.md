@@ -68,7 +68,9 @@ M6-4 Detailed Collections remain separate open items.
 
 ## Run
 ```bash
-python dashboard_builder.py data          # -> dashboard.html (gitignored)
+python -m services.refresh                # validate + publish dashboard.html and its generation manifest
+# (GET / serves only a dashboard published this way and re-validated; a plain `python dashboard_builder.py data`
+#  build has no publication record and is answered with a neutral status page — M8-ACCURACY-2)
 uvicorn app:app --host 127.0.0.1          # local only; dashboard at http://127.0.0.1:8000/ , API docs at /docs
 ```
 

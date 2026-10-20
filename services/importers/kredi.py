@@ -17,24 +17,36 @@ Source module on the M6-1 framework (`run_import` + `SourceSpec`; no reader of i
 - **Dates:** the latest recorded payment-slip date is reported as an activity date, never as the
   workbook's snapshot date; the snapshot date is unknown unless declared. Future due dates are normal.
 - **No cash-planning metrics,** no FX, no UI, no API, no persistence. Safe summaries carry counts only.
+
+Two source layouts are recognized deterministically (M8-ACCURACY-2, `probe_layout`); anything else fails closed:
+- **`erp_export`** — the original ERP export: the 23 headers in row 1, installments from row 2, one trailing ERP
+  control-total row.
+- **`filtered_takip`** — the owner's revised "kredi takip" workbook: row 1 holds only summary formulas linked to the
+  SUBTOTAL row, the same 23 headers in row 2, installments from row 3, the ERP control-total row, and a last row of
+  Excel `SUBTOTAL(...)` formulas. The saved AutoFilter (hidden rows) is a VIEW: every row is imported and validated,
+  hidden or not; the SUBTOTAL cells are checked against the visible rows separately from the full-source ERP totals.
+  Neither summary row is ever an installment.
 """
 from __future__ import annotations
 
 import datetime as dt
 import json
 from collections import Counter, defaultdict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+import re
+
 from .base import ImportResult, run_import
-from .excel import WorkbookPair, label_text
+from .excel import CellRead, WorkbookPair, column_index, label_text, sheet_layout_flags
 from .keys import record_key
 from .models import (
     Audience,
+    CellKind,
     Confidence,
     NormalizedRecord,
     NormalizedValue,
@@ -174,6 +186,7 @@ class LoanInstallment:
     payment_slip_series: NormalizedValue
     payment_slip_number: NormalizedValue   # 0 on every unpaid row in the real export (recorded as is)
     source_row: int
+    hidden_in_source: bool = False         # the workbook's saved filter hides this row (a view, never a payment fact)
 
 
 class KrediSummary(BaseModel):
@@ -202,6 +215,20 @@ class KrediSummary(BaseModel):
     contracts_without_installment_count: int = 0
     paid_without_payment_date: int = 0
     payment_date_without_paid_amount: int = 0
+    # --- M8-ACCURACY-2: layout, saved view and source exceptions (counts only) ---
+    layout: str | None = None
+    header_row: int | None = None
+    saved_filter: bool = False
+    filter_columns: list[str] = Field(default_factory=list)       # header names of filtered columns
+    hidden_installment_rows: int = 0
+    visible_installment_rows: int = 0
+    subtotal_row: bool = False
+    subtotal_checks: dict[str, int] = Field(default_factory=dict)  # checked / matched / mismatched / unsupported / missing_cache
+    summary_row_checks: dict[str, int] = Field(default_factory=dict)
+    filtered_totals_match: bool | None = None                      # SUBTOTAL cells == visible rows (None: not checked)
+    negative_remaining_rows: int = 0
+    negative_amount_rows: int = 0                                  # any other money field below zero
+    closed_with_positive_remaining: int = 0
 
 
 @dataclass
@@ -236,6 +263,175 @@ class KrediResult:
 
 
 # ---------------------------------------------------------------------------------------------
+# Layout detection (deterministic; never guesses a header location)
+# ---------------------------------------------------------------------------------------------
+LAYOUT_ERP = "erp_export"
+LAYOUT_TAKIP = "filtered_takip"
+SUBTOTAL_RE = re.compile(r"^=\s*SUBTOTAL\(\s*(\d+)\s*,\s*\$?([A-Z]{1,3})\$?(\d+)\s*:\s*\$?([A-Z]{1,3})\$?(\d+)\s*\)\s*$",
+                         re.IGNORECASE)
+CELL_REF_RE = re.compile(r"^=\s*\$?([A-Z]{1,3})\$?(\d+)\s*$", re.IGNORECASE)
+SUBTOTAL_SUM = frozenset({9, 109})
+SUBTOTAL_COUNT_NUMBERS = frozenset({2, 102})
+SUBTOTAL_COUNT_VALUES = frozenset({3, 103})
+
+
+@dataclass
+class LayoutProbe:
+    layout: str | None = None
+    header_row: int | None = None
+    data_end_row: int | None = None        # last row handed to the framework (the ERP control-total row included)
+    subtotal_row: int | None = None
+    last_row: int | None = None
+    problems: list[tuple[str, str]] = field(default_factory=list)   # (code, message), fatal
+    grid: dict[int, list[CellRead]] = field(default_factory=dict)   # every row as read (small owner sheet)
+    headers_found: bool = False            # the full header set is present at `header_row`
+    hidden_rows: frozenset[int] = frozenset()
+    auto_filter_ref: str | None = None
+    filter_columns: tuple[int, ...] = ()
+
+
+def _row_labels(cells: list[CellRead]) -> set[str]:
+    return {t for t in (label_text(c) for c in cells) if t is not None}
+
+
+def probe_layout(path: str | Path, content: bytes) -> LayoutProbe:
+    """Classify the workbook as `erp_export`, `filtered_takip` or unsupported, from its content only."""
+    probe = LayoutProbe()
+    req = required_headers()
+    with WorkbookPair(path, content=content) as wb:
+        sheet = wb.sheet(KREDI_SPEC.sheet)
+        if sheet is None:
+            probe.problems.append(("sheet_missing", "The declared sheet does not exist."))
+            return probe
+        formulas: dict[tuple[int, int], str] = {}
+        for r, cells in sheet.iter_rows(min_row=1):
+            probe.grid[r] = cells
+            for c_no, c in enumerate(cells, start=1):
+                if c.formula:
+                    formulas[(r, c_no)] = c.formula
+    probe._formulas = formulas  # type: ignore[attr-defined]
+    try:
+        flags = sheet_layout_flags(path, 0, content=content)
+        probe.hidden_rows, probe.auto_filter_ref, probe.filter_columns = (flags.hidden_rows, flags.auto_filter_ref,
+                                                                          flags.filter_columns)
+    except Exception:
+        probe.problems.append(("sheet_flags_unreadable", "Row visibility / saved filter could not be read."))
+        return probe
+    nonempty = [r for r, cells in probe.grid.items() if any(c.kind is not CellKind.EMPTY for c in cells)]
+    if not nonempty:
+        probe.problems.append(("empty_sheet", "The sheet has no content."))
+        return probe
+    probe.last_row = max(nonempty)
+    row1, row2 = probe.grid.get(1, []), probe.grid.get(2, [])
+    h1, h2 = req <= _row_labels(row1), req <= _row_labels(row2)
+    if h1 and h2:
+        probe.problems.append(("layout_ambiguous", "Both row 1 and row 2 carry the full header set."))
+        return probe
+    if h1:
+        probe.layout, probe.header_row, probe.headers_found = LAYOUT_ERP, 1, True
+        return probe
+    if not h2:
+        # No revised-layout signature: validate strictly as the original export (row-1 headers), so the framework
+        # reports the exact header problems (header_missing, …) and fails closed.
+        probe.layout, probe.header_row = LAYOUT_ERP, 1
+        return probe
+    # filtered_takip: row 1 = summary formulas only; last row = SUBTOTAL formulas only; row above = ERP totals
+    row1_cells = [(c, cell) for c, cell in enumerate(row1, start=1) if cell.kind is not CellKind.EMPTY]
+    if not row1_cells or any(not cell.kind.is_formula for _, cell in row1_cells):
+        probe.problems.append(("layout_unsupported", "Row 1 above the headers must contain only summary formulas."))
+        return probe
+    last = probe.last_row
+    last_cells = [(c, cell) for c, cell in enumerate(probe.grid[last], start=1) if cell.kind is not CellKind.EMPTY]
+    if not last_cells or any(not (cell.kind.is_formula and SUBTOTAL_RE.match(formulas.get((last, c), "")))
+                             for c, cell in last_cells):
+        probe.problems.append(("layout_unsupported", "The last row must contain only Excel SUBTOTAL formulas."))
+        return probe
+    for c, _ in row1_cells:
+        f = formulas.get((1, c), "")
+        ref = CELL_REF_RE.match(f)
+        if not (SUBTOTAL_RE.match(f) or (ref and int(ref.group(2)) == last)):
+            probe.problems.append(("unsupported_summary_formula",
+                                   "A row-1 formula is neither a SUBTOTAL nor a reference to the SUBTOTAL row."))
+            return probe
+    if last - 1 <= 3:
+        probe.problems.append(("layout_unsupported", "No installment rows between the headers and the totals."))
+        return probe
+    probe.layout, probe.header_row, probe.subtotal_row, probe.data_end_row = LAYOUT_TAKIP, 2, last, last - 1
+    probe.headers_found = True
+    return probe
+
+
+def _num_value(read: CellRead) -> float | None:
+    v = read.value
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and not read.kind.is_error else None
+
+
+def _subtotal_value(probe: LayoutProbe, fn: int, col: int, r1: int, r2: int) -> float | None:
+    """Excel SUBTOTAL over the VISIBLE rows of one column range (hidden rows excluded). None: unsupported."""
+    vals: list[CellRead] = []
+    for r in range(r1, r2 + 1):
+        if r in probe.hidden_rows:
+            continue
+        cells = probe.grid.get(r, [])
+        vals.append(cells[col - 1] if col - 1 < len(cells) else CellRead(CellKind.EMPTY))
+    if fn in SUBTOTAL_SUM:
+        return round(sum(x for x in (_num_value(v) for v in vals) if x is not None), 6)
+    if fn in SUBTOTAL_COUNT_NUMBERS:
+        return float(sum(1 for v in vals if _num_value(v) is not None))
+    if fn in SUBTOTAL_COUNT_VALUES:
+        return float(sum(1 for v in vals if v.kind is not CellKind.EMPTY))
+    return None
+
+
+def _check_summary_rows(probe: LayoutProbe) -> tuple[dict[str, int], dict[str, int]]:
+    """SUBTOTAL row cells vs the visible rows, and row-1 summary formulas vs the SUBTOTAL row."""
+    formulas = getattr(probe, "_formulas", {})
+    sub = {"checked": 0, "matched": 0, "mismatched": 0, "unsupported": 0, "missing_cache": 0}
+    top = dict(sub)
+    sub_values: dict[int, float | None] = {}
+    last = probe.subtotal_row
+    for c, cell in enumerate(probe.grid.get(last, []), start=1):
+        if cell.kind is CellKind.EMPTY:
+            continue
+        m = SUBTOTAL_RE.match(formulas.get((last, c), ""))
+        if cell.kind is CellKind.FORMULA_MISSING_CACHE or cell.kind.is_error:
+            sub["missing_cache" if cell.kind is CellKind.FORMULA_MISSING_CACHE else "mismatched"] += 1
+            sub_values[c] = None
+            continue
+        fn, col = int(m.group(1)), column_index(m.group(2).upper())
+        expected = _subtotal_value(probe, fn, col, int(m.group(3)), int(m.group(5)))
+        cached = _num_value(cell)
+        sub_values[c] = cached
+        if expected is None or cached is None:
+            sub["unsupported"] += 1
+            continue
+        sub["checked"] += 1
+        tol = CONTROL_TOTAL_TOLERANCE if fn in SUBTOTAL_SUM else 0.0
+        sub["matched" if abs(expected - cached) <= tol else "mismatched"] += 1
+    for c, cell in enumerate(probe.grid.get(1, []), start=1):
+        if cell.kind is CellKind.EMPTY:
+            continue
+        if cell.kind is CellKind.FORMULA_MISSING_CACHE or cell.kind.is_error:
+            top["missing_cache" if cell.kind is CellKind.FORMULA_MISSING_CACHE else "mismatched"] += 1
+            continue
+        f = formulas.get((1, c), "")
+        cached = _num_value(cell)
+        ref = CELL_REF_RE.match(f)
+        if ref:
+            target = sub_values.get(column_index(ref.group(1).upper()))
+        else:
+            m = SUBTOTAL_RE.match(f)
+            target = _subtotal_value(probe, int(m.group(1)), column_index(m.group(2).upper()),
+                                     int(m.group(3)), int(m.group(5))) if m else None
+        if target is None or cached is None:
+            top["unsupported"] += 1
+            continue
+        top["checked"] += 1
+        top["matched" if abs(target - cached) <= CONTROL_TOTAL_TOLERANCE else "mismatched"] += 1
+    return sub, top
+
+
+# ---------------------------------------------------------------------------------------------
 # Candidates (never selects)
 # ---------------------------------------------------------------------------------------------
 def required_headers() -> frozenset[str]:
@@ -243,36 +439,60 @@ def required_headers() -> frozenset[str]:
 
 
 def find_kredi_candidates(folder: str | Path) -> list[dict[str, Any]]:
-    """List Kredi-looking workbooks (basename, whether the header row carries the supported columns).
-    Never selects one and never orders by modification time. Header compatibility says nothing about
-    loan types or arithmetic — only `import_kredi` decides whether a workbook is supported."""
+    """List Kredi-looking workbooks (basename, whether row 1 or row 2 carries the supported columns, and the detected
+    layout). Never selects one and never orders by modification time. Header compatibility says nothing about loan
+    types or arithmetic — only `import_kredi` decides whether a workbook is supported."""
     out = []
     for p in sorted(Path(folder).glob("*.xlsx")):
         if p.name.startswith("~$") or not KREDI_SPEC.matches_filename(p.name):
             continue
         try:
-            with WorkbookPair(p) as wb:
-                sheet = wb.sheet(0)
-                headers = {label_text(c) for c in sheet.row(1)} if sheet else set()
-            compatible = required_headers() <= headers
+            probe = probe_layout(p, p.read_bytes())
+            layout = probe.layout if (not probe.problems and probe.headers_found) else None
         except Exception:
-            compatible = False
-        out.append({"file": p.name, "headers_compatible": compatible})
+            layout = None
+        out.append({"file": p.name, "headers_compatible": layout is not None, "layout": layout})
     return out
 
 
 # ---------------------------------------------------------------------------------------------
 # Pipeline
 # ---------------------------------------------------------------------------------------------
-def import_kredi(path: str | Path, *, snapshot_date: dt.date | None = None) -> KrediResult:
-    """Import one explicitly chosen loan-contract export. Fail-closed on schema, identity, type/status
-    drift, contract-level inconsistency, impossible installment numbers, control-total mismatch and both
-    arithmetic identities. Payment-slip anomalies are warnings."""
+def _failed_layout(path: Path, probe: LayoutProbe) -> KrediResult:
+    report = ValidationReport(source=KREDI_SPEC.key, audience=KREDI_SPEC.audience, file=path.name,
+                              sheet=KREDI_SPEC.sheet_label(), layout="table")
+    for code, msg in probe.problems or [("layout_unsupported", "Unsupported workbook layout.")]:
+        report.add(Severity.ERROR, code, msg)
+    counts = KrediSummary(layout=None)
+    return KrediResult(False, "layout", path.name, [], [], report, VerificationResult(), counts)
+
+
+def import_kredi(path: str | Path, *, snapshot_date: dt.date | None = None, content: bytes | None = None) -> KrediResult:
+    """Import one explicitly chosen loan-contract workbook (`erp_export` or `filtered_takip` layout). Fail-closed on
+    layout ambiguity, schema, identity, type/status drift, contract-level inconsistency, impossible installment
+    numbers, control-total mismatch and both arithmetic identities. Payment-slip anomalies, negative amounts and a
+    saved-filter SUBTOTAL that disagrees with the visible rows are reported (never repaired).
+
+    `content`: the workbook bytes frozen once by the caller (M8-ACCURACY-2); otherwise read once here. Every reader
+    below parses these same bytes."""
     path = Path(path)
-    spec = replace(KREDI_SPEC, business_date=DateRule.declared()) if snapshot_date is not None else KREDI_SPEC
-    res = run_import(path, spec, declared_date=snapshot_date)
+    if content is None:
+        try:
+            content = path.read_bytes()
+        except OSError:
+            return _failed_layout(path, LayoutProbe(problems=[("unreadable_workbook", "The workbook could not be read.")]))
+    try:
+        probe = probe_layout(path, content)
+    except Exception:
+        probe = LayoutProbe(problems=[("unreadable_workbook", "The workbook could not be read.")])
+    if probe.problems or probe.layout is None:
+        return _failed_layout(path, probe)
+    spec = replace(KREDI_SPEC, layout=TableLayout(header_row=probe.header_row, data_end_row=probe.data_end_row))
+    if snapshot_date is not None:
+        spec = replace(spec, business_date=DateRule.declared())
+    res = run_import(path, spec, declared_date=snapshot_date, content=content)
     report = res.report
-    counts = KrediSummary(rows_read=report.rows_read)
+    counts = KrediSummary(rows_read=report.rows_read, layout=probe.layout, header_row=probe.header_row)
     result = KrediResult(False, res.failed_step, path.name, [], [], report, VerificationResult(), counts,
                          import_result=res)
     counts.rules = {r.name: {"checked": r.checked, "failed": r.failed, "skipped": r.skipped}
@@ -289,16 +509,21 @@ def import_kredi(path: str | Path, *, snapshot_date: dt.date | None = None) -> K
         if not counts.control_totals_match:
             report.add(Severity.ERROR, "control_totals_mismatch",
                        "The export's control-total row does not equal the column sums.")
+    elif probe.layout == LAYOUT_TAKIP:
+        report.add(Severity.ERROR, "control_total_row_missing",
+                   "The revised layout requires the ERP control-total row directly above the SUBTOTAL row.")
     else:
         report.add(Severity.INFO, "no_control_total_row", "No trailing control-total row was found.")
 
+    _source_view(probe, report, counts, records)
     _validate_installments(records, report, counts)
     if report.errors:
         result.failed_step = "installments"
         return result
 
-    contracts, installments = _build(records)
+    contracts, installments = _build(records, probe.hidden_rows)
     _fill_counts(counts, res, contracts, installments, snapshot_date)
+    _exceptions(report, counts, installments)
     _verify(result, contracts, installments, records)
     if not result.verification.ok:
         failed = [c.name for c in result.verification.checks if not c.ok]
@@ -309,6 +534,62 @@ def import_kredi(path: str | Path, *, snapshot_date: dt.date | None = None) -> K
     result.ok, result.failed_step = True, None
     result.contracts, result.installments = contracts, installments
     return result
+
+
+def _source_view(probe: LayoutProbe, report: ValidationReport, counts: KrediSummary,
+                 rows: list[NormalizedRecord]) -> None:
+    """Saved filter / hidden rows and (revised layout) the SUBTOTAL view. Hidden rows are never skipped."""
+    hidden = probe.hidden_rows
+    counts.hidden_installment_rows = sum(1 for r in rows if r.row in hidden)
+    counts.visible_installment_rows = len(rows) - counts.hidden_installment_rows
+    counts.saved_filter = probe.auto_filter_ref is not None
+    header = probe.grid.get(probe.header_row or 1, [])
+    counts.filter_columns = [label_text(header[c]) or f"#{c}" for c in probe.filter_columns if c < len(header)]
+    if counts.saved_filter or hidden:
+        report.add(Severity.INFO, "saved_filter_view",
+                   f"The workbook carries a saved filter view; {counts.hidden_installment_rows} installment row(s) "
+                   "are hidden in it. Every row is imported and validated; the filter is not a payment status.",
+                   count=counts.hidden_installment_rows)
+    if probe.layout != LAYOUT_TAKIP:
+        return
+    counts.subtotal_row = True
+    counts.subtotal_checks, counts.summary_row_checks = _check_summary_rows(probe)
+    bad = counts.subtotal_checks.get("mismatched", 0) + counts.summary_row_checks.get("mismatched", 0)
+    unknown = (counts.subtotal_checks.get("missing_cache", 0) + counts.summary_row_checks.get("missing_cache", 0)
+               + counts.subtotal_checks.get("unsupported", 0) + counts.summary_row_checks.get("unsupported", 0))
+    counts.filtered_totals_match = False if bad else (None if unknown else True)
+    if bad:
+        report.add(Severity.WARNING, "filtered_subtotal_mismatch",
+                   f"{bad} SUBTOTAL / summary cell(s) disagree with the visible rows (the saved view is stale or "
+                   "edited). The full-source import is unaffected; the filtered totals are contradictory.", count=bad)
+    if unknown:
+        report.add(Severity.WARNING, "filtered_subtotal_unverified",
+                   f"{unknown} SUBTOTAL / summary cell(s) have no saved result or an unsupported function.",
+                   count=unknown)
+
+
+def _exceptions(report: ValidationReport, counts: KrediSummary, installments: list[LoanInstallment]) -> None:
+    """Source-recorded exceptions: reported, never zeroed, never repaired, never read as a payment status."""
+    money = ("installment_total", "principal", "interest", "bsmv", "kkdf", "paid_amount")
+    neg_rem = sum(1 for i in installments if isinstance(i.remaining_amount.value, (int, float))
+                  and i.remaining_amount.value < 0)
+    neg_other = sum(1 for i in installments if any(isinstance(getattr(i, f).value, (int, float))
+                                                   and getattr(i, f).value < 0 for f in money))
+    closed_pos = sum(1 for i in installments if i.status is LoanStatus.CLOSED
+                     and isinstance(i.remaining_amount.value, (int, float)) and i.remaining_amount.value > 0)
+    counts.negative_remaining_rows, counts.negative_amount_rows = neg_rem, neg_other
+    counts.closed_with_positive_remaining = closed_pos
+    if neg_rem:
+        report.add(Severity.WARNING, "negative_remaining_amount",
+                   f"{neg_rem} installment(s) record a negative remaining amount (kept as recorded, never zeroed).",
+                   field="remaining_amount", count=neg_rem)
+    if neg_other:
+        report.add(Severity.WARNING, "negative_amount", f"{neg_other} installment(s) carry a negative money value.",
+                   count=neg_other)
+    if closed_pos:
+        report.add(Severity.INFO, "status_closed_with_remaining",
+                   f"{closed_pos} installment(s) are 'Kapalı' but record a positive remaining amount; DURUM is not "
+                   "a payment status (unverified).", field="status", count=closed_pos)
 
 
 def _control_total_row(records: list[NormalizedRecord]) -> NormalizedRecord | None:
@@ -407,7 +688,8 @@ def _validate_installments(rows: list[NormalizedRecord], report: ValidationRepor
                                                                  for nv in r.values.values()))
 
 
-def _build(rows: list[NormalizedRecord]) -> tuple[list[LoanContract], list[LoanInstallment]]:
+def _build(rows: list[NormalizedRecord], hidden: frozenset[int] = frozenset()
+           ) -> tuple[list[LoanContract], list[LoanInstallment]]:
     installments: list[LoanInstallment] = []
     by_contract: dict[str, list[LoanInstallment]] = defaultdict(list)
     first: dict[str, NormalizedRecord] = {}
@@ -423,7 +705,7 @@ def _build(rows: list[NormalizedRecord]) -> tuple[list[LoanContract], list[LoanI
             remaining_principal=v["remaining_principal"], paid_amount=v["paid_amount"],
             remaining_amount=v["remaining_amount"], payment_date=v["payment_date"],
             payment_slip_series=v["payment_slip_series"], payment_slip_number=v["payment_slip_number"],
-            source_row=r.row)
+            source_row=r.row, hidden_in_source=r.row in hidden)
         installments.append(inst)
         by_contract[code].append(inst)
         first.setdefault(code, r)
@@ -475,4 +757,5 @@ def _verify(result: KrediResult, contracts: list[LoanContract], installments: li
 
 
 __all__ = ["KREDI_SPEC", "LoanType", "LoanStatus", "LoanContract", "LoanInstallment", "KrediSummary", "KrediResult",
-           "import_kredi", "find_kredi_candidates", "required_headers", "AMOUNT_TOLERANCE", "SUPPORTED_LOAN_TYPES"]
+           "import_kredi", "find_kredi_candidates", "required_headers", "probe_layout", "LayoutProbe", "LAYOUT_ERP",
+           "LAYOUT_TAKIP", "AMOUNT_TOLERANCE", "SUPPORTED_LOAN_TYPES"]

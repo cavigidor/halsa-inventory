@@ -123,7 +123,8 @@ class _Raw:
 
 # ---------------------------------------------------------------------------------------------
 def run_import(path: str | Path, spec: SourceSpec, *, declared_date: dt.date | None = None,
-               masters: Mapping[str, MasterIndex] | None = None) -> ImportResult:
+               masters: Mapping[str, MasterIndex] | None = None, content: bytes | None = None) -> ImportResult:
+    """`content` (M8-ACCURACY-2): the workbook bytes frozen once by the caller; `path` then only names the file."""
     spec.check()
     path = Path(path)
     basename = path.name
@@ -137,7 +138,7 @@ def run_import(path: str | Path, spec: SourceSpec, *, declared_date: dt.date | N
         report.add(Severity.ERROR, "unsupported_format", "Only .xlsx / .xlsm workbooks are supported.")
         return state.fail("validate")
     try:
-        links = external_link_targets(path)
+        links = external_link_targets(path, content=content)
     except (zipfile.BadZipFile, ParseError, KeyError, OSError):
         report.add(Severity.ERROR, "unreadable_workbook", "The workbook could not be opened as an .xlsx package.")
         return state.fail("validate")
@@ -149,7 +150,7 @@ def run_import(path: str | Path, spec: SourceSpec, *, declared_date: dt.date | N
                    count=len(links))
 
     try:
-        wb_ctx = WorkbookPair(path).__enter__()
+        wb_ctx = WorkbookPair(path, content=content).__enter__()
     except (InvalidFileException, zipfile.BadZipFile, KeyError, OSError, ValueError):
         report.add(Severity.ERROR, "unreadable_workbook", "The workbook could not be read.")
         return state.fail("validate")
@@ -211,7 +212,7 @@ def _read_table(sheet: SheetPair, spec: SourceSpec, report: ValidationReport) ->
     letters = {name: get_column_letter(c) for name, c in hm.columns.items()}
     max_col = max(hm.columns.values())
     raws: list[_Raw] = []
-    for r, cells in sheet.iter_rows(min_row=layout.first_data_row, max_col=max_col):
+    for r, cells in sheet.iter_rows(min_row=layout.first_data_row, max_row=layout.data_end_row, max_col=max_col):
         sel = {name: (cells[c - 1] if c - 1 < len(cells) else EMPTY_CELL) for name, c in hm.columns.items()}
         if all(c.kind == CellKind.EMPTY for c in sel.values()):
             if layout.end == "first_blank":

@@ -66,7 +66,8 @@ by the next steps, and its output must not be described as an all-system green l
 ## 4. Start the actual dashboard and check it
 
 ```bash
-python dashboard_builder.py data
+python -m services.refresh          # publishes the dashboard + generation manifest (a plain
+                                    # dashboard_builder.py build is not served by GET / — M8-ACCURACY-2)
 uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 

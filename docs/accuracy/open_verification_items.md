@@ -58,6 +58,13 @@ Owner questions are numbered as in `docs/m8_owner_questions_tr.md` (Q#). "Withhe
   as paid.
 - **To resolve:** the owner's 2026-10-19 answer recorded as a D-xxx decision; authoritative dated file of record; a
   reconciliation against a bank statement or the ERP balance.
+- **Revised workbook (2026-10-19, M8-ACCURACY-2):** the owner's filtered `kredi takip` revision is supported as a
+  separate layout (`docs/m6_kredi.md`, D-051); every row is imported, hidden rows included. Open, and blocking any
+  promotion: (1) DURUM / Kapalı meaning; (2) why 11 positive-remaining 2026 installments are outside the saved filter
+  (10 past due, 1 due on 2026-10-19) — they are **not** assumed paid; (3) the negative residual on one Kapalı row —
+  **not** assumed zero; (4) which workbook is the file of record; (5) the business snapshot date (the file time is not
+  one); (6) reconciliation against bank / payment records. The real file has been verified only by the owner's local
+  run of `scripts/reconcile_sources.py`, if at all — never in the cloud.
 
 ### GİDER/GELİR — basis, mapping, contradictory totals · INVALID
 - **Evidence:** `docs/m6_gider_gelir.md`: `<Y> TOPLAM = Σ months` is only a warning (1 real row differs); ÖZET expense
@@ -129,13 +136,29 @@ Owner questions are numbered as in `docs/m8_owner_questions_tr.md` (Q#). "Withhe
 - **To resolve:** last-order-date basis (Q3), attribute source of record (Q10), real-data reconciliation.
 
 ## Cross-cutting items
-- **Generation-bound evidence (review of PR #27, mandatory for M8-ACCURACY-2):** the API receives no evidence today;
-  the snapshot of the published generation must be shared by dashboard, API, owner views and refresh before any
-  promotion (`release_gate.md` §6 A–F).
+- **Generation-bound evidence (built in M8-ACCURACY-2):** one source-generation manifest (`services/generation.py`)
+  is shared by the dashboard, every API route, the Yönetim owner views and the refresh (`release_gate.md` §8).
+  `GENERATION_BOUND_API_EVIDENCE` stays **False** until the owner's real-data acceptance run (§8.3), so the production
+  register still cannot certify any metric.
 - **Evidence inspection (fixed):** `_excel_errors` previously reported 0 when inspection raised (always for numeric
-  columns); it now fails closed.
-- **Report dates:** stock and Cari exports are chosen by modification time; no report date is read or declared. The
-  M8 upload (CP3) must capture a declared business date per source; until then stock / Cari outputs stay NOT_VERIFIED.
+  columns); it now fails closed. M8-ACCURACY-2 adds formula-aware inspection of the core workbooks
+  (`services/source_validation.py`: error cells, missing caches, blanks vs zeros, invalid dates, external links).
+- **Report dates:** a source's business date is now **declared** in `data/sources.json` (`release_gate.md` §9); it is
+  never inferred from a file timestamp. Without the file, sources are still chosen by modification time, recorded as
+  `mtime_fallback`, and nothing can verify. The 45-day operational age limit is **provisional** (definition
+  `operational_freshness`, unapproved).
+- **Joins (measured, not repaired):** order-source ↔ master ↔ invoice account, aging ↔ master, sales ↔ stock and product
+  naming are counted (`validate_joins`); a join problem withholds the dependent sources. D-003 is unchanged.
+- **Review of PR #28 (fixed 2026-10-20):** request-level generation consistency (request-pinned views + one gate per
+  request + publish lock) and persisted-evidence integrity (ids cover the evaluation; restart re-derives from the bytes).
+  Remaining limits: consistency across separate responses, multi-process deployments, and the integrity of the input
+  files / served HTML (access control) — `release_gate.md` §10.
+- **Second review pass on PR #28 (fixed 2026-10-20):** `GET /` now authorizes the exact dashboard bytes against the
+  accepted generation and the current gate; the reconciliation command can no longer overwrite an input or an
+  existing file (`release_gate.md` §11).
+- **Hedef** is not part of the generation manifest yet; outputs that use it stay without evidence.
+- **Owner-source approvals:** core sources can carry a fingerprint-bound approval (§9); owner sources (Kredi,
+  Gider/Gelir, Bütçe) have no approval mechanism yet, so their outputs cannot verify.
 - **Real-data reconciliation:** required for every promotion; owner-local only.
 - **Legacy `weekly_agent.py`:** a separate, unverified copy of the stock / lapsed rules; disabled (exit 2).
 - **Lapsed window:** spec 2020–2025 vs code 2021–2025 (Q11).

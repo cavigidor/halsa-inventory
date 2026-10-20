@@ -13,6 +13,7 @@ never opened or followed. Nothing here writes to the file.
 from __future__ import annotations
 
 import datetime as dt
+import io
 import posixpath
 import re
 import zipfile
@@ -44,6 +45,7 @@ class CellRead:
     value: Any = None            # cached / literal value; None for empty, missing cache and errors
     error: str | None = None     # normalized Excel error code for ERROR / FORMULA_ERROR
     external_ref: bool = False   # formula references another workbook
+    formula: str | None = None   # the formula text for formula cells (never evaluated)
 
 
 EMPTY_CELL = CellRead(CellKind.EMPTY)
@@ -74,10 +76,10 @@ def classify(fcell: Any, vcell: Any) -> CellRead:
     if formula is not None:
         ext = bool(EXTERNAL_REF_RE.search(formula))
         if v_type == "e":
-            return CellRead(CellKind.FORMULA_ERROR, None, _error_code(v_value), ext)
+            return CellRead(CellKind.FORMULA_ERROR, None, _error_code(v_value), ext, formula)
         if v_value is None:
-            return CellRead(CellKind.FORMULA_MISSING_CACHE, None, None, ext)
-        return CellRead(CellKind.FORMULA_VALUE, v_value, None, ext)
+            return CellRead(CellKind.FORMULA_MISSING_CACHE, None, None, ext, formula)
+        return CellRead(CellKind.FORMULA_VALUE, v_value, None, ext, formula)
     if f_type == "e" or v_type == "e":
         return CellRead(CellKind.ERROR, None, _error_code(v_value if v_value is not None else f_value))
     if v_value is None:
@@ -157,16 +159,23 @@ def _zip_longest(a: Iterator, b: Iterator) -> Iterator[tuple[Any, Any]]:
 
 
 class WorkbookPair:
-    """Context manager: the workbook opened read-only in both views. Never saved."""
+    """Context manager: the workbook opened read-only in both views. Never saved.
 
-    def __init__(self, path: str | Path) -> None:
+    `content` (M8-ACCURACY-2): the workbook's bytes as frozen once by the caller. Both views are then parsed from those
+    exact bytes, never from the (mutable) file again."""
+
+    def __init__(self, path: str | Path, content: bytes | None = None) -> None:
         self.path = Path(path)
+        self._content = content
         self._f = None
         self._v = None
 
+    def _src(self):
+        return io.BytesIO(self._content) if self._content is not None else self.path
+
     def __enter__(self) -> "WorkbookPair":
-        self._f = openpyxl.load_workbook(self.path, read_only=True, data_only=False, keep_links=False)
-        self._v = openpyxl.load_workbook(self.path, read_only=True, data_only=True, keep_links=False)
+        self._f = openpyxl.load_workbook(self._src(), read_only=True, data_only=False, keep_links=False)
+        self._v = openpyxl.load_workbook(self._src(), read_only=True, data_only=True, keep_links=False)
         return self
 
     def __exit__(self, *exc: Any) -> None:
@@ -205,13 +214,13 @@ def sanitize_name(target: str) -> str:
     return base[:80]
 
 
-def external_link_targets(path: str | Path) -> list[str]:
+def external_link_targets(path: str | Path, content: bytes | None = None) -> list[str]:
     """Sanitized basenames of external workbooks the package links to (from relationships only).
 
     Raises zipfile.BadZipFile for a non-xlsx file. The linked files are never opened.
     """
     names: list[str] = []
-    with zipfile.ZipFile(path) as z:
+    with zipfile.ZipFile(io.BytesIO(content) if content is not None else path) as z:
         members = set(z.namelist())
         rels = "xl/_rels/workbook.xml.rels"
         link_parts: list[str] = []
@@ -238,3 +247,62 @@ def external_link_targets(path: str | Path) -> list[str]:
                         break
             names.append(target_name)
     return names
+
+
+# ---------------------------------------------------------------------------------------------
+# M8-ACCURACY-2: row visibility and saved AutoFilter, read from the sheet XML (openpyxl's read-only mode does not
+# expose them). Read-only; nothing is evaluated or changed.
+# ---------------------------------------------------------------------------------------------
+_MAIN_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+_ODR_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+
+
+def column_index(letters: str) -> int:
+    """'A' → 1, 'L' → 12, 'AA' → 27."""
+    from openpyxl.utils.cell import column_index_from_string
+    return column_index_from_string(letters.upper())
+
+
+@dataclass(frozen=True)
+class SheetLayoutFlags:
+    hidden_rows: frozenset[int]          # 1-based row numbers marked hidden (by a filter or manually)
+    auto_filter_ref: str | None          # e.g. "A2:W380"
+    filter_columns: tuple[int, ...]      # 0-based colId values that carry saved filter criteria
+    filtered_rows_marked: bool           # <sheetPr filterMode="1"> or hidden rows inside the filter range
+
+
+def _sheet_part(z: zipfile.ZipFile, index: int) -> str | None:
+    wb = ET.fromstring(z.read("xl/workbook.xml"))
+    sheets = [s for s in wb.iter(f"{_MAIN_NS}sheet")]
+    if not 0 <= index < len(sheets):
+        return None
+    rid = sheets[index].get(f"{_ODR_NS}id")
+    rels = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+    for rel in rels.iter(f"{_REL_NS}Relationship"):
+        if rel.get("Id") == rid:
+            target = rel.get("Target") or ""
+            return target.lstrip("/") if target.startswith("/") else posixpath.normpath(posixpath.join("xl", target))
+    return None
+
+
+def sheet_layout_flags(path: str | Path, sheet_index: int = 0, content: bytes | None = None) -> SheetLayoutFlags:
+    """Hidden rows and the saved AutoFilter of one worksheet. Raises on an unreadable package (callers fail closed)."""
+    hidden: set[int] = set()
+    ref, cols, filter_mode = None, [], False
+    with zipfile.ZipFile(io.BytesIO(content) if content is not None else path) as z:
+        part = _sheet_part(z, sheet_index)
+        if part is None or part not in z.namelist():
+            raise KeyError("sheet part")
+        xml = z.read(part)                       # read-only; small owner sheets (core sheets never use this)
+        for _, el in ET.iterparse(io.BytesIO(xml), events=("end",)):
+            tag = el.tag
+            if tag == f"{_MAIN_NS}row":
+                if el.get("hidden") in ("1", "true"):
+                    hidden.add(int(el.get("r")))
+                el.clear()
+            elif tag == f"{_MAIN_NS}sheetPr":
+                filter_mode = el.get("filterMode") in ("1", "true")
+            elif tag == f"{_MAIN_NS}autoFilter":
+                ref = el.get("ref")
+                cols = [int(fc.get("colId")) for fc in el.iter(f"{_MAIN_NS}filterColumn") if fc.get("colId")]
+    return SheetLayoutFlags(frozenset(hidden), ref, tuple(sorted(cols)), filter_mode or bool(hidden and ref))

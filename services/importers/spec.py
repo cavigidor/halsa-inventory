@@ -89,6 +89,7 @@ class TableLayout:
     header_row: int
     data_start_row: int | None = None   # default header_row + 1
     end: Literal["sheet_end", "first_blank"] = "sheet_end"
+    data_end_row: int | None = None     # last data row (inclusive) when a layout has trailing control rows
 
     @property
     def first_data_row(self) -> int:
@@ -252,6 +253,8 @@ class SourceSpec:
         if table:
             if self.layout.header_row < 1 or self.layout.first_data_row <= self.layout.header_row:
                 problems.append("invalid header/data rows")
+            if self.layout.data_end_row is not None and self.layout.data_end_row < self.layout.first_data_row:
+                problems.append("data_end_row before the first data row")
             for f in self.fields:
                 if not isinstance(f.header, Header) or f.cell or f.anchor:
                     problems.append(f"table field {f.name} needs exactly a header")

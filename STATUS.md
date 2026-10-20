@@ -1,9 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-19 (M8-ACCURACY safety gate PR #27 merged at `a28b2b9`; M8-ACCURACY-2 is Current. Owner supplied a newly filtered Kredi workbook for source-validation handoff; no loan or other financial metric has been certified VERIFIED)._
+_Updated 2026-10-20 (M8-ACCURACY-2 third review pass on PR #28, not merged: GET / serves only dashboard bytes this server published for the accepted, re-validated generation — never on the page's own markers; after a restart the dashboard is re-built from re-derived evidence. Technical foundation ready for final technical review; owner-local real-data acceptance NOT started; no metric promoted; `GENERATION_BOUND_API_EVIDENCE` stays False)._
 
 ## Git
-- **`main`:** M7 complete PR #24; readiness PR #25; M8 planning PR #26; M8-ACCURACY safety gate PR #27 squash merged (`a28b2b9`). M8-ACCURACY-2 is the next implementation checkpoint.
+- **`main`:** M7 complete PR #24; readiness PR #25; M8 planning PR #26; M8-ACCURACY safety gate PR #27 squash merged (`a28b2b9`).
+- **`claude/m8-accuracy-2-shared-evidence`:** M8-ACCURACY-2 (D-051); one PR, not merged.
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
 - **Owner's Mac folder:** current checkout state was not inspected in this checkpoint. Previous notes reported an older checkout; verify `git status` before pulling, protect private `.env`, data and SQLite, and follow `docs/owner_launch_checklist.md`. Browser/real-data acceptance remains owner-local.
 
@@ -18,7 +19,50 @@ forward (D-038) and is merged. M6-5 (Trodat), M6-6 Gider/Gelir and M6-6 Bütçe 
 BLOCKED and is not renumbered.
 **Milestone 7 — Sales Operating System: COMPLETE with M7-6** (PR #24 merged 2026-10-18 @ `de7eb43`). M7-1 (Customer 360), M7-2 (Günlük Satış), M7-3 (cross-sell + opportunity / territory intelligence), M7-4 (Fuar Merkezi) and M7-5 (Takip / CRM) are merged; M7-6 (Yönetim owner view + integration / performance / polish) is done. M6-4 stays blocked by a missing export; that does not block M7 (D-047).
 
-## M8-ACCURACY — factual integrity and fail-closed display (merged PR #27; ACCURACY-2 now Current)
+## M8-ACCURACY-2 — shared generation evidence and source verification (Current; PR open, not merged)
+- **Built (synthetic-verified):** `services/generation.py` (explicit `data/sources.json` selection, frozen source bytes,
+  SHA-256 manifest of core + owner sources, atomic install with the context, rollback, restart restore, owner reload);
+  `services/source_validation.py` (formula-aware core inspection, join counts); `services/accuracy.py` (new evidence
+  fields: declared vs latest-transaction dates, invalid dates, blanks, ambiguous headers, external references, date
+  contradictions, explicit selection; `operational_freshness` definition, provisional 45 days); the API gate binds per
+  request to the published manifest by served fingerprint; `GET /api/accuracy/status`; Kredi `filtered_takip` layout
+  (`services/importers/kredi.py`), schedule views (`services/kredi_schedule.py`) and `scripts/reconcile_sources.py`.
+- **Real files:** not opened in the cloud. The owner's revised Kredi workbook and the core exports must be checked
+  locally (`docs/accuracy/release_gate.md` §8.3); nothing here claims a real-data result.
+- **Not promoted:** no metric is VERIFIED; `GENERATION_BOUND_API_EVIDENCE` is False; Kredi stays withheld (DURUM,
+  11 positive-remaining rows outside the saved filter, negative residual, file of record, snapshot date, payment
+  reconciliation). Hedef is not in the manifest; owner sources have no approval mechanism yet.
+- **Review corrections (2026-10-20, D-052; `docs/accuracy/release_gate.md` §10):**
+  1. Request-level TOCTOU fixed. `services/request_pin.py` pins the context, owner views, Customer 360 snapshot and the
+     gate once per request. `PUBLISH_LOCK` makes dashboard + manifest + context (and owner view + record) one step.
+     Interleaving tests force a refresh, a failed refresh and an owner reload between authorization and the endpoint's
+     reads. A negative control reproduces the race with pinning disabled. A concurrency test ran 109 requests during 6
+     alternating refreshes: 59 verified, all generation A with A's data; 50 withheld; none mixed.
+  2. Persisted-evidence integrity fixed. The ids cover the full evaluation (an unkeyed checksum against corruption). A
+     restart re-derives from the bytes. 11 field mutations with fingerprints unchanged, each in 3 variants: plain edit,
+     resealed ids, and resealed ids plus an edited dashboard marker. All 33 fail closed.
+  3. The manifest beside the dashboard is now git-ignored. Reconciliation evidence defaults to `data/reconciliation/`.
+     The command's final line is `GENEL SONUÇ: PASS / OPEN / FAIL` (exit codes 0 / 3 / 1; 2 = unreadable).
+- **Second review pass (2026-10-20, D-053; `docs/accuracy/release_gate.md` §11).** Both findings were reproduced on `bc01577` first:
+  1. **Evidence output.** `--evidence-out` equal to `--kredi` replaced the synthetic workbook with JSON. Now refused when the destination is or aliases any input (symlink, `..`, symlinked folder, hard link) or already exists. Files are created with `O_EXCL`; a failed write exits 4 and leaves nothing.
+  2. **`GET /`.** After a source change and restart (`source_changed`) it returned 200 with 2 VERIFIED reorder rows. Now it checks the exact HTML bytes (SHA recorded at publication, generation marker) against the accepted, re-validated generation, and re-authorizes every embedded metric with the current gate. Otherwise 503 with no data. HTTP tests cover every case listed in §11.2.
+- **Third review pass (2026-10-20, D-054; `release_gate.md` §12):**
+  - **Problem:** a dashboard whose displayed marker was empty was served without an accepted generation or byte match. The marker is a claim of the file.
+  - **Now:** `GET /` serves the file only when an accepted generation, the markers and the digest recorded by this process at publication all match, and the gate authorizes every displayed metric. Otherwise a neutral page (503).
+  - **After a restart:** the server re-builds and re-publishes the dashboard from the re-derived evidence; the pre-restart file is never served.
+  - **Tests:** 19 new HTTP tests.
+- **Readiness:** technical foundation ready for final technical review. Owner-local real-data acceptance not started. Individual metric promotion: none.
+- **Tests (actual, cloud, synthetic, Python 3.12.3):**
+
+| Where | Command | Result |
+|---|---|---|
+| Branch before the new test files | `python -m pytest -q` | **1163 passed, 7 skipped, 2 xfailed** |
+| Branch with `test_m8_accuracy2.py` (29) and `test_m8_kredi_takip.py` (27) | same, also with `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled` | **1219 passed, 7 skipped, 2 xfailed** (skips: owner-local `local_data`; xfails: DQ-1, DQ-6 strict) |
+| After the review corrections (+48 in `tests/test_m8_accuracy2_review.py`, +3 in `tests/test_m8_kredi_takip.py`) | same, `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled` | **1270 passed, 7 skipped, 2 xfailed** |
+| After the second review pass (+31 in `tests/test_m8_accuracy2_review2.py`) | same | **1301 passed, 7 skipped, 2 xfailed** |
+| After the third review pass (+19 in `tests/test_m8_accuracy2_review3.py`) | same | **1320 passed, 7 skipped, 2 xfailed** |
+
+## M8-ACCURACY — factual integrity and fail-closed display (merged PR #27)
 - **Directive:** NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION (D-049). States VERIFIED / NOT_VERIFIED / INVALID;
   only VERIFIED outputs may be displayed.
 - **Implemented:** `services/accuracy.py` (register, definitions, blockers, runtime source evidence, fail-closed gate,

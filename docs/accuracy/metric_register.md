@@ -28,12 +28,20 @@ most four short reasons (no numbers, names, paths or exception text).
    **Time** is judged per metric: an *operational* metric (current state) needs a known report date no older than its
    `max_source_age_days` (45); a *historical* metric (a closed past period) needs a known report date, a dated
    `period_end` and a complete period, with no age limit. Both need verified completeness. Age never approves.
-4. **Generation binding.** Evidence lives in an immutable `EvidenceSnapshot` whose `generation_id` is a content hash
-   of the exact frames the outputs were computed from. A gate accepts evidence only for the generation it decides for;
-   evidence from another (earlier) generation never certifies anything. The dashboard build binds itself to the
-   snapshot of its own frames. **The API currently receives no snapshot**, so every source-bound metric is withheld
-   there; `validate_register(production=True)` refuses any VERIFIED certification until M8-ACCURACY-2 shares the
-   published generation's snapshot with the API, owner views and refresh (`GENERATION_BOUND_API_EVIDENCE`).
+4. **Generation binding (M8-ACCURACY-2).** Evidence comes from one source-generation manifest
+   (`services/generation.Manifest`): every core and owner source is recorded with the SHA-256 of its **original
+   workbook bytes**, its selection origin, declared dates, validation counts and `SourceEvidence`. Each source is read
+   once and every parse uses those bytes. The dashboard HTML embeds the manifest's `core_id`
+   (`stockagent-generation`); the API binds each request to the published manifest **only for the sources whose
+   served fingerprint equals the recorded one** (`Manifest.bound_snapshot`); any other source gets no evidence and the
+   code `EVIDENCE-GENERATION:<source>`. A refresh installs the context and the manifest together and restores both on
+   failure; an owner reload replaces only that owner record; a restart treats the saved manifest only as a candidate
+   and re-derives the whole evaluation from the original bytes before any evidence binds (`release_gate.md` §10.2).
+   **Request pinning:** each HTTP request reads the context, owner views and Customer 360 snapshot once and builds its
+   gate once from them, so the authorizing evidence always belongs to the returned data (`release_gate.md` §10.1). `GET /api/accuracy/status` shows the generation and the per-metric state (no
+   values). `validate_register(production=True)` still refuses any VERIFIED certification while
+   `GENERATION_BOUND_API_EVIDENCE` is False — it stays False until the owner's real-data acceptance
+   (`release_gate.md` §8.3).
 5. **Dependencies.** A combined output is the worst of its own state and every output it depends on.
 6. Any error while deciding, an unknown key or an unclassified API route = `INVALID` (fail-closed).
 

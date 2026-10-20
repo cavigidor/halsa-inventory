@@ -129,8 +129,8 @@ def test_05_explicit_path_no_mtime_selection(tmp_path):
     os.utime(tmp_path / NAME, (1, 1))
     (tmp_path / "~$kredi sözleşmeleri.xlsx").write_bytes(b"lock")
     out = find_kredi_candidates(tmp_path)
-    assert out == [{"file": "kredi borçları.xlsx", "headers_compatible": True},
-                   {"file": NAME, "headers_compatible": True}]
+    assert out == [{"file": "kredi borçları.xlsx", "headers_compatible": True, "layout": "erp_export"},
+                   {"file": NAME, "headers_compatible": True, "layout": "erp_export"}]   # M8-ACCURACY-2: + layout
     src = (ROOT / "services/importers/kredi.py").read_text()
     for banned in ("getmtime", "st_mtime", "_latest(", "today(", "now("):
         assert banned not in src, banned
