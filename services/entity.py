@@ -10,11 +10,14 @@ from services import request_pin as RP
 
 
 class ContextRepository:
-    def __init__(self, data_folder=None, context=None, inflation_rate=None, generation_store=None):
+    def __init__(self, data_folder=None, context=None, inflation_rate=None, generation_store=None,
+                 on_generation_accepted=None):
         self._folder = data_folder
         self._ctx = context
         self._infl = inflation_rate
         self._generations = generation_store   # M8-ACCURACY-2: build from the restored generation's exact bytes
+        self._on_accepted = on_generation_accepted   # (manifest, paths, frames) after a re-derived generation is accepted
+        self._post_build = None
         self._cust_idx = None
         self._prod_idx = None
         self._idx_ctx = None
@@ -49,6 +52,12 @@ class ContextRepository:
                     raise
                 self.last_error = None
                 self._cust_idx = self._prod_idx = None
+        job, self._post_build = self._post_build, None
+        if job is not None and self._on_accepted is not None:   # outside the build lock (it takes the publish lock)
+            try:
+                self._on_accepted(*job)
+            except Exception:
+                pass                                         # the dashboard stays unpublished → GET / withholds
         return self._ctx
 
     def _build(self):
@@ -66,6 +75,7 @@ class ContextRepository:
                 m, paths, frames = built
                 m = store.accept_rederived(cand, m)
                 if m is not None:
+                    self._post_build = (m, paths, frames)        # re-publish the dashboard from these bytes
                     ctx = CTX.build_context(self._folder, inflation_rate=self._infl, sources=paths, frames=frames)
                     ctx.generation = {"core_id": m.core_id, "served": {r.key: r.sha256 for r in m.core}}
                     ctx.generation_manifest = m

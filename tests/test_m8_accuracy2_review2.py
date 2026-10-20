@@ -252,7 +252,7 @@ def test_reproduction_source_changed_after_restart_is_withheld(world, published,
         assert APP.app.state.generations.restore_reason == "source_changed"
         r = c.get("/")
         assert_withheld(r) or None
-        assert r.headers["X-Halsa-Dashboard"] == "evidence_unavailable"
+        assert r.headers["X-Halsa-Dashboard"] == "no_accepted_generation"
         warm_up()
         assert_withheld(c.get("/"))                                    # still withheld after the rebuild
         assert c.get("/api/context").status_code == ACC.WITHHELD_HTTP_STATUS
@@ -267,12 +267,14 @@ def test_pending_revalidation_then_successful_restore(world, published, monkeypa
     c = restart(world, monkeypatch)
     try:
         assert APP.app.state.generations.restore_reason == "pending_revalidation"
-        assert_withheld(c.get("/"))                                    # a candidate gives no evidence
-        warm_up()                                                      # re-derived from the original bytes
+        assert APP.app.state.generations.current() is None             # a candidate gives no evidence …
+        r = c.get("/")                                                 # … GET / waits for the re-derivation
         assert APP.app.state.generations.restore_reason is None
-        r = c.get("/")
-        assert r.status_code == 200 and r.content == published["body"] and reorder_rows(r.text)
         m = APP.app.state.generations.current()
+        # served: the dashboard RE-BUILT by this process from the re-derived evidence (never the pre-restart file)
+        assert r.status_code == 200 and GEN.sha256_bytes(r.content) == m.dashboard_sha256
+        assert r.content == Path(world.dash).read_bytes()
+        assert reorder_rows(r.text) == reorder_rows(published["body"].decode())
         assert r.headers["X-Halsa-Generation"] == m.generation_id and m.core_id == published["m"].core_id
     finally:
         close(c)
@@ -439,9 +441,9 @@ def test_get_root_waits_for_publication_and_serves_one_consistent_generation(wor
         close(c)
 
 
-def test_production_register_dashboard_embeds_no_metric_and_needs_no_evidence(world, monkeypatch):
-    """Without any synthetic promotion (the real register) nothing is displayed, so serving it exposes no metric even
-    when its generation was rejected; the displayed marker is empty."""
+def test_production_register_dashboard_without_accepted_generation_is_not_served(world, monkeypatch):
+    """The real register displays nothing (empty marker). That claim of the file is NOT evidence: after the generation
+    is rejected (source changed + restart) the on-disk page is not served (third review of PR #28)."""
     selection(world.folder)
     assert refresh(world.folder, world.dash, install=world.install)["ok"]
     body = Path(world.dash).read_bytes()
@@ -453,8 +455,8 @@ def test_production_register_dashboard_embeds_no_metric_and_needs_no_evidence(wo
     c = restart(world, monkeypatch)
     try:
         r = c.get("/")
-        assert r.status_code == 200 and r.content == body and reorder_rows(r.text) == []
-        assert r.headers["X-Halsa-Generation"] == "none"                 # served without any evidence
+        assert r.status_code == 503 and r.content != body and data_of(r.text) is None
+        assert r.headers["X-Halsa-Dashboard"] == "no_accepted_generation"
     finally:
         close(c)
 
@@ -465,7 +467,7 @@ def test_dashboard_markers_and_old_dashboards():
     assert GEN.dashboard_markers(b) == ("ab12", ("stock.reorder", "stock.overstock"))
     assert GEN.dashboard_markers(b'<meta name="stockagent-generation" content="ab12">') == ("ab12", None)
     assert APP._dashboard_authorized(b'<meta name="stockagent-generation" content="">', None)[:2] == \
-        (False, "displayed_marker_missing")
+        (False, "no_accepted_generation")
 
 
 def test_request_pinning_and_publish_lock_still_in_place():

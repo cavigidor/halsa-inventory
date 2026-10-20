@@ -248,29 +248,28 @@ def test_get_needs_no_header(mk):
 
 
 # ---------------- GET / serves the dashboard (D-020) ----------------
-def test_root_serves_dashboard_file(mk, tmp_path, monkeypatch):
+def test_root_never_serves_an_unpublished_dashboard_file(mk, tmp_path, monkeypatch):
+    """M8-ACCURACY-2 (review of PR #28): `/` serves the on-disk HTML only when its exact bytes match the accepted,
+    re-validated manifest. A hand-written page — even one with the policy marker and an EMPTY displayed-metrics
+    marker — is a claim of the file itself and is never served (a published page: tests/test_m8_accuracy2_review3.py)."""
     f = tmp_path / "dashboard.html"
-    # M8-ACCURACY: `/` serves only dashboards built with the factual-integrity gate (policy marker in <head>).
     from services import accuracy as ACC
-    # M8-ACCURACY-2: it also lists the metrics it embeds; this page embeds none, so it needs no evidence.
     f.write_text(f'<!doctype html><meta name="stockagent-accuracy" content="{ACC.POLICY_VERSION}">'
-                 '<meta name="stockagent-displayed" content="">'
-                 "<title>Şirket Panosu — test</title>", encoding="utf-8")
+                 '<meta name="stockagent-generation" content=""><meta name="stockagent-displayed" content="">'
+                 "<title>Şirket Panosu — test</title><script>const DATA={}</script>", encoding="utf-8")
     monkeypatch.setattr(APP, "DASHBOARD_PATH", str(f))
     c, _ = mk(headers={})
     r = c.get("/")
-    assert r.status_code == 200 and "Şirket Panosu" in r.text and r.headers["content-type"].startswith("text/html")
-    f.write_text(f'<!doctype html><meta name="stockagent-accuracy" content="{ACC.POLICY_VERSION}">'
-                 "<title>Şirket Panosu — test</title>", encoding="utf-8")       # no displayed marker: cannot be judged
-    r = c.get("/")
-    assert r.status_code == 503 and "Şirket Panosu" not in r.text
+    assert r.status_code == 503 and r.headers["content-type"].startswith("text/html")
+    assert "Şirket Panosu — test" not in r.text and "const DATA" not in r.text and str(tmp_path) not in r.text
+    assert r.headers["X-Halsa-Dashboard"] == "no_accepted_generation"
 
 
 def test_root_without_dashboard_gives_build_hint(mk, tmp_path, monkeypatch):
     monkeypatch.setattr(APP, "DASHBOARD_PATH", str(tmp_path / "missing.html"))
     c, _ = mk(headers={})
     r = c.get("/")
-    assert r.status_code == 404 and "dashboard_builder.py" in r.text
+    assert r.status_code == 404 and "services.refresh" in r.text and str(tmp_path) not in r.text
 
 
 # ---------------- warm-up / context_ready ----------------

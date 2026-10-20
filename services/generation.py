@@ -638,11 +638,22 @@ class GenerationStore:
                 return None
             if self._m is not None and not rederived.owner:
                 rederived = dataclasses.replace(rederived, owner=self._m.owner)
-            # the dashboard published with the candidate: its bytes are checked again on every GET /
-            rederived = dataclasses.replace(rederived, dashboard_sha256=candidate.dashboard_sha256)
+            # the dashboard file on disk is NOT carried over: its recorded digest came from the (untrusted) saved file.
+            # Until the server re-publishes a dashboard built from the re-derived evidence (`set_dashboard`), GET /
+            # serves no dashboard bytes.
+            rederived = dataclasses.replace(rederived, dashboard_sha256=None)
             self._m, self._pending = rederived, None
             self.restore_reason = None
             return rederived
+
+    def set_dashboard(self, core_id: str, dashboard_sha256: str) -> Manifest | None:
+        """Record the dashboard bytes this process published for the current generation `core_id` (owner records
+        kept). None when another core generation is current meanwhile."""
+        with self._lock:
+            if self._m is None or self._m.core_id != core_id:
+                return None
+            self._m = dataclasses.replace(self._m, dashboard_sha256=dashboard_sha256)
+            return self._m
 
     def reject_candidate(self, candidate: Manifest, reason: str) -> None:
         with self._lock:

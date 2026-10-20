@@ -432,6 +432,8 @@ def api(env, monkeypatch):
     spy = SpyProvider()
     APP.app.state.repo = ContextRepository(context=CTX.build_context(env["data"], inflation_rate=0.4))
     APP.app.state.provider, APP.app.state.agent = spy, BusinessActionAgent(spy)
+    from services import generation as GEN
+    APP.app.state.generations = GEN.GenerationStore()       # as at startup: the API refresh publishes into it
     RF.run_refresh(env["data"], env["dash"], inflation_rate=0.4)          # a live dashboard exists
     return TestClient(APP.app, headers=H), spy
 

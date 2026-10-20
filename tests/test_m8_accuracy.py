@@ -593,7 +593,8 @@ def test_root_refuses_a_dashboard_built_without_the_gate(client, tmp_path, monke
     legacy.write_text("<!doctype html><title>Şirket Panosu</title><script>const DATA={}</script>", encoding="utf-8")
     monkeypatch.setattr(APP, "DASHBOARD_PATH", str(legacy))
     r = client.get("/")
-    assert r.status_code == 503 and "doğrulama" in r.text and str(tmp_path) not in r.text
+    assert r.status_code == 503 and "doğrulanmış" in r.text and str(tmp_path) not in r.text
+    assert "const DATA" not in r.text                     # the file itself is never returned
 
 
 def test_refresh_success_publishes_only_a_gated_dashboard_and_no_unverified_totals(tmp_path):
