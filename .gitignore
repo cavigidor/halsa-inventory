@@ -22,6 +22,11 @@ dashboard.html.new
 *.prev.html.tmp
 *.refresh.lock
 agent_context.json
+# M8-ACCURACY-2: generation manifest beside the dashboard (fingerprints / counts of the private exports) and its
+# atomic-write temp files; reconciliation evidence (default location is data/reconciliation/, already ignored)
+*.generation.json
+.gen-*
+kanit_*.json
 
 # --- databases (action state, history, memory) -----------------------
 *.db

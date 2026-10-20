@@ -326,13 +326,15 @@ def test_reconcile_command_default_output_is_privacy_safe(tmp_path):
     p = KT.book(tmp_path)
     ev = tmp_path / "evidence.json"
     r = _reconcile("--kredi", str(p), "--today", TODAY.isoformat(), "--evidence-out", str(ev))
-    assert r.returncode == 0, r.stdout + r.stderr
+    assert r.returncode == 3, r.stdout + r.stderr                     # OPEN: business questions remain
+    assert "GENEL SONUÇ: OPEN" in r.stdout
     out = r.stdout
     assert "teknik doğrulamadır" in out.lower() or "finansal onay değildir" in out.lower() or "onay" in out.lower()
     for s in SECRETS:
         assert s not in out, s
         assert s not in ev.read_text(encoding="utf-8"), s
     d = json.loads(ev.read_text(encoding="utf-8"))
+    assert d["overall"] == "OPEN" and d["failed"] == 0 and d["open"] >= 4
     res = {x["code"]: x for x in d["results"]}
     assert res["layout"]["status"] == "PASS" and res["import"]["installments"] == 9
     assert res["saved_filter"]["hidden_rows"] == 5 and res["saved_filter"]["visible_rows"] == 4
@@ -346,9 +348,9 @@ def test_reconcile_command_default_output_is_privacy_safe(tmp_path):
 def test_reconcile_values_only_on_request_and_exit_codes(tmp_path):
     p = KT.book(tmp_path)
     shown = _reconcile("--kredi", str(p), "--today", TODAY.isoformat(), "--show-values")
-    assert shown.returncode == 0 and "installment_total=" in shown.stdout
+    assert shown.returncode == 3 and "installment_total=" in shown.stdout
     bad = _reconcile("--kredi", str(KT.book(tmp_path / "s", stale_subtotal=True)), "--today", TODAY.isoformat())
-    assert bad.returncode == 1 and "[FAIL]" in bad.stdout
+    assert bad.returncode == 1 and "[FAIL]" in bad.stdout and "GENEL SONUÇ: FAIL" in bad.stdout
     wrong = _reconcile("--kredi", str(p), "--expect-sha256", "0" * 64)
     assert wrong.returncode == 1
     assert _reconcile().returncode == 2
@@ -376,3 +378,42 @@ def test_kredi_is_not_unlocked():
     m = ACC.REGISTER["owner.kredi"]
     assert m.certified != ACC.State.VERIFIED and m.blockers
     assert ACC.current_gate(today=TODAY).decide("owner.kredi").state != ACC.State.VERIFIED
+
+
+def test_reconcile_pass_result_on_a_clean_workbook(tmp_path):
+    rows = [TK.inst(no=n, due=D(2026, 12, n), paid=False) for n in (1, 2)]
+    p = KT.book(tmp_path, rows, visible=lambda r: True)
+    r = _reconcile("--kredi", str(p), "--today", TODAY.isoformat(), "--snapshot-date", "2026-10-19")
+    assert r.returncode == 0 and "GENEL SONUÇ: PASS" in r.stdout, r.stdout
+    assert "finansal onay değildir" in r.stdout
+
+
+def test_reconcile_evidence_never_lands_where_it_could_be_committed(tmp_path):
+    p = KT.book(tmp_path)
+    refused = _reconcile("--kredi", str(p), "--evidence-out", str(ROOT / "kanit.json"))
+    assert refused.returncode == 2 and not (ROOT / "kanit.json").exists()
+    refused2 = _reconcile("--kredi", str(p), "--evidence-out", str(ROOT / "docs" / "kanit.json"))
+    assert refused2.returncode == 2 and not (ROOT / "docs" / "kanit.json").exists()
+    created = [d for d in (ROOT / "data", ROOT / "data" / "reconciliation") if not d.exists()]
+    before = set((ROOT / "data" / "reconciliation").glob("*.json")) if (ROOT / "data" / "reconciliation").exists() \
+        else set()
+    r = _reconcile("--kredi", str(p), "--today", TODAY.isoformat(), "--evidence-out")
+    try:
+        assert r.returncode == 3, r.stdout
+        new = set((ROOT / "data" / "reconciliation").glob("*.json")) - before
+        assert len(new) == 1
+        out = next(iter(new))
+        assert subprocess.run(["git", "check-ignore", "-q", str(out)], cwd=ROOT).returncode == 0
+        assert "data/reconciliation/" in r.stdout.replace("\\", "/")
+    finally:
+        for f in set((ROOT / "data" / "reconciliation").glob("*.json")) - before:
+            f.unlink()
+        for d in reversed(created):                       # never leave a ./data folder behind (local_data tests)
+            if d.exists():
+                d.rmdir()
+
+
+def test_generation_manifest_and_temp_files_are_git_ignored():
+    for name in ("dashboard.generation.json", ".gen-x1", "kanit_kredi_1.json", "data/reconciliation/x.json",
+                 "data/sources.json"):
+        assert subprocess.run(["git", "check-ignore", "-q", name], cwd=ROOT).returncode == 0, name

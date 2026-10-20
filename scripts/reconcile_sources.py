@@ -3,19 +3,23 @@
     python -m scripts.reconcile_sources --kredi "data/kredi takip(1).xlsx" --today 2026-10-19
     python -m scripts.reconcile_sources --kredi "data/kredi takip(1).xlsx" --show-values        # amounts: local only
     python -m scripts.reconcile_sources --core data                                             # stock / sales / Cari
-    python -m scripts.reconcile_sources --kredi FILE --expect-sha256 <hash> --evidence-out data/kredi_evidence.json
+    python -m scripts.reconcile_sources --kredi FILE --expect-sha256 <hash> --evidence-out     # → data/reconciliation/
 
 Guarantees:
 - reads the workbook bytes once and never writes to, repairs or re-saves any workbook;
 - no AI provider, no network, nothing uploaded; nothing is written unless `--evidence-out` is given, and that file
-  holds fingerprints, counts and PASS / FAIL / OPEN results only (never amounts, codes, bank or customer names);
+  holds fingerprints, counts and PASS / FAIL / OPEN results only (never amounts, codes, bank or customer names).
+  Without a path it goes to the git-ignored `data/reconciliation/`; an explicit path inside this repository must be
+  under `data/` (refused otherwise, so private evidence is never left where it could be committed);
 - default console output is privacy-safe (counts, fingerprints, results). `--show-values` prints amount totals to the
   LOCAL console for the owner; never paste that output into GitHub, chat or an AI tool;
 - the workbook's saved Excel filter is reported as a view and never treated as proof that hidden rows are settled;
 - TECHNICAL validation only. A PASS here is not a financial / accounting approval and does not verify bank liabilities.
 
-Exit code: 0 = every technical check passed (OPEN items may remain), 1 = a technical check failed, 2 = unreadable /
-usage error.
+Overall result (printed last, and `overall` in the evidence file):
+  PASS = every check passed;  OPEN = no technical failure, but business questions remain (owner / accountant decision);
+  FAIL = at least one technical check failed.
+Exit code: 0 = PASS, 1 = FAIL, 2 = unreadable input / usage error, 3 = OPEN.
 """
 from __future__ import annotations
 
@@ -175,11 +179,21 @@ def main(argv=None) -> int:
     ap.add_argument("--snapshot-date", help="declared Kredi snapshot date YYYY-MM-DD (unknown if omitted)")
     ap.add_argument("--expect-sha256", help="fail unless the Kredi workbook has exactly this fingerprint")
     ap.add_argument("--show-values", action="store_true", help="print amount totals to the LOCAL console only")
-    ap.add_argument("--evidence-out", help="write privacy-safe evidence JSON (fingerprints, counts, results)")
+    ap.add_argument("--evidence-out", nargs="?", const="", default=None,
+                    help="write privacy-safe evidence JSON (fingerprints, counts, results); without a path: "
+                         "data/reconciliation/ (git-ignored); inside the repository only under data/")
     a = ap.parse_args(argv)
     if not (a.kredi or a.core):
         ap.print_usage()
         return 2
+    evidence_path = None
+    if a.evidence_out is not None:
+        evidence_path = _evidence_path(a.evidence_out, "kredi" if a.kredi and not a.core else
+                                       ("core" if a.core and not a.kredi else "sources"))
+        if evidence_path is None:
+            print("Kanıt dosyası bu depo içinde yalnızca git'e girmeyen data/ klasörüne yazılabilir "
+                  "(veya depo dışına). Örnek: --evidence-out (varsayılan: data/reconciliation/).")
+            return 2
     try:
         today = _today(a.today)
         snap = dt.date.fromisoformat(a.snapshot_date) if a.snapshot_date else None
@@ -200,12 +214,45 @@ def main(argv=None) -> int:
         return 2
     failed = sum(1 for r in out.results if r["status"] == "FAIL")
     open_ = sum(1 for r in out.results if r["status"] == "OPEN")
+    overall = "FAIL" if failed else ("OPEN" if open_ else "PASS")
+    summary["overall"], summary["failed"], summary["open"] = overall, failed, open_
     out.line(f"Sonuç: {failed} teknik hata, {open_} çözülmemiş konu (sahip / muhasebe kararı gerekli).")
-    if a.evidence_out:
-        with open(a.evidence_out, "w", encoding="utf-8") as fh:
+    out.line(f"GENEL SONUÇ: {overall} — " + {
+        "PASS": "tüm teknik kontroller geçti; finansal onay değildir.",
+        "OPEN": "teknik hata yok; çözülmemiş iş soruları var (doğrulanmış sayılmaz).",
+        "FAIL": "en az bir teknik kontrol başarısız (kaynak doğrulanmadı)."}[overall])
+    if evidence_path:
+        os.makedirs(os.path.dirname(evidence_path), exist_ok=True)
+        with open(evidence_path, "w", encoding="utf-8") as fh:
             json.dump(summary, fh, ensure_ascii=False, indent=1)
-        out.line(f"Kanıt dosyası yazıldı (değer yok): {os.path.basename(a.evidence_out)}")
-    return 1 if failed else 0
+        out.line(f"Kanıt dosyası yazıldı (değer yok): {_shown(evidence_path)}")
+    return {"PASS": 0, "FAIL": 1, "OPEN": 3}[overall]
+
+
+DEFAULT_EVIDENCE_DIR = os.path.join(ROOT, "data", "reconciliation")
+
+
+def _inside(path: str, folder: str) -> bool:
+    try:
+        return os.path.commonpath([os.path.realpath(path), os.path.realpath(folder)]) == os.path.realpath(folder)
+    except ValueError:                                   # different drives (Windows)
+        return False
+
+
+def _evidence_path(value: str, kind: str) -> str | None:
+    """Where the evidence file goes. Default: data/reconciliation/ (git-ignored). Inside this repository only under
+    data/; anywhere outside the repository is the owner's choice. None = refused."""
+    if value == "":
+        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        return os.path.join(DEFAULT_EVIDENCE_DIR, f"kanit_{kind}_{stamp}.json")
+    path = os.path.abspath(value)
+    if _inside(path, ROOT) and not _inside(path, os.path.join(ROOT, "data")):
+        return None
+    return path
+
+
+def _shown(path: str) -> str:
+    return os.path.relpath(path, ROOT) if _inside(path, ROOT) else os.path.basename(path)
 
 
 if __name__ == "__main__":
