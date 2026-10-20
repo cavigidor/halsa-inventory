@@ -1,10 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-20 (M8-ACCURACY-2 third review pass on PR #28, not merged: GET / serves only dashboard bytes this server published for the accepted, re-validated generation — never on the page's own markers; after a restart the dashboard is re-built from re-derived evidence. Technical foundation ready for final technical review; owner-local real-data acceptance NOT started; no metric promoted; `GENERATION_BOUND_API_EVIDENCE` stays False)._
+_Updated 2026-10-20 (M8-ACCURACY-2 PR #28 technical foundation squash-merged at `5baa92a`, GitHub CI 1320 passed / 7 skipped / 2 xfailed; next is owner-local private real-data acceptance. No financial/business metric is VERIFIED; no real Halsa source has been checked with this checkpoint)._
 
 ## Git
-- **`main`:** M7 complete PR #24; readiness PR #25; M8 planning PR #26; M8-ACCURACY safety gate PR #27 squash merged (`a28b2b9`).
-- **`claude/m8-accuracy-2-shared-evidence`:** M8-ACCURACY-2 (D-051); one PR, not merged.
+- **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), and M8 source-evidence foundation PR #28 (`5baa92a`) merged.
+- **`claude/m8-accuracy-2-shared-evidence`:** PR #28 merged as technical infrastructure 2026-10-20; all production metrics still withheld and `GENERATION_BOUND_API_EVIDENCE` remains False.
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
 - **Owner's Mac folder:** current checkout state was not inspected in this checkpoint. Previous notes reported an older checkout; verify `git status` before pulling, protect private `.env`, data and SQLite, and follow `docs/owner_launch_checklist.md`. Browser/real-data acceptance remains owner-local.
 
@@ -19,7 +19,7 @@ forward (D-038) and is merged. M6-5 (Trodat), M6-6 Gider/Gelir and M6-6 Bütçe 
 BLOCKED and is not renumbered.
 **Milestone 7 — Sales Operating System: COMPLETE with M7-6** (PR #24 merged 2026-10-18 @ `de7eb43`). M7-1 (Customer 360), M7-2 (Günlük Satış), M7-3 (cross-sell + opportunity / territory intelligence), M7-4 (Fuar Merkezi) and M7-5 (Takip / CRM) are merged; M7-6 (Yönetim owner view + integration / performance / polish) is done. M6-4 stays blocked by a missing export; that does not block M7 (D-047).
 
-## M8-ACCURACY-2 — shared generation evidence and source verification (Current; PR open, not merged)
+## M8-ACCURACY-2 — source evidence technical foundation (PR #28 merged; owner-local acceptance Current)
 - **Built (synthetic-verified):** `services/generation.py` (explicit `data/sources.json` selection, frozen source bytes,
   SHA-256 manifest of core + owner sources, atomic install with the context, rollback, restart restore, owner reload);
   `services/source_validation.py` (formula-aware core inspection, join counts); `services/accuracy.py` (new evidence
@@ -51,7 +51,7 @@ BLOCKED and is not renumbered.
   - **Now:** `GET /` serves the file only when an accepted generation, the markers and the digest recorded by this process at publication all match, and the gate authorizes every displayed metric. Otherwise a neutral page (503).
   - **After a restart:** the server re-builds and re-publishes the dashboard from the re-derived evidence; the pre-restart file is never served.
   - **Tests:** 19 new HTTP tests.
-- **Readiness:** technical foundation ready for final technical review. Owner-local real-data acceptance not started. Individual metric promotion: none.
+- **Readiness:** PR #28 technical foundation reviewed and merged. Owner-local real-data acceptance not started. Individual production metric promotion: none.
 - **Tests (actual, cloud, synthetic, Python 3.12.3):**
 
 | Where | Command | Result |
@@ -1345,3 +1345,22 @@ and a negative residual exception; both need owner reconciliation. Do not auto-z
 status `Kapalı` is not approved as proof of payment, and source file-of-record / true snapshot date remain
 unconfirmed. Record user-approved year, month, bank, interest/principal/tax breakdown definitions separately before
 any VERIFIED production output. All values must remain withheld by the M8 accuracy gate until demonstrated.
+
+## 2026-10-20 PR #28 merge record / next required acceptance
+
+PR #28 merged (squash `5baa92a`; reviewed head `4f2f7d7`; GitHub Actions `39484204004`
+**1320 passed, 7 skipped, 2 xfailed**). Reviewer confirmed the final fail-closed dashboard serving behavior
+(exact server-published HTML bytes + accepted re-derived generation + authorization for each embedded metric),
+safe exclusive evidence writes, request-pinned evidence/data, and synthetic Kredi filtered import compatibility.
+
+This is **technical foundation only**. `GENERATION_BOUND_API_EVIDENCE = False`; **zero VERIFIED production
+metrics**. Real Kredi and core ERP exports have not been inspected by these CI tests; 7 local-data skips remain,
+and DQ-1/DQ-6 are expected failures. Kredi DURUM, hidden positive remaining amounts, negative residual,
+snapshot/file of record and bank reconciliation are unresolved. No public hosting, authentication, or monthly-upload UI.
+
+**Current task (TASKS.md):** owner-local read-only real-data acceptance using
+`docs/accuracy/release_gate.md` §8.3 on the owner's private Mac; never commit source workbooks,
+`data/sources.json`, evidence JSON, or personal/company records. Any OPEN/FAIL blocks the
+corresponding metric's promotion until resolved. Technical PASS alone is not accounting approval.
+After owner acceptance, separately implement and review metric-by-metric business verification,
+then father-first secure access and hosting.
