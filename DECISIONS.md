@@ -816,3 +816,14 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **Reconciliation output** stays private: evidence defaults to `data/reconciliation/`; the manifest beside the
   dashboard is git-ignored. Overall result PASS / OPEN / FAIL with distinct exit codes.
 - **Unchanged:** `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; DQ-1 … DQ-6, D-003, Kredi DURUM open.
+
+### D-053 · 2026-10-20 · Dashboard bytes are authorized like an API response; evidence output never touches an input
+- **`GET /` is gated.** The HTML lists the metrics it embeds. The manifest records the SHA-256 of the exact published HTML.
+  `GET /` captures the bytes and the accepted generation under the publish lock and binds evidence only when both match
+  the accepted, re-validated generation. The current gate must authorize every embedded metric; otherwise 503, no
+  data. A page that embeds no source-bound metric needs no evidence; a page without the marker is refused.
+- **Reconciliation never writes over inputs.** A destination that is, or aliases, an input, or that already exists,
+  is refused. Evidence files are created exclusively (no truncation possible), and write failures are reported (exit 4).
+- **Readiness is reported on three levels:** technical foundation / owner-local real-data acceptance / individual
+  metric promotion (`docs/accuracy/release_gate.md` §11.3).
+- **Unchanged:** `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; Kredi questions, DQ-1 … DQ-6, D-003 open.

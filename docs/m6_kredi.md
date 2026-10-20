@@ -106,8 +106,10 @@ declared — the file time is shown as information only); currencies; visible ro
 **only** with `--show-values`, on the local console. `--evidence-out` writes fingerprints, counts and results only;
 without a path to the git-ignored `data/reconciliation/`, and an explicit path inside the repository must be under
 `data/`. The last line is `GENEL SONUÇ: PASS / OPEN / FAIL`.
-Exit codes: 0 = PASS, 1 = FAIL (a technical check failed), 2 = unreadable input / usage, 3 = OPEN (no technical failure,
-business questions remain). A PASS is technical consistency, never financial approval.
+Exit codes: 0 = PASS, 1 = FAIL (a technical check failed), 2 = unreadable input / usage / refused evidence path,
+3 = OPEN (no technical failure, business questions remain), 4 = checks ran but the evidence file could not be written.
+The evidence path may never be (or link to) an input or an existing file; it is created exclusively and never
+overwrites anything.
 
 **Still open for the revised workbook** (the owner's description, recorded without values): 11 installments with a
 positive remaining amount in 2026 are outside the saved filter (10 due before 2026-10-19, 1 due on it); one Kapalı row

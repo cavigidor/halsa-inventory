@@ -197,10 +197,13 @@ data date (max sales date), file names and data-quality counts (e.g. DQ-4) remai
 3. `python -m scripts.reconcile_sources --kredi "data/kredi takip(1).xlsx" --today <YYYY-MM-DD> --evidence-out` →
    not FAIL; each OPEN answered by the owner / accountant (§8.4). `--show-values` only on the local console.
    Evidence files go to the git-ignored `data/reconciliation/` (an explicit path inside the repository is refused
-   unless it is under `data/`). Exit codes: 0 PASS, 1 FAIL, 2 unreadable / usage, 3 OPEN.
+   unless it is under `data/`; a path that is, or links to, any input or any existing file is refused). Exit codes:
+   0 PASS, 1 FAIL, 2 unreadable / usage / refused evidence path, 3 OPEN, 4 evidence file could not be written.
 4. Run the refresh in the app; check `GET /api/accuracy/status`: the `generation_id` is set, every source is `bound`.
 5. Restart the app; after the warm-up, `restore_pending` is false, `restore_reason` is null and the same `core_id` is
    published (re-derived from the bytes). `evidence_mismatch` or `source_changed` means: refresh again, nothing binds.
+   `GET /` must then return 200 with an `X-Halsa-Generation` header equal to the status `generation_id`; a 503 with
+   `X-Halsa-Dashboard` names why the page is withheld (§11.2).
 6. Only then, in a separate reviewed PR: set the flag, record the evidence (counts only) as `reconciliation_ref`, and
    promote individual metrics per §2.
 
@@ -292,3 +295,45 @@ the restart checks.
 The owner's real-data run (§8.3) has not happened; `GENERATION_BOUND_API_EVIDENCE` stays False; no metric is
 VERIFIED; Kredi questions (§8.4) open; Hedef not generation-bound; no owner-source approvals; the 45-day limit is
 provisional; DQ-1 … DQ-6 unchanged.
+
+## 11. Second review pass on PR #28 (2026-10-20, two reproduced findings)
+### 11.1 Reconciliation output could overwrite an input
+**Reproduced on `bc01577`:** `--evidence-out` equal to `--kredi` replaced the synthetic workbook with JSON (exit 3; the
+file then started with `{`).
+**Fix (`scripts/reconcile_sources.py`):** the destination is refused (exit 2) when it is, or resolves / links to, the
+Kredi workbook, `sources.json`, a selected core workbook or any workbook / JSON file in the core folder (symlinks,
+`..`, symlinked folders and hard links via device + inode), or when anything already exists at the path (including a
+dangling symlink). The file is created with `O_CREAT | O_EXCL | O_NOFOLLOW` (mode 0600), so no existing file can be
+truncated even if one appears after the check; a partly written file of ours is removed; a write failure is reported
+as `KANIT DOSYASI YAZILAMADI` with exit 4. The private-destination rule (inside the repository only under `data/`)
+is unchanged. Inputs are only ever opened read-only.
+
+### 11.2 `GET /` served a dashboard whose generation had been rejected
+**Reproduced on `bc01577`:** publish a synthetic VERIFIED stock metric, change the stock workbook, restart →
+`restore_reason = source_changed`, the API withholds the metric, but `GET /` returned 200 with the 2 embedded rows.
+**Fix:**
+- The build embeds `stockagent-displayed`: every metric whose output the HTML contains. The refresh records the
+  SHA-256 of the exact published HTML in the manifest (`dashboard_sha256`, covered by `generation_id`); restart refuses
+  a dashboard whose bytes differ (`dashboard_bytes_mismatch`); a re-derived generation keeps the candidate's digest.
+- `GET /` reads the bytes and the accepted generation together under `PUBLISH_LOCK`. Evidence binds only if the HTML's
+  generation is the accepted (re-validated, not pending) one and its bytes are exactly the published bytes. The
+  CURRENT gate (today's freshness, current register) must then authorize every displayed metric. Otherwise 503 with
+  a neutral notice and `X-Halsa-Dashboard` = `evidence_unavailable` / `not_authorized` / `displayed_marker_missing`.
+  No embedded data is returned.
+- A dashboard that displays nothing source-bound (the production register today: the marker is empty) is served
+  without evidence. It contains no metric data. A dashboard without the marker (built before this rule) is refused.
+- HTTP tests (`tests/test_m8_accuracy2_review2.py`) cover:
+  - source changed + restart (the reproduction);
+  - pending revalidation, then a successful restore with identical bytes;
+  - a corrupted manifest; a resealed manifest; `evidence_mismatch` after resealing the manifest and the dashboard;
+  - edited HTML bytes, live and after restart;
+  - failed publication / rollback; a crash between the file swaps;
+  - authorization re-evaluated at serve time (stale stock);
+  - `GET /` waits for an in-progress publication.
+
+### 11.3 Readiness — three different things
+| Level | State |
+|---|---|
+| **Technical foundation** (manifest, request pinning, publish lock, re-derived restart, dashboard authorization, fail-closed reconciliation) | Ready for review / merge as a foundation: both review rounds' findings are fixed and covered by synthetic production-gate tests. Every production metric is still withheld. |
+| **Owner-local real-data acceptance** (§8.3) | **Not started.** The real ERP exports and `kredi takip(1).xlsx` have not been run through this code. Required before `GENERATION_BOUND_API_EVIDENCE` may become True. |
+| **Individual metric promotion** (§2) | **None.** Each metric needs owner decisions (D-xxx), real-data reconciliation evidence and regression tests, one reviewed PR each, after the flag. Kredi additionally needs the DURUM / Kapalı meaning, the 11 excluded positive-remaining rows, the negative residual, the file of record, the snapshot date and payment reconciliation. |

@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-20 (M8-ACCURACY-2 review corrections on PR #28, not merged: request-pinned generations + publish lock; manifest ids cover the full evaluation; restart re-derives evidence from the original bytes; private evidence paths. No metric is VERIFIED; `GENERATION_BOUND_API_EVIDENCE` stays False)._
+_Updated 2026-10-20 (M8-ACCURACY-2 second review pass on PR #28, not merged: `GET /` authorizes the exact dashboard bytes; reconciliation output can never overwrite an input. Technical foundation ready for review; owner-local real-data acceptance NOT started; no metric promoted; `GENERATION_BOUND_API_EVIDENCE` stays False)._
 
 ## Git
 - **`main`:** M7 complete PR #24; readiness PR #25; M8 planning PR #26; M8-ACCURACY safety gate PR #27 squash merged (`a28b2b9`).
@@ -43,6 +43,10 @@ BLOCKED and is not renumbered.
      resealed ids, and resealed ids plus an edited dashboard marker. All 33 fail closed.
   3. The manifest beside the dashboard is now git-ignored. Reconciliation evidence defaults to `data/reconciliation/`.
      The command's final line is `GENEL SONUÇ: PASS / OPEN / FAIL` (exit codes 0 / 3 / 1; 2 = unreadable).
+- **Second review pass (2026-10-20, D-053; `docs/accuracy/release_gate.md` §11).** Both findings were reproduced on `bc01577` first:
+  1. **Evidence output.** `--evidence-out` equal to `--kredi` replaced the synthetic workbook with JSON. Now refused when the destination is or aliases any input (symlink, `..`, symlinked folder, hard link) or already exists. Files are created with `O_EXCL`; a failed write exits 4 and leaves nothing.
+  2. **`GET /`.** After a source change and restart (`source_changed`) it returned 200 with 2 VERIFIED reorder rows. Now it checks the exact HTML bytes (SHA recorded at publication, generation marker) against the accepted, re-validated generation, and re-authorizes every embedded metric with the current gate. Otherwise 503 with no data. HTTP tests cover every case listed in §11.2.
+- **Readiness:** technical foundation ready for review. Owner-local real-data acceptance not started. Individual metric promotion: none.
 - **Tests (actual, cloud, synthetic, Python 3.12.3):**
 
 | Where | Command | Result |
@@ -50,6 +54,7 @@ BLOCKED and is not renumbered.
 | Branch before the new test files | `python -m pytest -q` | **1163 passed, 7 skipped, 2 xfailed** |
 | Branch with `test_m8_accuracy2.py` (29) and `test_m8_kredi_takip.py` (27) | same, also with `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled` | **1219 passed, 7 skipped, 2 xfailed** (skips: owner-local `local_data`; xfails: DQ-1, DQ-6 strict) |
 | After the review corrections (+48 in `tests/test_m8_accuracy2_review.py`, +3 in `tests/test_m8_kredi_takip.py`) | same, `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled` | **1270 passed, 7 skipped, 2 xfailed** |
+| After the second review pass (+31 in `tests/test_m8_accuracy2_review2.py`) | same | **1301 passed, 7 skipped, 2 xfailed** |
 
 ## M8-ACCURACY — factual integrity and fail-closed display (merged PR #27)
 - **Directive:** NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION (D-049). States VERIFIED / NOT_VERIFIED / INVALID;
