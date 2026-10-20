@@ -19,7 +19,12 @@ Guarantees:
 Overall result (printed last, and `overall` in the evidence file):
   PASS = every check passed;  OPEN = no technical failure, but business questions remain (owner / accountant decision);
   FAIL = at least one technical check failed.
-Exit code: 0 = PASS, 1 = FAIL, 2 = unreadable input / usage error, 3 = OPEN.
+Exit code: 0 = PASS, 1 = FAIL, 2 = unreadable input / usage error / refused evidence path, 3 = OPEN,
+4 = the checks ran but the evidence file could not be written (nothing else was written).
+
+Evidence output never touches an input: the path is refused if it is (or links to) the Kredi workbook, the selection
+file or any workbook in the core folder, or if anything already exists there; the file is created exclusively
+(O_CREAT | O_EXCL), so no existing file can be truncated.
 """
 from __future__ import annotations
 
@@ -194,6 +199,10 @@ def main(argv=None) -> int:
             print("Kanıt dosyası bu depo içinde yalnızca git'e girmeyen data/ klasörüne yazılabilir "
                   "(veya depo dışına). Örnek: --evidence-out (varsayılan: data/reconciliation/).")
             return 2
+        clash = _evidence_clash(evidence_path, _protected_inputs(a.kredi, a.core))
+        if clash:
+            print(clash)
+            return 2
     try:
         today = _today(a.today)
         snap = dt.date.fromisoformat(a.snapshot_date) if a.snapshot_date else None
@@ -222,11 +231,93 @@ def main(argv=None) -> int:
         "OPEN": "teknik hata yok; çözülmemiş iş soruları var (doğrulanmış sayılmaz).",
         "FAIL": "en az bir teknik kontrol başarısız (kaynak doğrulanmadı)."}[overall])
     if evidence_path:
-        os.makedirs(os.path.dirname(evidence_path), exist_ok=True)
-        with open(evidence_path, "w", encoding="utf-8") as fh:
-            json.dump(summary, fh, ensure_ascii=False, indent=1)
+        err = _write_evidence_exclusive(evidence_path, summary, _protected_inputs(a.kredi, a.core))
+        if err:
+            out.line(f"KANIT DOSYASI YAZILAMADI: {err} Sonuçlar yukarıdadır; kaynak dosyalara dokunulmadı.")
+            return 4
         out.line(f"Kanıt dosyası yazıldı (değer yok): {_shown(evidence_path)}")
     return {"PASS": 0, "FAIL": 1, "OPEN": 3}[overall]
+
+
+# ---------------------------------------------------------------------------------------------
+# evidence output safety: never an input, never an existing file, never truncating anything
+# ---------------------------------------------------------------------------------------------
+_WORKBOOK_EXT = (".xlsx", ".xlsm", ".xls", ".xltx", ".json", ".csv")
+
+
+def _protected_inputs(kredi: str | None, core: str | None) -> list[str]:
+    """Every file this run reads or depends on: the Kredi workbook, the core folder's selection file, the selected
+    workbooks and (conservatively) every workbook / JSON file directly in the core folder."""
+    out = []
+    if kredi:
+        out.append(kredi)
+    if core:
+        out.append(os.path.join(core, "sources.json"))
+        try:
+            from services import generation as GEN
+            paths, _, _ = GEN.select_core(core)
+            out += [p for p in paths.values() if p]
+        except Exception:
+            pass
+        try:
+            out += [os.path.join(core, n) for n in os.listdir(core) if n.lower().endswith(_WORKBOOK_EXT)]
+        except OSError:
+            pass
+    return out
+
+
+def _same_file(a: str, b: str) -> bool:
+    """Same path after resolving symlinks, or the same file object (hard links: device + inode)."""
+    try:
+        if os.path.realpath(a) == os.path.realpath(b):
+            return True
+        sa, sb = os.stat(a), os.stat(b)
+        return (sa.st_dev, sa.st_ino) == (sb.st_dev, sb.st_ino)
+    except OSError:
+        return False
+
+
+def _evidence_clash(path: str, protected: list[str]) -> str | None:
+    for p in protected:
+        if _same_file(path, p):
+            return ("Kanıt dosyası bir kaynak dosyanın yerine yazılamaz (aynı dosya, bağlantı veya kısayol). "
+                    "Başka bir dosya adı verin veya yolu boş bırakın (data/reconciliation/).")
+    if os.path.lexists(path):
+        return "Kanıt dosyası zaten var; mevcut dosyaların üzerine asla yazılmaz. Yeni bir dosya adı verin."
+    return None
+
+
+def _write_evidence_exclusive(path: str, summary: dict, protected: list[str]) -> str | None:
+    """Create a NEW file (O_CREAT | O_EXCL: fails if anything — file, link or dangling symlink — already exists at
+    the path, so no existing file can ever be truncated). A partly written file of ours is removed. Returns an error
+    text, or None on success."""
+    clash = _evidence_clash(path, protected)          # re-checked right before writing
+    if clash:
+        return clash
+    if os.path.dirname(path) == DEFAULT_EVIDENCE_DIR:
+        try:
+            os.makedirs(DEFAULT_EVIDENCE_DIR, mode=0o700, exist_ok=True)
+        except OSError as e:
+            return f"klasör oluşturulamadı ({type(e).__name__})."
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags, 0o600)
+    except FileExistsError:
+        return "dosya bu arada oluşturulmuş; üzerine yazılmadı."
+    except OSError as e:
+        return f"dosya oluşturulamadı ({type(e).__name__})."
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(summary, fh, ensure_ascii=False, indent=1)
+            fh.flush()
+            os.fsync(fh.fileno())
+    except Exception as e:
+        try:
+            os.remove(path)                            # only the file this call created
+        except OSError:
+            pass
+        return f"yazma hatası ({type(e).__name__})."
+    return None
 
 
 DEFAULT_EVIDENCE_DIR = os.path.join(ROOT, "data", "reconciliation")
