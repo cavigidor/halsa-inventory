@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-21 (M8-ACCURACY-2A owner-local real-data acceptance run (read-only; core FAIL on genuine source issues, Kredi NOT RUN — file absent); M8-ACCURACY-2B corrections on branch `claude/m8-accuracy-2b-precise-validation`, one PR, not merged. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False)._
+_Updated 2026-10-21 (M8-ACCURACY-2A owner-local real-data acceptance run (read-only; core FAIL on genuine source issues, Kredi NOT RUN — file absent); M8-ACCURACY-2B corrections and the PR #29 correction pass on branch `claude/m8-accuracy-2b-precise-validation`, one PR, not merged. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False)._
 
 ## Git
 - **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), and M8 source-evidence foundation PR #28 (`5baa92a`) merged.
@@ -23,7 +23,13 @@ _Updated 2026-10-21 (M8-ACCURACY-2A owner-local real-data acceptance run (read-o
   - Dependency-scoped judgement for traced metrics.
   - Bounded restart re-publication wait.
 - **Private rerun of 2B on the real exports:** 3 footers recognized, 0 ambiguous; 92 of 94 footer cells matched, 2 error-propagated, 0 contradictory. Core technical failures 8 → 7 (overall still FAIL on genuine items). No metric VERIFIED.
-- **Tests (cloud, synthetic, `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled`):** before 2B 1320 passed / 7 skipped / 2 xfailed; with 2B **1369 passed, 7 skipped, 2 xfailed** (+49 in `tests/test_m8_accuracy2b.py`; skips = owner-local `local_data`; xfails = DQ-1, DQ-6).
+- **Tests (cloud, synthetic, `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled`):** before 2B 1320 passed / 7 skipped / 2 xfailed; with 2B 1369 passed; after the correction pass **1390 passed, 7 skipped, 2 xfailed** (+49 in `tests/test_m8_accuracy2b.py`, +21 in `tests/test_m8_accuracy2b_review.py`; skips = owner-local `local_data`; xfails = DQ-1, DQ-6).
+- **PR #29 correction pass (`release_gate.md` §14, D-056–D-058):**
+  - Partial footer reconciliation is OPEN (never PASS) and never makes `totals_consistent` True; field-level footer evidence.
+  - Owner-confirmed DinamikCRM stock template: A = product code, J = country of origin; enforced by header digest; altered or reordered layouts refused. Column identity only.
+  - DinamikCRM report conventions recorded (not evidence).
+  - Veri Kontrol Merkezi designed (`docs/m8_veri_kontrol_merkezi.md`); implementation is checkpoint M8-VKM-1.
+  - Private rerun: footers 92/94 matched, 2 error-propagated → OPEN; template approved (A/J); no metric VERIFIED.
 
 ## Milestone
 **Milestone 5 — AI Aksiyon Merkezi: COMPLETE** (M5-1 to M5-6; final acceptance in the M5-6 section below).

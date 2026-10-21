@@ -430,3 +430,39 @@ selection, totals, mapping, blank buckets). No metric is VERIFIED.
 
 **Not done here (documented):** dependency declarations for the remaining metrics (strict until audited); supplier
 (`320`) accounts in collections (owner question, no rule); cross-response consistency; native macOS browser tests.
+
+## 14. PR #29 correction pass — partial footers, owner-confirmed stock template (2026-10-21; D-056–D-058)
+Follows the independent review of PR #29.
+
+**Footer reconciliation (fixed).** `stock_footer_totals` reported PASS while 2 of 94 footer cells were
+error-propagated. It is now **PASS only when every checked footer cell matched** (matched == checked, no ambiguous
+row); a contradiction is **FAIL**; error-propagated, missing-cache or unsupported cells, ambiguous rows or nothing
+checked are **OPEN**, with the matched and unreconciled counts and the affected column letters printed. A partial
+reconciliation caps `totals_consistent` at None — no declaration can make it True; a contradiction makes it False.
+Without any footer row the declaration decides, as before. The evidence is also kept **per field**
+(`footer_totals`), so a metric is withheld by a partial / contradictory footer only when it reads that field.
+
+**Owner-confirmed stock template (D-056).** Column A = product code, column J = country of origin (both labelled
+`Stok_Kodu`). `STOCK_TEMPLATES["dinamikcrm_stok_v1"]` pins header row 4, 89 columns, the SHA-256 of the header labels
+in order (measured owner-locally; no label or value committed), A / J and the physical column of every pipeline
+field. One `Stok_Kodu` header → unchanged; a duplicated one → accepted only for the exact approved header row,
+otherwise refused (`identity_header_ambiguous`, layout unsupported → every stock metric INVALID). Never "the first
+column". Residual risk: swapped column contents under unchanged labels are not detectable from the header (no
+content heuristic is used). The approval covers column identity only; `STOCK-CODE-AUTHORITY` is replaced by this
+evidence, `STOCK-REPORT-SCOPE` (the duplicated code's row grain) stays.
+
+**DinamikCRM conventions (D-057)** recorded as owner statements, not evidence: staff generate the recurring exports,
+the owner uploads them manually, layouts stay fixed, the intended period runs from 1 January of the earliest selected
+year to the selected reporting date. Dates are still declared per upload; completeness is never inferred; no SKU is
+classified discontinued without source evidence.
+
+**Real-data private rerun (counts and statuses only):** footers 3 recognized (2 aggregate, 1 label), 0 ambiguous;
+94 checked, 92 matched, 2 error-propagated (one column, BA), 0 contradictory → **OPEN**; `totals_consistent` None.
+Template: `approved_template` (`dinamikcrm_stok_v1`), identity A, country of origin J; the `Stok_Kodu`
+duplicated-header reason no longer applies. Counts unchanged (3,314 parsed, 3,311 product-code rows, 3,310 distinct,
+1 duplicate occurrence, 0 missing identity). Core technical failures 7, OPEN 29. `stock.reorder` INVALID (coverage
+errors, duplicate code), `stock.overstock` INVALID, `stock.product_counts` INVALID (duplicate code),
+`receivables.collections` NOT_VERIFIED. **No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False.**
+
+**Veri Kontrol Merkezi** — designed in `docs/m8_veri_kontrol_merkezi.md`, separate checkpoint M8-VKM-1; review never
+certifies a metric, never changes source data, never deletes a suspected duplicate.

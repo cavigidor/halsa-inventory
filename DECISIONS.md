@@ -851,3 +851,52 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **Restart:** GET / waits (bounded, default 60 s) for an in-progress valid re-publication; never serves old bytes.
 - **Unchanged:** no metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False; no financial calculation changed except
   that report-total rows no longer count as products (and in the DQ-4 count).
+
+### D-056 · 2026-10-21 · Owner-confirmed DinamikCRM stock layout: column A = product code, column J = country of origin (column identity only)
+- **Owner statement (2026-10-21, review of PR #29):** in the DinamikCRM stock export, physical column **A** is the
+  actual product / stock code and physical column **J** is the country of origin. Both are labelled `Stok_Kodu`.
+- **Implementation:** `services/source_validation.STOCK_TEMPLATES["dinamikcrm_stok_v1"]` pins the approved layout by
+  header row 4, column count (89), the SHA-256 of every header label in physical order (no label or data is
+  committed; measured owner-locally), identity column A, country-of-origin column J, and the physical column of every
+  pipeline field (Stok_Kodu A, Stok_Adı B, TOPLAM STOK MİKTAR W, STOK Kontrol % AI, Envanter değeri AV, minseviye BN,
+  maxseviye BO, DURUM CB). `check_stock_template` decides the identity column:
+  - exactly one `Stok_Kodu` header → unambiguous, unchanged behaviour (read by name);
+  - more than one → accepted only when the whole header row is exactly an approved template; then A is the product
+    code, J is recorded as country of origin and never read, and the duplicated header counts as resolved;
+  - any other duplicated-identity layout (moved, renamed, added, removed or reordered column) → refused:
+    `identity_header_ambiguous`, `layout_supported = False`, every stock metric INVALID. Never "the first column".
+- **Residual risk (documented, not hidden):** a header-only signature cannot tell the two identically-labelled
+  columns apart if their CONTENTS were swapped with the labels unchanged. No content heuristic is used to "detect"
+  that (it would be an inference); it stays an item for the Veri Kontrol Merkezi and owner review.
+- **Scope of the approval:** column identity ONLY. It does not establish freshness, completeness, report date,
+  quantities, totals, financial accuracy or product-level correctness. The duplicated product code (row grain) stays
+  open (`STOCK-REPORT-SCOPE`); nothing is merged or deleted. `STOCK-CODE-AUTHORITY` is no longer a static blocker —
+  the template evidence decides. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` stays False.
+
+### D-057 · 2026-10-21 · DinamikCRM report conventions (owner statement; not evidence)
+- Halsa staff generate all recurring ERP reports in DinamikCRM; the owner uploads the Excel files manually. No
+  DinamikCRM integration exists or is required.
+- Recurring exports keep the established layout (D-056 enforces this for the stock export; any layout change is
+  refused until a new template is approved).
+- The intended reporting period runs from 1 January of the earliest selected year to the selected / latest
+  reporting date.
+- **These conventions are NOT proof** of completeness, of the snapshot / report date, or of any figure. Dates still
+  have to be declared per upload (D-051 rules unchanged: no date from file timestamps or mtime), and period
+  completeness is never inferred from the earliest / latest transaction dates.
+- Historical SKUs absent from today's stock **may** be discontinued, but no SKU is classified as discontinued without
+  source evidence.
+- **Still open:** the duplicated stock-code row grain; the four 2022 duplicate sales rows; 120 / 320 account treatment
+  in collections; Kredi `DURUM`; unknown source dates. Kredi `DURUM`, revenue definitions, DQ-1–DQ-6 and D-003
+  unchanged.
+
+### D-058 · 2026-10-21 · Partial footer reconciliation is OPEN, never PASS; review never certifies (PR #29 correction pass)
+- `stock_footer_totals` is **PASS only when every checked footer cell reconciled** (matched == checked, no ambiguous
+  row); any contradictory total is **FAIL**; error-propagated, missing-cache or unsupported cells, ambiguous rows or
+  nothing checked are **OPEN**, with matched / unreconciled counts and the affected column letters shown.
+- A partial reconciliation caps `totals_consistent` at "not verified" (None) — no declaration can turn it into True;
+  a contradiction makes it False (INVALID).
+- Footer evidence is also **field level** (`footer_totals` per field): a metric is NOT_VERIFIED only when a field it
+  reads has a partial footer, INVALID when a field it reads contradicts; an unrelated column's formula errors never
+  invalidate an independent field.
+- Veri Kontrol Merkezi (design, `docs/m8_veri_kontrol_merkezi.md`): reviewing or acknowledging a data issue records a
+  human decision; it **never** certifies a metric, never changes source data and never deletes a suspected duplicate.

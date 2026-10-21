@@ -160,7 +160,11 @@ Owner questions are numbered as in `docs/m8_owner_questions_tr.md` (Q#). "Withhe
   accepted generation and the current gate; the reconciliation command can no longer overwrite an input or an
   existing file (`release_gate.md` §11).
 - **Owner-local real-data acceptance (M8-ACCURACY-2A, 2026-10-21) and corrections (2B):** see `release_gate.md` §13.
-  Still open for Halsa staff: which `Stok_Kodu` column is the product code; the one duplicated product code; the four
+  Answered 2026-10-21 (D-056, column identity only): `Stok_Kodu` column A = product code, column J = country of
+  origin. Recorded conventions (D-057, not evidence): staff generate recurring exports in DinamikCRM, the owner uploads
+  them manually, layouts stay fixed, the intended period runs from 1 January of the earliest selected year to the
+  selected reporting date. Footer totals of the real stock export: partial (OPEN, D-058).
+  Still open for Halsa staff: the one duplicated product code (row grain); the four
   identical 2022 sales-row pairs; products sold but absent from the stock report; order customers absent from the
   master; order customer ↔ invoice account relationships (DQ-5) and the DQ-6 account; supplier-prefix (`320`)
   accounts in the Cari aging export and in the collections list; source authority and business dates; the Kredi
