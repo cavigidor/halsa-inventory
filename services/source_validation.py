@@ -117,10 +117,11 @@ def _is_date_text(text: str) -> bool:
 
 def scan_sheet(content: bytes, *, sheet_index: int = 0, header_row: int = 1, wanted: tuple[str, ...] = (),
                date_columns: tuple[str, ...] = (), keep_numbers: tuple[str, ...] = (),
-               strip_headers: bool = False, header_match=None) -> SheetScan:
+               strip_headers: bool = False, header_match=None, exclude_rows: frozenset[int] = frozenset()) -> SheetScan:
     """One streaming pass. `wanted` headers are matched exactly (or stripped when `strip_headers`), first occurrence —
     the occurrence pandas uses — and a duplicated wanted header is reported. `header_match(label)` may select extra
-    columns (e.g. aging buckets)."""
+    columns (e.g. aging buckets). `exclude_rows` (Excel row numbers) are RECOGNIZED report-control rows
+    (`analyze_stock_rows`): they are not data rows and are reported separately, never silently."""
     with zipfile.ZipFile(io.BytesIO(content)) as z:
         strings = _shared_strings(z)
         part = _sheet_part(z, sheet_index)
@@ -160,7 +161,7 @@ def scan_sheet(content: bytes, *, sheet_index: int = 0, header_row: int = 1, wan
                         if label is not None:
                             headers[col] = label.strip() if strip_headers else label
                         continue
-                    if r < header_row:
+                    if r < header_row or r in exclude_rows:
                         continue
                     if f is None and raw is None and is_ is None:
                         continue                                   # an empty cell element
@@ -252,6 +253,276 @@ def _date_cell_ok(t, raw, text_val) -> bool:
 
 
 # ---------------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------------------------
+# stock report rows (M8-ACCURACY-2B): product rows vs the export's own report-control (total) rows
+# ---------------------------------------------------------------------------------------------
+_AGG_RE = re.compile(r"^\(?(SUM|SUBTOTAL)\((?:(\d+),)?\$?([A-Z]{1,3})\$?(\d+):\$?([A-Z]{1,3})\$?(\d+)\)\)?$")
+_CELLREF_RE = re.compile(r"\$?([A-Z]{1,3})\$?(\d+)")
+_SUBTOTAL_SUM = {"9", "109"}
+
+
+@dataclass
+class _Cell:
+    formula: str | None
+    kind: str                          # "number" | "text" | "error" | "bool" | "blank"
+    value: Any
+
+
+@dataclass
+class StockRowAnalysis:
+    """Row-level facts of the supported stock export (counts only; nothing is dropped or repaired).
+
+    product row      = the identity cell (first `Stok_Kodu` column, the one the M5 pipeline reads) is non-blank;
+    footer row       = a trailing row RECOGNIZED as the export's report-control rows (see `analyze_stock_rows`);
+    ambiguous row    = a trailing row without identity that does not satisfy the footer rules (fails closed: it is
+                       counted as a row with missing identity);
+    missing identity = a row with cells but no identity that is not a recognized footer."""
+    ok: bool
+    failure: str | None = None
+    header_row: int = 0
+    first_data_row: int | None = None
+    last_product_row: int | None = None
+    parsed_rows: int = 0                       # rows below the header with at least one cell
+    footer_rows: tuple[int, ...] = ()          # recognized report-control rows (Excel row numbers)
+    footer_kinds: dict[str, int] = field(default_factory=dict)   # aggregate / label
+    ambiguous_rows: tuple[int, ...] = ()
+    missing_identity_rows: int = 0             # blank identity, not a recognized footer (incl. ambiguous rows)
+    code_rows: int = 0
+    distinct_codes: int = 0
+    duplicate_code_occurrences: int = 0        # code_rows - distinct_codes (never deduplicated)
+    identity_header_columns: int = 0           # columns labelled like the identity header (>1 = ambiguous label)
+    footer_checks: dict[str, int] = field(default_factory=dict)  # checked / matched / mismatched / error_propagated / unsupported / missing_cache
+    coverage: dict[str, int] = field(default_factory=dict)
+
+    LABELS_TR = {"parsed_rows": "Okunan satır", "footer_rows": "Tanınan rapor toplam satırı",
+                 "code_rows": "Ürün kodlu satır", "distinct_codes": "Farklı ürün kodu",
+                 "duplicate_code_occurrences": "Yinelenen ürün kodu tekrarı",
+                 "missing_identity_rows": "Kimliği eksik / belirsiz satır"}
+
+    def counts(self) -> dict[str, int]:
+        return {"parsed_rows": self.parsed_rows, "footer_rows": len(self.footer_rows), "code_rows": self.code_rows,
+                "distinct_codes": self.distinct_codes, "duplicate_code_occurrences": self.duplicate_code_occurrences,
+                "missing_identity_rows": self.missing_identity_rows}
+
+    def summary(self) -> dict[str, Any]:
+        return {"ok": self.ok, "failure": self.failure, "counts": self.counts(), "footer_kinds": dict(self.footer_kinds),
+                "ambiguous_rows": len(self.ambiguous_rows), "footer_checks": dict(self.footer_checks),
+                "identity_header_columns": self.identity_header_columns, "coverage": dict(self.coverage)}
+
+
+def _read_cells(content: bytes, sheet_index: int = 0) -> tuple[dict[int, dict[int, _Cell]], list[int]]:
+    """Every non-empty cell (formula text + cached value), by Excel row / column. Small sheets only (stock export)."""
+    rows: dict[int, dict[int, _Cell]] = {}
+    with zipfile.ZipFile(io.BytesIO(content)) as z:
+        strings = _shared_strings(z)
+        part = _sheet_part(z, sheet_index)
+        hidden: list[int] = []
+        with z.open(part) as fh:
+            for _, el in ET.iterparse(fh, events=("end",)):
+                if el.tag != f"{_NS}row":
+                    continue
+                r = int(el.get("r") or 0)
+                if el.get("hidden") in ("1", "true"):
+                    hidden.append(r)
+                pos = 0
+                for c in el.findall(f"{_NS}c"):
+                    pos += 1
+                    ref = c.get("r")
+                    m = _REF_RE.match(ref) if ref else None
+                    col = _col_index(m.group(1)) if m else pos
+                    t = c.get("t")
+                    f = c.find(f"{_NS}f")
+                    v = c.find(f"{_NS}v")
+                    is_ = c.find(f"{_NS}is")
+                    raw = v.text if v is not None else None
+                    ftxt = (f.text or "") if f is not None else None
+                    if ftxt is None and raw is None and is_ is None:
+                        continue
+                    if t == "s" and raw is not None:
+                        try:
+                            cell = _Cell(ftxt, "text", strings[int(raw)])
+                        except (ValueError, IndexError):
+                            cell = _Cell(ftxt, "text", None)
+                    elif t == "inlineStr" and is_ is not None:
+                        cell = _Cell(ftxt, "text", "".join(x.text or "" for x in is_.iter(f"{_NS}t")))
+                    elif t == "str":
+                        cell = _Cell(ftxt, "text" if raw not in (None, "") else "blank", raw)
+                    elif t == "e":
+                        cell = _Cell(ftxt, "error", raw)
+                    elif t == "b":
+                        cell = _Cell(ftxt, "bool", raw)
+                    elif raw is None:
+                        cell = _Cell(ftxt, "blank", None)
+                    else:
+                        try:
+                            cell = _Cell(ftxt, "number", float(raw))
+                        except ValueError:
+                            cell = _Cell(ftxt, "text", raw)
+                    if cell.kind == "text" and isinstance(cell.value, str) and cell.value.strip() == "" and ftxt is None:
+                        continue
+                    rows.setdefault(r, {})[col] = cell
+                el.clear()
+    return rows, hidden
+
+
+def _blank(cell: _Cell | None) -> bool:
+    return cell is None or cell.kind == "blank" or (cell.kind == "text" and str(cell.value or "").strip() == "")
+
+
+def _row_local(formula: str, row: int) -> bool:
+    refs = _CELLREF_RE.findall(formula)
+    return bool(refs) and ":" not in formula and all(int(n) == row for _, n in refs)
+
+
+def analyze_stock_rows(content: bytes, *, header_row: int = 4, identity: str = "Stok_Kodu", name: str = "Stok_Adı",
+                       quantity: str = "TOPLAM STOK MİKTAR ", coverage: str = "STOK Kontrol %") -> StockRowAnalysis:
+    """Deterministic recognition of the supported stock export's trailing report-control rows. Never raises.
+
+    Only rows AFTER the last product row can be footers; a blank-identity row between product rows is always a row
+    with missing identity. A trailing row is a recognized footer when the identity and name cells are blank and:
+    - AGGREGATE: it has at least one aggregate cell, every aggregate cell is `SUM(X a:X b)` or `SUBTOTAL(9|109, X a:X b)`
+      over its OWN column X with exactly the data range a = first data row, b = last product row; any other formula
+      only references its own row and has a blank cached result; it has no numeric literal (text labels allowed in
+      columns it does not aggregate); or
+    - LABEL: no number and no aggregate; the text cells that sit in columns an ADJACENT recognized aggregate row
+      aggregates all hold one identical text, any other text cell repeats the adjacent aggregate row's own text label
+      in the same column, and any formula is row-local with a blank cached result.
+    Everything else is AMBIGUOUS (fails closed as missing identity). Every aggregate cell is reconciled against the
+    rows it covers: matched / mismatched (contradictory totals) / error_propagated (an error cell inside the range,
+    so Excel itself caches an error) / missing_cache / unsupported (SUBTOTAL on a sheet with hidden rows)."""
+    try:
+        rows, hidden = _read_cells(content)
+    except Exception as e:
+        return StockRowAnalysis(False, f"read:{type(e).__name__}")
+    hdr = rows.get(header_row, {})
+    labels = {c: (str(x.value) if x.value is not None else "") for c, x in hdr.items()}
+    id_cols = sorted(c for c, lab in labels.items() if lab == identity)
+    name_cols = sorted(c for c, lab in labels.items() if lab == name)
+    if not id_cols:
+        return StockRowAnalysis(False, "identity_header_missing", header_row)
+    idc, namec = id_cols[0], (name_cols[0] if name_cols else None)
+    qtyc = next((c for c, lab in sorted(labels.items()) if lab == quantity), None)
+    covc = next((c for c, lab in sorted(labels.items()) if lab == coverage), None)
+    data = sorted(r for r in rows if r > header_row and rows[r])
+    out = StockRowAnalysis(True, None, header_row, identity_header_columns=len(id_cols))
+    out.parsed_rows = len(data)
+    if not data:
+        return out
+    product = [r for r in data if not _blank(rows[r].get(idc))]
+    out.first_data_row = data[0]
+    if not product:
+        out.missing_identity_rows = len(data)
+        out.ambiguous_rows = tuple(data)
+        return out
+    first, last = data[0], product[-1]
+    out.last_product_row = last
+    codes = [str(rows[r][idc].value).strip() if rows[r][idc].kind != "number" else repr(rows[r][idc].value)
+             for r in product]
+    out.code_rows, out.distinct_codes = len(codes), len(set(codes))
+    out.duplicate_code_occurrences = out.code_rows - out.distinct_codes
+    middle_blank = [r for r in data if r <= last and _blank(rows[r].get(idc))]
+    trailing = [r for r in data if r > last]
+
+    def aggregate_cells(r):
+        res, ok = {}, True
+        for c, cell in rows[r].items():
+            if cell.formula is None:
+                continue
+            m = _AGG_RE.match(cell.formula.strip().lstrip("="))
+            if m:
+                fn, c1, a, c2, b = m.group(2), m.group(3), int(m.group(4)), m.group(5), int(m.group(6))
+                own = _col_index(c1) == c == _col_index(c2)
+                if m.group(1) == "SUBTOTAL" and fn not in _SUBTOTAL_SUM:
+                    ok = False
+                elif m.group(1) == "SUM" and fn is not None:
+                    ok = False
+                elif not own or a != first or b != last:
+                    ok = False
+                else:
+                    res[c] = (m.group(1), cell)
+            elif not (_row_local(cell.formula, r) and _blank(cell)):
+                ok = False
+        return res, ok
+
+    kinds: dict[int, str] = {}
+    aggs: dict[int, dict] = {}
+    for r in trailing:
+        cells = rows[r]
+        if not (_blank(cells.get(idc)) and (namec is None or _blank(cells.get(namec)))):
+            kinds[r] = "ambiguous"
+            continue
+        agg, ok = aggregate_cells(r)
+        numbers = [c for c, x in cells.items() if x.formula is None and x.kind == "number"]
+        if agg and ok and not numbers and not any(x.formula is None and x.kind not in ("text", "blank") for x in
+                                                  cells.values()):
+            kinds[r], aggs[r] = "aggregate", agg
+    for r in trailing:
+        if r in kinds:
+            continue
+        cells = rows[r]
+        texts = {c: x for c, x in cells.items() if x.formula is None and x.kind == "text"}
+        others = [x for c, x in cells.items() if c not in texts and not (x.formula is not None and
+                                                                          _row_local(x.formula, r) and _blank(x))]
+        neighbours = [n for n in (r - 1, r + 1) if kinds.get(n) == "aggregate"]
+        label_ok = False
+        for n in neighbours:
+            in_agg = {c: x for c, x in texts.items() if c in aggs[n]}
+            # a text that the adjacent aggregate row carries too, in the same column (a shared row label)
+            shared = {c: x for c, x in texts.items() if c not in aggs[n] and rows[n].get(c) is not None
+                      and rows[n][c].formula is None and rows[n][c].kind == "text"
+                      and str(rows[n][c].value).strip() == str(x.value).strip()}
+            if (in_agg and not others and len(in_agg) + len(shared) == len(texts)
+                    and len({str(x.value).strip() for x in in_agg.values()}) == 1):
+                label_ok = True
+                break
+        kinds[r] = "label" if label_ok else "ambiguous"
+    out.footer_rows = tuple(r for r in trailing if kinds[r] in ("aggregate", "label"))
+    out.footer_kinds = {k: sum(1 for r in out.footer_rows if kinds[r] == k) for k in ("aggregate", "label")}
+    out.ambiguous_rows = tuple(r for r in trailing if kinds[r] == "ambiguous")
+    out.missing_identity_rows = len(middle_blank) + len(out.ambiguous_rows)
+    # reconcile every aggregate cell against the rows it covers (first..last), exactly as Excel would sum them
+    chk = {"checked": 0, "matched": 0, "mismatched": 0, "error_propagated": 0, "missing_cache": 0, "unsupported": 0}
+    covered = [r for r in data if first <= r <= last]
+    for r, agg in aggs.items():
+        for c, (fn, cell) in agg.items():
+            chk["checked"] += 1
+            if fn == "SUBTOTAL" and hidden:
+                chk["unsupported"] += 1
+                continue
+            vals = [rows[x].get(c) for x in covered]
+            if any(v is not None and v.kind == "error" for v in vals):
+                chk["error_propagated" if cell.kind == "error" else "mismatched"] += 1
+                continue
+            total = sum(v.value for v in vals if v is not None and v.kind == "number")
+            if cell.kind == "blank":
+                chk["missing_cache"] += 1
+            elif cell.kind == "number" and abs(cell.value - total) <= max(0.01, 1e-9 * abs(total)):
+                chk["matched"] += 1
+            else:
+                chk["mismatched"] += 1
+    out.footer_checks = chk
+    # coverage: mathematically undefined (#DIV/0!) vs other errors vs blank vs a recorded number (no substitution)
+    if covc is not None:
+        cov = {"undefined_div0": 0, "other_error": 0, "blank": 0, "numeric": 0, "undefined_with_stock": 0,
+               "stock_quantity_missing": 0}
+        for r in product:
+            x = rows[r].get(covc)
+            q = rows[r].get(qtyc) if qtyc else None
+            if x is not None and x.kind == "error":
+                key = "undefined_div0" if str(x.value) == "#DIV/0!" else "other_error"
+                cov[key] += 1
+                if key == "undefined_div0" and q is not None and q.kind == "number" and q.value > 0:
+                    cov["undefined_with_stock"] += 1
+            elif _blank(x):
+                cov["blank"] += 1
+            elif x.kind == "number":
+                cov["numeric"] += 1
+            if q is None or q.kind not in ("number",):
+                cov["stock_quantity_missing"] += 1
+        out.coverage = cov
+    return out
+
+
 # core source definitions (the columns the CURRENT M5 pipeline reads; nothing new is required)
 # ---------------------------------------------------------------------------------------------
 CORE = {
@@ -297,6 +568,25 @@ class CoreInspection:
     missing_headers: tuple[str, ...] = ()
     latest_bucket: tuple[int, int] | None = None     # aging: newest month bucket (year, month) from the headers
     columns: dict[str, dict[str, int]] = field(default_factory=dict)
+    duplicate_headers: tuple[str, ...] = ()
+    rows: StockRowAnalysis | None = None             # stock: product / footer / identity row analysis (2B)
+
+    def fields(self) -> dict[str, dict[str, Any]]:
+        """Field-level evidence (M8-ACCURACY-2B): per inspected column, so a metric is judged by the fields it USES.
+        Aging month buckets are combined into `bucket:*` (the collections metric reads all of them)."""
+        out: dict[str, dict[str, Any]] = {}
+        for h, c in self.columns.items():
+            key = "bucket:*" if (self.key == "aging" and _is_bucket(h)) else h
+            d = out.setdefault(key, {"error_cells": 0, "missing_cached_formulas": 0, "blank_cells": 0,
+                                     "invalid_dates": 0, "external_refs": 0, "duplicate_header": False,
+                                     "amount": key == "bucket:*" or h in CORE[self.key]["amounts"]})
+            d["error_cells"] += c.get("error", 0) + c.get("formula_error", 0)
+            d["missing_cached_formulas"] += c.get("formula_missing_cache", 0)
+            d["blank_cells"] += c.get("empty", 0)
+            d["invalid_dates"] += c.get("invalid_dates", 0)
+            d["external_refs"] += c.get("external_ref", 0)
+            d["duplicate_header"] = d["duplicate_header"] or h in self.duplicate_headers
+        return out
 
     def summary(self) -> dict:
         d = {k: getattr(self, k) for k in ("ok", "failure", "layout_supported", "data_rows", "error_cells",
@@ -305,6 +595,9 @@ class CoreInspection:
                                            "external_references", "ambiguous_headers")}
         d["missing_headers"] = list(self.missing_headers)
         d["latest_bucket"] = list(self.latest_bucket) if self.latest_bucket else None
+        d["duplicate_headers"] = list(self.duplicate_headers)
+        if self.rows is not None:
+            d["rows"] = self.rows.summary()                 # stock: counts only (2B)
         return d
 
 
@@ -312,10 +605,12 @@ def inspect_core(key: str, content: bytes) -> CoreInspection:
     """Formula-aware inspection of one core workbook from its frozen bytes. Never raises: an inspection that cannot
     run is a failure (the caller marks the source INVALID), never a clean result."""
     spec = CORE[key]
+    rows = analyze_stock_rows(content, header_row=spec["header_row"]) if key == "stock" else None
+    exclude = frozenset(rows.footer_rows) if (rows is not None and rows.ok) else frozenset()
     try:
         scan = scan_sheet(content, header_row=spec["header_row"], wanted=spec["required"],
                           date_columns=spec["dates"], strip_headers=spec["strip"],
-                          header_match=_is_bucket if spec.get("buckets") else None)
+                          header_match=_is_bucket if spec.get("buckets") else None, exclude_rows=exclude)
     except Exception as e:                                    # unreadable package / XML: fail closed
         return CoreInspection(key, False, f"scan:{type(e).__name__}", None)
     missing = tuple(h for h in spec["required"] if h not in scan.columns)
@@ -323,7 +618,8 @@ def inspect_core(key: str, content: bytes) -> CoreInspection:
     inspected = list(scan.columns.values())
     n = scan.data_rows
     out = CoreInspection(key, True, None, layout_supported=not missing and (bool(buckets) or not spec.get("buckets")),
-                         data_rows=n, missing_headers=missing)
+                         data_rows=n, missing_headers=missing, duplicate_headers=tuple(sorted(scan.duplicate_headers)),
+                         rows=rows)
     out.error_cells = sum(s.error + s.formula_error for s in inspected)
     out.missing_cached_formulas = sum(s.formula_missing_cache for s in inspected)
     out.external_links = scan.external_links
@@ -418,6 +714,44 @@ def validate_joins(sales=None, stock=None, aging=None, master=None) -> dict[str,
     return rep
 
 
+# Named cross-source relationships (M8-ACCURACY-2B). A metric declares which of these it USES
+# (services/accuracy.Metric.requires); a problem in one relationship never judges a metric that does not use it.
+# Nothing here approves a relationship: `validated` is True only when every count ran and found nothing.
+JOINS: dict[str, dict[str, Any]] = {
+    "sales_product_in_stock": {"title_tr": "Satılan ürün kodu stok raporunda",
+                               "unmatched": ("sold_products_not_in_stock",),
+                               "ambiguous": ("stock_duplicate_codes", "products_with_multiple_names")},
+    "order_customer_in_master": {"title_tr": "Sipariş müşterisi müşteri ana listesinde (D-003)",
+                                 "unmatched": ("order_customers_unmatched_in_master",),
+                                 "ambiguous": ("master_duplicate_codes", "matches_only_after_trim",
+                                               "order_codes_colliding_after_trim")},
+    "invoice_account_in_master": {"title_tr": "Fatura hesabı müşteri ana listesinde",
+                                  "unmatched": ("invoice_accounts_unmatched_in_master",),
+                                  "ambiguous": ("master_duplicate_codes",)},
+    "order_customer_invoice_account": {"title_tr": "Sipariş müşterisi ↔ fatura hesabı ilişkisi (DQ-5)",
+                                       "unmatched": (),
+                                       "ambiguous": ("order_customers_with_multiple_invoice_accounts",
+                                                     "invoice_accounts_with_multiple_order_customers")},
+    "aging_account_in_sales_invoices": {"title_tr": "Cari hesap satış fatura hesaplarında (DQ-6)",
+                                        "unmatched": ("aging_accounts_not_in_sales_invoice_accounts",),
+                                        "ambiguous": ("aging_accounts_matching_order_code_only",
+                                                      "aging_duplicate_accounts")},
+}
+
+
+def join_checks(rep: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Per-relationship counts from `validate_joins` (unknown stays None; never approved by being common)."""
+    out = {}
+    for jid, spec in JOINS.items():
+        def total(keys):
+            vals = [rep.get(k) for k in keys]
+            return None if any(v is None for v in vals) else int(sum(vals))
+        u, a = total(spec["unmatched"]), total(spec["ambiguous"])
+        out[jid] = {"unmatched": u, "ambiguous": a,
+                    "validated": (None if (u is None or a is None) else (u == 0 and a == 0))}
+    return out
+
+
 def join_evidence(rep: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Per-source join fields for `SourceEvidence`: unmatched / ambiguous counts, and `joins_validated` True only when
     every check ran and found nothing. Unknown (a check that could not run) stays None."""
@@ -449,5 +783,5 @@ def join_evidence(rep: dict[str, Any]) -> dict[str, dict[str, Any]]:
                       "joins_validated": verdict(stock_unmatched, stock_amb)}}
 
 
-__all__ = ["scan_sheet", "inspect_core", "validate_joins", "join_evidence", "CoreInspection", "SheetScan",
-           "ColumnScan", "CORE"]
+__all__ = ["scan_sheet", "inspect_core", "validate_joins", "join_evidence", "join_checks", "analyze_stock_rows",
+           "StockRowAnalysis", "CoreInspection", "SheetScan", "ColumnScan", "CORE", "JOINS"]

@@ -158,6 +158,9 @@ def reconcile_core(data_folder: str, out: Out, *, today: dt.date) -> dict:
     m = GEN.build_manifest(frozen, v["frames"], decl, origin, today)
     for r in m.core:
         out.line(f"{r.key}: {r.file} · SHA-256 {r.sha256}")
+        rows = (r.validation or {}).get("rows") if r.key == "stock" else None
+        if rows:
+            _stock_rows(out, rows)
         ev = r.evidence
         rd = ev.report_date
         out.check(f"{r.key}:report_date", "PASS" if rd else "OPEN",
@@ -174,6 +177,36 @@ def reconcile_core(data_folder: str, out: Out, *, today: dt.date) -> dict:
         out.line(f"      {k}: {val}")
     return {"ok": True, "core_id": m.core_id, "sources": [{"key": r.key, "file": r.file, "sha256": r.sha256}
                                                            for r in m.core]}
+
+
+def _stock_rows(out: Out, rows: dict) -> None:
+    """M8-ACCURACY-2B: stock row diagnostics (counts only) — report-control rows are recognized, reconciled and never
+    counted as products; nothing is dropped, repaired or deduplicated."""
+    from services import source_validation as SV
+    counts = rows.get("counts") or {}
+    out.line("  Stok satırları (sayılar):")
+    for k, label in SV.StockRowAnalysis.LABELS_TR.items():
+        out.line(f"      {label}: {counts.get(k)}")
+    fk, chk = rows.get("footer_kinds") or {}, rows.get("footer_checks") or {}
+    out.line(f"      tanınan toplam satırı türleri: toplam formülü={fk.get('aggregate', 0)} · etiket={fk.get('label', 0)}"
+             f" · belirsiz={rows.get('ambiguous_rows', 0)}")
+    if chk.get("mismatched"):
+        st = "FAIL"
+    elif chk.get("missing_cache") or chk.get("unsupported") or rows.get("ambiguous_rows"):
+        st = "OPEN"
+    else:
+        st = "PASS" if chk.get("checked") else "OPEN"
+    out.check("stock_footer_totals", st, "Rapor toplam satırları = kapsadıkları ürün satırlarının toplamı",
+              **{f"footer_{k}": v for k, v in chk.items()})
+    out.check("stock_identity_header", "OPEN" if (rows.get("identity_header_columns") or 0) > 1 else "PASS",
+              "'Stok_Kodu' başlığı tek sütunda (birden fazlaysa hangisinin ürün kodu olduğu sahip kararıdır)",
+              columns=rows.get("identity_header_columns"))
+    cov = rows.get("coverage") or {}
+    if cov:
+        out.line("      STOK Kontrol % (kapsam): tanımsız (#DIV/0!)={0} · diğer hata={1} · boş={2} · sayı={3} · "
+                 "tanımsız ama stoklu={4} · stok miktarı eksik={5}".format(
+                     cov.get("undefined_div0"), cov.get("other_error"), cov.get("blank"), cov.get("numeric"),
+                     cov.get("undefined_with_stock"), cov.get("stock_quantity_missing")))
 
 
 def main(argv=None) -> int:
