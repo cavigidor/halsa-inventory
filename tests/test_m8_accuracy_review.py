@@ -41,9 +41,23 @@ def full(source="src", **kw):
                 missing_cached_formulas=0, missing_required_values=0, duplicate_records=0, join_unmatched=0,
                 join_ambiguous=0, joins_validated=True, totals_consistent=True, mapping_approved=True,
                 blank_amount_cells=0, invalid_dates=0, ambiguous_headers=0, external_references=0, date_contradictions=0,
-                selection_explicit=True)
+                selection_explicit=True, fields=_clean_fields(source), joins=_clean_joins())
     base.update(kw)
     return ACC.SourceEvidence(source, **base)
+
+
+def _clean_fields(source):
+    """M8-ACCURACY-2B: field-level evidence where every inspected field passed (scoped metrics need it)."""
+    from services import source_validation as SV
+    spec = SV.CORE.get(source)
+    names = list(spec["required"]) + (["bucket:*"] if spec.get("buckets") else []) if spec else []
+    return {h: {"error_cells": 0, "missing_cached_formulas": 0, "blank_cells": 0, "invalid_dates": 0,
+                "external_refs": 0, "duplicate_header": False, "amount": False} for h in names}
+
+
+def _clean_joins():
+    from services import source_validation as SV
+    return {j: {"unmatched": 0, "ambiguous": 0, "validated": True} for j in SV.JOINS}
 
 
 def certified(key="t.m", temporal="operational", sources=("src",)):
