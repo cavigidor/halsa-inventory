@@ -292,7 +292,10 @@ class StockRowAnalysis:
     duplicate_code_occurrences: int = 0        # code_rows - distinct_codes (never deduplicated)
     identity_header_columns: int = 0           # columns labelled like the identity header (>1 = ambiguous label)
     footer_checks: dict[str, int] = field(default_factory=dict)  # checked / matched / mismatched / error_propagated / unsupported / missing_cache
+    footer_by_column: dict[str, dict[str, int]] = field(default_factory=dict)   # column letter → same counts
+    footer_by_header: dict[str, str] = field(default_factory=dict)  # header → PASS/OPEN/FAIL (field-level evidence)
     coverage: dict[str, int] = field(default_factory=dict)
+    template: dict[str, Any] = field(default_factory=dict)       # identity column decision (check_stock_template)
 
     LABELS_TR = {"parsed_rows": "Okunan satır", "footer_rows": "Tanınan rapor toplam satırı",
                  "code_rows": "Ürün kodlu satır", "distinct_codes": "Farklı ürün kodu",
@@ -307,7 +310,15 @@ class StockRowAnalysis:
     def summary(self) -> dict[str, Any]:
         return {"ok": self.ok, "failure": self.failure, "counts": self.counts(), "footer_kinds": dict(self.footer_kinds),
                 "ambiguous_rows": len(self.ambiguous_rows), "footer_checks": dict(self.footer_checks),
-                "identity_header_columns": self.identity_header_columns, "coverage": dict(self.coverage)}
+                "footer_by_column": {k: dict(v) for k, v in self.footer_by_column.items()},
+                "footer_status": self.footer_status(),
+                "identity_header_columns": self.identity_header_columns, "coverage": dict(self.coverage),
+                "template": dict(self.template)}
+
+    def footer_status(self) -> str:
+        """PASS only when every checked footer cell reconciled numerically; FAIL on a contradiction; OPEN otherwise
+        (error-propagated, missing cache, unsupported, ambiguous rows, or nothing checked). Partial ≠ verified."""
+        return _footer_status(self.footer_checks or {}, self.ambiguous_rows)
 
 
 def _read_cells(content: bytes, sheet_index: int = 0) -> tuple[dict[int, dict[int, _Cell]], list[int]]:
@@ -383,6 +394,105 @@ def _translate(formula: str, origin: str, dest: str) -> str:
     return Translator("=" + formula, origin=origin).translate_formula(dest)[1:]
 
 
+# ---------------------------------------------------------------------------------------------
+# owner-approved stock export templates (M8-ACCURACY-2B, D-056) — COLUMN IDENTITY ONLY
+# ---------------------------------------------------------------------------------------------
+# The DinamikCRM stock export labels two different columns `Stok_Kodu`. The owner confirmed (2026-10-21): physical
+# column A = the product / stock code, physical column J = the country of origin. A workbook with a duplicated
+# identity header is accepted ONLY when its whole header row is exactly an approved template (column count and the
+# SHA-256 of every header label in order); any moved, renamed, added or removed column is refused (fail closed),
+# never resolved by picking the first header. The approval says nothing about report date, completeness, quantities,
+# totals or the duplicated product code.
+STOCK_TEMPLATES: dict[str, dict[str, Any]] = {
+    "dinamikcrm_stok_v1": {
+        "title_tr": "DinamikCRM stok raporu (sahip onaylı sütun kimliği, D-056)",
+        "header_row": 4,
+        # measured owner-locally on the 5 Oct 2026 export (header row only; no data value is stored or committed)
+        "columns": 89,
+        "header_sha256": "d3ba17a4ff313868d3a01ae213a3bd5f47e50672d78f1c74d0ccfa37a44d881c",
+        "identity": "A",              # product / stock code
+        "country_of_origin": "J",     # also labelled `Stok_Kodu`; never read by the pipeline, never a product code
+        "fields": {                   # pipeline field → physical column (strict position check)
+            "Stok_Kodu": "A", "Stok_Adı": "B", "TOPLAM STOK MİKTAR ": "W", "STOK Kontrol %": "AI",
+            "Envanter değeri": "AV", "minseviye": "BN", "maxseviye": "BO", "DURUM": "CB",
+        },
+    },
+}
+
+
+def _col_letter(n: int) -> str:
+    s = ""
+    while n:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def header_signature(labels: dict[int, str]) -> tuple[int, str]:
+    """(column count, SHA-256) of a header row: every label in physical order, blanks included. No label is stored."""
+    import hashlib
+    n = max((c for c, lab in labels.items() if lab != ""), default=0)    # trailing empty (styled) cells ignored
+    canon = "\x1f".join(labels.get(c, "") for c in range(1, n + 1))
+    return n, hashlib.sha256(canon.encode("utf-8")).hexdigest()
+
+
+@dataclass
+class TemplateCheck:
+    status: str                       # approved_template | single_identity_header | unapproved_duplicate_identity |
+                                      # identity_header_missing
+    template: str | None = None
+    identity_column: str | None = None
+    country_of_origin_column: str | None = None
+    columns: int = 0
+    header_sha256: str | None = None
+    identity_header_columns: int = 0
+    problems: tuple[str, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        return self.status in ("approved_template", "single_identity_header")
+
+    def summary(self) -> dict[str, Any]:
+        return {"status": self.status, "template": self.template, "identity_column": self.identity_column,
+                "country_of_origin_column": self.country_of_origin_column, "columns": self.columns,
+                "header_sha256": self.header_sha256, "identity_header_columns": self.identity_header_columns,
+                "problems": list(self.problems)}
+
+
+def check_stock_template(labels: dict[int, str], identity: str = "Stok_Kodu") -> TemplateCheck:
+    """Which physical column is the product code? Deterministic, never 'the first one' for a duplicated header."""
+    from services.importers.excel import column_index
+    cols, sha = header_signature(labels)
+    id_cols = sorted(c for c, lab in labels.items() if lab == identity)
+    base = dict(columns=cols, header_sha256=sha, identity_header_columns=len(id_cols))
+    if not id_cols:
+        return TemplateCheck("identity_header_missing", **base)
+    for name, t in STOCK_TEMPLATES.items():
+        if t.get("header_sha256") and t["header_sha256"] == sha and t.get("columns") == cols:
+            idc, cc = column_index(t["identity"]), column_index(t["country_of_origin"])
+            problems = []
+            if labels.get(idc) != identity:
+                problems.append("identity_column_moved")
+            for field_name, letter in (t.get("fields") or {}).items():
+                if labels.get(column_index(letter)) != field_name:
+                    problems.append(f"field_moved:{field_name}")
+            if problems:                                             # (cannot happen with an identical signature)
+                return TemplateCheck("unapproved_duplicate_identity", name, problems=tuple(problems), **base)
+            return TemplateCheck("approved_template", name, t["identity"], t["country_of_origin"], **base)
+    if len(id_cols) == 1:
+        return TemplateCheck("single_identity_header", None, _col_letter(id_cols[0]), None, **base)
+    return TemplateCheck("unapproved_duplicate_identity", None, None, None,
+                         problems=("duplicate_identity_header_outside_an_approved_template",), **base)
+
+
+def _footer_status(c: dict[str, int], ambiguous) -> str:
+    if c.get("mismatched"):
+        return "FAIL"
+    if not c.get("checked") or c.get("matched", 0) != c.get("checked") or ambiguous:
+        return "OPEN"
+    return "PASS"
+
+
 def _blank(cell: _Cell | None) -> bool:
     return cell is None or cell.kind == "blank" or (cell.kind == "text" and str(cell.value or "").strip() == "")
 
@@ -416,13 +526,19 @@ def analyze_stock_rows(content: bytes, *, header_row: int = 4, identity: str = "
     labels = {c: (str(x.value) if x.value is not None else "") for c, x in hdr.items()}
     id_cols = sorted(c for c, lab in labels.items() if lab == identity)
     name_cols = sorted(c for c, lab in labels.items() if lab == name)
+    tc = check_stock_template(labels, identity)
     if not id_cols:
-        return StockRowAnalysis(False, "identity_header_missing", header_row)
-    idc, namec = id_cols[0], (name_cols[0] if name_cols else None)
+        return StockRowAnalysis(False, "identity_header_missing", header_row, template=tc.summary())
+    if not tc.ok:                    # a duplicated identity header outside an approved template: never guess
+        return StockRowAnalysis(False, "identity_header_ambiguous", header_row, identity_header_columns=len(id_cols),
+                                template=tc.summary())
+    from services.importers.excel import column_index
+    idc = column_index(tc.identity_column)
+    namec = name_cols[0] if name_cols else None
     qtyc = next((c for c, lab in sorted(labels.items()) if lab == quantity), None)
     covc = next((c for c, lab in sorted(labels.items()) if lab == coverage), None)
     data = sorted(r for r in rows if r > header_row and rows[r])
-    out = StockRowAnalysis(True, None, header_row, identity_header_columns=len(id_cols))
+    out = StockRowAnalysis(True, None, header_row, identity_header_columns=len(id_cols), template=tc.summary())
     out.parsed_rows = len(data)
     if not data:
         return out
@@ -501,24 +617,34 @@ def analyze_stock_rows(content: bytes, *, header_row: int = 4, identity: str = "
     # reconcile every aggregate cell against the rows it covers (first..last), exactly as Excel would sum them
     chk = {"checked": 0, "matched": 0, "mismatched": 0, "error_propagated": 0, "missing_cache": 0, "unsupported": 0}
     covered = [r for r in data if first <= r <= last]
+    by_col: dict[str, dict[str, int]] = {}
     for r, agg in aggs.items():
         for c, (fn, cell) in agg.items():
             chk["checked"] += 1
-            if fn == "SUBTOTAL" and hidden:
-                chk["unsupported"] += 1
-                continue
             vals = [rows[x].get(c) for x in covered]
-            if any(v is not None and v.kind == "error" for v in vals):
-                chk["error_propagated" if cell.kind == "error" else "mismatched"] += 1
-                continue
-            total = sum(v.value for v in vals if v is not None and v.kind == "number")
-            if cell.kind == "blank":
-                chk["missing_cache"] += 1
-            elif cell.kind == "number" and abs(cell.value - total) <= max(0.01, 1e-9 * abs(total)):
-                chk["matched"] += 1
+            if fn == "SUBTOTAL" and hidden:
+                res = "unsupported"
+            elif any(v is not None and v.kind == "error" for v in vals):
+                res = "error_propagated" if cell.kind == "error" else "mismatched"
+            elif cell.kind == "blank":
+                res = "missing_cache"
+            elif cell.kind == "number" and abs(cell.value - sum(v.value for v in vals if v is not None and
+                                                                  v.kind == "number")) <= max(
+                    0.01, 1e-9 * abs(sum(v.value for v in vals if v is not None and v.kind == "number"))):
+                res = "matched"
             else:
-                chk["mismatched"] += 1
+                res = "mismatched"
+            chk[res] += 1
+            d = by_col.setdefault(_col_letter(c), {k: 0 for k in chk})     # physical column letter (no labels)
+            d["checked"] += 1
+            d[res] += 1
     out.footer_checks = chk
+    out.footer_by_column = by_col
+    for letter, d in by_col.items():                          # header → worst footer result (in memory only)
+        lab = labels.get(_col_index(letter), "")
+        st = _footer_status(d, ())
+        prev = out.footer_by_header.get(lab)
+        out.footer_by_header[lab] = st if prev is None else max(prev, st, key=("PASS", "OPEN", "FAIL").index)
     # coverage: mathematically undefined (#DIV/0!) vs other errors vs blank vs a recorded number (no substitution)
     if covc is not None:
         cov = {"undefined_div0": 0, "other_error": 0, "blank": 0, "numeric": 0, "undefined_with_stock": 0,
@@ -593,6 +719,7 @@ class CoreInspection:
         """Field-level evidence (M8-ACCURACY-2B): per inspected column, so a metric is judged by the fields it USES.
         Aging month buckets are combined into `bucket:*` (the collections metric reads all of them)."""
         out: dict[str, dict[str, Any]] = {}
+        resolved = self.resolved_headers()
         for h, c in self.columns.items():
             key = "bucket:*" if (self.key == "aging" and _is_bucket(h)) else h
             d = out.setdefault(key, {"error_cells": 0, "missing_cached_formulas": 0, "blank_cells": 0,
@@ -603,8 +730,15 @@ class CoreInspection:
             d["blank_cells"] += c.get("empty", 0)
             d["invalid_dates"] += c.get("invalid_dates", 0)
             d["external_refs"] += c.get("external_ref", 0)
-            d["duplicate_header"] = d["duplicate_header"] or h in self.duplicate_headers
+            d["duplicate_header"] = d["duplicate_header"] or (h in self.duplicate_headers and h not in resolved)
+            if self.rows is not None and self.rows.ok and h in self.rows.footer_by_header:
+                d["footer_totals"] = self.rows.footer_by_header[h]   # PASS / OPEN / FAIL for this field's totals
         return out
+
+    def resolved_headers(self) -> frozenset[str]:
+        """Duplicated headers whose column identity an approved template fixes (D-056: stock `Stok_Kodu` = column A)."""
+        t = (self.rows.template if self.rows is not None else {}) or {}
+        return frozenset({"Stok_Kodu"}) if t.get("status") == "approved_template" else frozenset()
 
     def summary(self) -> dict:
         d = {k: getattr(self, k) for k in ("ok", "failure", "layout_supported", "data_rows", "error_cells",
@@ -635,7 +769,9 @@ def inspect_core(key: str, content: bytes) -> CoreInspection:
     buckets = [s for h, s in scan.columns.items() if spec.get("buckets") and _is_bucket(h)]
     inspected = list(scan.columns.values())
     n = scan.data_rows
-    out = CoreInspection(key, True, None, layout_supported=not missing and (bool(buckets) or not spec.get("buckets")),
+    refused = rows is not None and rows.failure in ("identity_header_ambiguous", "identity_header_missing")
+    out = CoreInspection(key, True, None, layout_supported=not missing and not refused and
+                         (bool(buckets) or not spec.get("buckets")),
                          data_rows=n, missing_headers=missing, duplicate_headers=tuple(sorted(scan.duplicate_headers)),
                          rows=rows)
     out.error_cells = sum(s.error + s.formula_error for s in inspected)

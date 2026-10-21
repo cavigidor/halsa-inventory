@@ -195,10 +195,11 @@ B_DQ4 = Blocker("DQ-4", NV, "Kapsamı hesaplanamayan (#DIV/0!) ürünler listeye
                 "export's 3 trailing rows are report totals, M8-ACCURACY-2B).")
 B_STOCK_DATE = Blocker("STOCK-DATE", NV, "Stok raporunun tarihi doğrulanmıyor.",
                        "dashboard_builder.select_sources picks the newest file by mtime; no report date is read.")
-B_STOCK_CODE = Blocker("STOCK-CODE-AUTHORITY", NV, "Stok raporunda 'Stok_Kodu' başlıklı iki farklı sütun var; "
-                       "hangisinin ürün kodu olduğu doğrulanmadı.",
-                       "M8-ACCURACY-2A real-data acceptance: two different columns share the header; the pipeline reads "
-                       "the first; not confirmed by Halsa staff.")
+# STOCK-CODE-AUTHORITY (2A/2B) is resolved by the owner's column-identity decision D-056 (2026-10-21): column A is
+# the product code, column J the country of origin. It is no longer a static blocker; instead the evidence decides —
+# the duplicated `Stok_Kodu` header counts as resolved ONLY when the workbook's header row is exactly the approved
+# template (services/source_validation.STOCK_TEMPLATES); any other duplicated-identity layout is refused (INVALID).
+# The approval covers column identity only — not freshness, completeness, quantities, totals or product correctness.
 B_STOCK_SCOPE = Blocker("STOCK-REPORT-SCOPE", NV, "Stok raporunun hangi ürünleri listelediği (kapsamı) ve tekrarlanan "
                         "ürün kodunun anlamı doğrulanmadı.",
                         "M8-ACCURACY-2A: one product code appears in two rows with different values; report scope "
@@ -267,19 +268,19 @@ _M = Metric
 REGISTER: dict[str, Metric] = {m.key: m for m in (
     # ---- static dashboard modules (dashboard_builder.build) ----
     _M("stock.reorder", "Azalan Stok", ("dashboard:reorder", "dashboard:stat:min_alti", "api:/api/context"),
-       ("stock",), ("stock_coverage_rule",), blockers=(B_DQ4, B_STOCK_DATE, B_STOCK_CODE, B_REAL),
+       ("stock",), ("stock_coverage_rule",), blockers=(B_DQ4, B_STOCK_DATE, B_STOCK_SCOPE, B_REAL),
        # traced: dashboard_builder.m_stock `low` (code, name, quantity, coverage, min, max, DURUM); no join
        requires=(Requirement("stock", ("Stok_Kodu", "Stok_Adı", "TOPLAM STOK MİKTAR ", "STOK Kontrol %", "minseviye",
                                         "maxseviye", "DURUM")),)),
     _M("stock.overstock", "Fazla Stok", ("dashboard:overstock", "dashboard:stat:maks_ustu",
                                          "dashboard:stat:fazla_stok_degeri"),
        ("stock",), ("stock_coverage_rule", "inventory_valuation"),
-       blockers=(B_DQ4, B_STOCK_DATE, B_INV_VALUE, B_STOCK_CODE, B_REAL),
+       blockers=(B_DQ4, B_STOCK_DATE, B_INV_VALUE, B_STOCK_SCOPE, B_REAL),
        # traced: m_stock `over` (code, name, quantity, coverage, max, inventory value, DURUM); no join
        requires=(Requirement("stock", ("Stok_Kodu", "Stok_Adı", "TOPLAM STOK MİKTAR ", "STOK Kontrol %", "maxseviye",
                                         "Envanter değeri", "DURUM")),)),
     _M("stock.product_counts", "Stok ürün sayıları", ("dashboard:header:urun_sayisi", "refresh:products"),
-       ("stock",), blockers=(B_STOCK_CODE, B_STOCK_SCOPE, B_STOCK_DATE, B_REAL),
+       ("stock",), blockers=(B_STOCK_SCOPE, B_STOCK_DATE, B_REAL),
        # traced: dashboard_builder.stock_row_counts (identity column only); no join
        requires=(Requirement("stock", ("Stok_Kodu",)),)),
     _M("stock.clearance_buyers", "Stok Eritme", ("dashboard:osmove",), ("stock", "sales"),
@@ -703,6 +704,10 @@ class SourceEvidence:
                     out.append((INV, f"Kullanılan alanda geçersiz tarihler var: {f}."))
                 if d.get("duplicate_header"):
                     out.append((NV, f"Kullanılan alanın başlığı kaynakta birden fazla sütunda var: {f}."))
+                if d.get("footer_totals") == "FAIL":
+                    out.append((INV, f"Kullanılan alanın rapor toplamı satırlarla çelişiyor: {f}."))
+                elif d.get("footer_totals") == "OPEN":
+                    out.append((NV, f"Kullanılan alanın rapor toplamı doğrulanamadı (kısmi mutabakat): {f}."))
                 if d.get("amount") and d.get("blank_cells"):     # as in the strict judgement: amount fields only
                     out.append((NV, f"Kullanılan tutar alanında boş hücreler var (sıfır sayılması onaylanmadı): {f}."))
         # … and on the joins it uses (a metric that uses none is not judged by any join)

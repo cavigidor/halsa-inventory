@@ -249,14 +249,17 @@ def test_product_count_is_not_hardcoded_and_footers_never_count(tmp_path):
         assert db.m_stock(str(p))[2] == n and analyze(p).code_rows == n
 
 
-def test_identity_header_ambiguity_is_reported_not_resolved(tmp_path):
+def test_identity_header_ambiguity_is_refused_not_resolved(tmp_path):
+    """Correction pass (D-056): a duplicated identity header outside an approved template is refused — never 'the
+    first column'. (The approved DinamikCRM template is covered in tests/test_m8_accuracy2b_review.py.)"""
     head = HEAD[:9] + ["Stok_Kodu"]                                      # a second, different 'Stok_Kodu' column
     rows = [r[:9] + [f"ALT-{i}"] for i, r in enumerate(products())]
     p = book(tmp_path / "s.xlsx", rows, footer=(), head=head)
     a = analyze(p)
-    assert a.identity_header_columns == 2 and a.code_rows == 5          # the first column is read, as before
+    assert not a.ok and a.failure == "identity_header_ambiguous" and a.identity_header_columns == 2
+    assert a.code_rows == 0 and a.template["status"] == "unapproved_duplicate_identity"
     ins = SV.inspect_core("stock", p.read_bytes())
-    assert ins.ambiguous_headers == 1 and ins.fields()["Stok_Kodu"]["duplicate_header"] is True
+    assert ins.layout_supported is False and ins.fields()["Stok_Kodu"]["duplicate_header"] is True
 
 
 def test_coverage_keeps_undefined_apart_from_missing_and_numbers(tmp_path):

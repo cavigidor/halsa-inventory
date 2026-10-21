@@ -56,8 +56,10 @@ def m_stock(path,df=None):
 
 def stock_row_counts(df):
     """M8-ACCURACY-2B: stock row diagnostics from the frame as read (counts only, nothing dropped or deduplicated).
-    The product count is the number of rows that carry a product code (identity column = the first 'Stok_Kodu', the
-    one pandas reads; its authority is an open owner question). Rows without a code — e.g. the export's trailing
+    The product count is the number of rows that carry a product code. Identity column = physical column A, the first
+    'Stok_Kodu' (the one pandas reads); the owner confirmed A = product code and J = country of origin (D-056), and the
+    gate accepts the duplicated header only for the exact approved template (source_validation.STOCK_TEMPLATES) —
+    any other duplicated-identity layout is refused before anything is shown. Rows without a code — e.g. the export's trailing
     report-total rows — are never counted as products. Footer recognition itself is formula-aware and lives in
     services/source_validation.analyze_stock_rows."""
     code=df[SC['code']] if SC['code'] in df.columns else pd.Series([],dtype=object)

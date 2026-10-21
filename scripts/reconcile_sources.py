@@ -190,17 +190,26 @@ def _stock_rows(out: Out, rows: dict) -> None:
     fk, chk = rows.get("footer_kinds") or {}, rows.get("footer_checks") or {}
     out.line(f"      tanınan toplam satırı türleri: toplam formülü={fk.get('aggregate', 0)} · etiket={fk.get('label', 0)}"
              f" · belirsiz={rows.get('ambiguous_rows', 0)}")
-    if chk.get("mismatched"):
-        st = "FAIL"
-    elif chk.get("missing_cache") or chk.get("unsupported") or rows.get("ambiguous_rows"):
-        st = "OPEN"
-    else:
-        st = "PASS" if chk.get("checked") else "OPEN"
-    out.check("stock_footer_totals", st, "Rapor toplam satırları = kapsadıkları ürün satırlarının toplamı",
-              **{f"footer_{k}": v for k, v in chk.items()})
-    out.check("stock_identity_header", "OPEN" if (rows.get("identity_header_columns") or 0) > 1 else "PASS",
-              "'Stok_Kodu' başlığı tek sütunda (birden fazlaysa hangisinin ürün kodu olduğu sahip kararıdır)",
-              columns=rows.get("identity_header_columns"))
+    # PASS only when EVERY checked footer cell reconciled (matched == checked); a contradiction is FAIL; anything
+    # partial (error-propagated, missing cache, unsupported, ambiguous rows, nothing checked) is OPEN — the matched
+    # and the unreconciled counts stay visible, and a partial reconciliation never verifies the totals
+    st = rows.get("footer_status") or "OPEN"
+    out.check("stock_footer_totals", st, "Rapor toplam satırları = kapsadıkları ürün satırlarının toplamı "
+              "(tümü eşleşmeden PASS yok)", **{f"footer_{k}": v for k, v in chk.items()})
+    for col, c in sorted((rows.get("footer_by_column") or {}).items()):
+        if c.get("matched", 0) != c.get("checked", 0):       # only the columns that did not fully reconcile
+            out.line("      toplamı doğrulanamayan sütun: {0} · kontrol={1} · eşleşen={2} · çelişen={3} · "
+                     "hata yayılımı={4} · önbelleksiz={5} · desteklenmeyen={6}".format(
+                         col, c.get("checked"), c.get("matched"), c.get("mismatched"), c.get("error_propagated"),
+                         c.get("missing_cache"), c.get("unsupported")))
+    t = rows.get("template") or {}
+    tstat = t.get("status")
+    out.check("stock_identity_header",
+              "PASS" if tstat in ("approved_template", "single_identity_header") else "FAIL",
+              "Ürün kodu sütunu belirlenebilir: tek 'Stok_Kodu' başlığı ya da sahip onaylı şablon (D-056; A = ürün "
+              f"kodu, J = menşe ülke) — onaysız/değişmiş düzen reddedilir · durum={tstat} · şablon={t.get('template')}"
+              f" · ürün kodu sütunu={t.get('identity_column')} · menşe ülke sütunu={t.get('country_of_origin_column')}",
+              columns=t.get("columns"), identity_headers=t.get("identity_header_columns"))
     cov = rows.get("coverage") or {}
     if cov:
         out.line("      STOK Kontrol % (kapsam): tanımsız (#DIV/0!)={0} · diğer hata={1} · boş={2} · sayı={3} · "

@@ -427,8 +427,16 @@ def build_core_records(frozen: Mapping[str, FrozenSource], frames: Mapping[str, 
         rows = ins.rows if (key == "stock" and ins.rows is not None and ins.rows.ok) else None
         dup = (rows.duplicate_code_occurrences if rows is not None
                else (pdup.duplicate_records if pdup is not None else None))
-        footer_bad = bool(rows is not None and rows.footer_checks.get("mismatched"))
-        totals = False if footer_bad else (ap.get("totals_consistent") if applies else None)
+        # … and a footer reconciliation that is only PARTIAL (error-propagated / missing cache / unsupported /
+        # ambiguous) caps the totals judgement at "not verified": no declaration can turn it into True
+        # (an export without any footer row has no footer evidence: the declaration alone decides, as before)
+        fstat = rows.footer_status() if (rows is not None and rows.footer_checks.get("checked")) else None
+        if fstat == "FAIL":
+            totals = False
+        elif fstat == "OPEN":
+            totals = None
+        else:
+            totals = ap.get("totals_consistent") if applies else None
         observed["approval_status"] = ("applied" if applies else ("fingerprint_mismatch" if ap else "not_supplied"))
         ev = ACC.SourceEvidence(
             key, available=True, layout_supported=ins.layout_supported, report_date=report_date,
