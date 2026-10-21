@@ -1,14 +1,14 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-21 (M8-ACCURACY-2A owner-local real-data acceptance run (read-only; core FAIL on genuine source issues, Kredi NOT RUN — file absent); M8-ACCURACY-2B corrections and the PR #29 correction pass on branch `claude/m8-accuracy-2b-precise-validation`, one PR, not merged. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False)._
+_Updated 2026-10-21 (PR #29 M8-ACCURACY-2B technically reviewed and squash-merged at `4ad8d8a` from `ab841ba`; CI `1411 passed, 7 skipped, 2 xfailed`. Core owner-local reconciliation remains FAIL; Kredi NOT RUN; zero production metrics VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False. Next implementation checkpoint: security-first M8-CP1 before exposing Veri Kontrol Merkezi or hosting)._
 
 ## Git
-- **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), and M8 source-evidence foundation PR #28 (`5baa92a`) merged.
+- **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), M8 source-evidence foundation PR #28 (`5baa92a`), and M8 precise validation PR #29 (`4ad8d8a`) merged.
 - **`claude/m8-accuracy-2-shared-evidence`:** PR #28 merged as technical infrastructure 2026-10-20; all production metrics still withheld and `GENERATION_BOUND_API_EVIDENCE` remains False.
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
 - **Owner's Mac folder:** current checkout state was not inspected in this checkpoint. Previous notes reported an older checkout; verify `git status` before pulling, protect private `.env`, data and SQLite, and follow `docs/owner_launch_checklist.md`. Browser/real-data acceptance remains owner-local.
 
-## M8-ACCURACY-2A / 2B — real-data acceptance and precise validation (Current)
+## M8-ACCURACY-2A / 2B — real-data diagnosis and precise validation (2B merged; acceptance still OPEN)
 - **2A (owner's Mac, 2026-10-20/21, read-only, AI disabled; counts only left the Mac):**
   - Checkout fast-forwarded to `c2a3df5`; `data/` untouched.
   - Sources: one stock, one sales, one Cari export. Authority and business dates NOT confirmed (no `sources.json`).
@@ -31,6 +31,13 @@ _Updated 2026-10-21 (M8-ACCURACY-2A owner-local real-data acceptance run (read-o
   - Veri Kontrol Merkezi designed (`docs/m8_veri_kontrol_merkezi.md`); implementation is checkpoint M8-VKM-1.
   - Private rerun: footers 92/94 matched, 2 error-propagated → OPEN; template approved (A/J); no metric VERIFIED.
 - **Second review of PR #29 (`release_gate.md` §15, D-059):** a scoped metric no longer inherits an unrelated column's footer problem through the source-level totals verdict; the overall reconciliation stays OPEN/FAIL, unscoped metrics stay strict, missing or inconsistent footer evidence fails closed (+21 tests in `tests/test_m8_accuracy2b_review2.py`).
+- **Independent final review and merge (2026-10-21):** PR #29 reviewed at `ab841ba`, GitHub Actions `39677793877` confirmed **1411 passed / 7 skipped / 2 xfailed**, JavaScript and browser checks required in CI. Squash merged `4ad8d8a`. **Scope:** validation infrastructure only; source authority, business dates, core FAIL, Kredi missing, duplicate SKU/sales, 120/320 supplier accounting, other metric dependency audits and real finance approval remain OPEN. Not a real-data signoff. 
+- **Local Git note:** Claude reported a renamed stale lock `.git/stale-maintenance-lock-claude` on the owner's Mac. No evidence of an active canonical Git lock; verify no Git maintenance process is running before removing only that inert renamed file. The Mac working tree and private sources were not inspected by this GitHub review.
+
+
+## Current next checkpoint — M8-CP1 security-first owner/father access
+
+Per M8 roadmap and TASKS.md, authentication/authorization is the next isolated Claude Code PR before any external hosting or exposing Veri Kontrol Merkezi. Both owner and father need distinct revocable accounts; local testing only, hardened FastAPI routes and state mutation, CSRF, throttled login, safe session cookies, opt-in secret provisioning, and forced unauthorized-request tests. No public deployment in CP1. Keep all metrics withheld and AI off by default. Later M8-VKM-1 implements owner-only source issue review with append-only history, without certifying any metric.
 
 ## Milestone
 **Milestone 5 — AI Aksiyon Merkezi: COMPLETE** (M5-1 to M5-6; final acceptance in the M5-6 section below).
