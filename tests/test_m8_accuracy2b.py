@@ -639,3 +639,57 @@ def test_reconcile_core_reports_stock_rows_privately(tmp_path):
     assert "[PASS] Rapor toplam satırları" in out and "tanımsız (#DIV/0!)=" in out
     for secret in ("Sentetik Kalem", "SP-900", "TOPLAM", "2000"):
         assert secret not in out, secret
+
+
+def _share(path, groups):
+    """Rewrite cells as Excel shared formulas: groups = [(si, [cell refs]), …]; the first ref is the master, the
+    others keep only `<f t="shared" si=…/>` (as Excel saves a run of identical formulas)."""
+    import re
+    import zipfile
+    src = Path(path).read_bytes()
+    zin = zipfile.ZipFile(__import__("io").BytesIO(src))
+    xml = zin.read("xl/worksheets/sheet1.xml").decode()
+    for si, refs in groups:
+        span = f"{refs[0]}:{refs[-1]}"
+        for k, ref in enumerate(refs):
+            def sub(m, k=k):
+                return (f'{m.group(1)}<f t="shared" ref="{span}" si="{si}">{m.group(2)}</f>' if k == 0
+                        else f'{m.group(1)}<f t="shared" si="{si}"/>')
+            xml, n = re.subn(rf'(<c r="{ref}"[^>]*>)<f>(.*?)</f>', sub, xml)
+            assert n == 1, ref
+    out = __import__("io").BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            zout.writestr(item, xml.encode() if item.filename == "xl/worksheets/sheet1.xml" else zin.read(item))
+    Path(path).write_bytes(out.getvalue())
+    return path
+
+
+def test_shared_formulas_in_footer_rows_are_expanded_and_recognized(tmp_path):
+    """Real exports store runs of identical formulas as shared formulas (found in the 2B private rerun)."""
+    p = book(tmp_path / "s.xlsx", products())                     # products rows 5–9, footers 10–12
+    _share(p, [(0, ["D10", "F10", "G10", "H10"]), (1, ["D12", "F12", "G12", "H12"]),
+               (2, ["J10", "J11", "J12"])])
+    a = analyze(p)
+    assert a.footer_kinds == {"aggregate": 2, "label": 1} and a.ambiguous_rows == ()
+    assert a.footer_checks["matched"] == 8 and a.footer_checks["mismatched"] == 0
+    assert SV.inspect_core("stock", p.read_bytes()).missing_required_values == 0
+
+
+def test_a_shared_formula_without_its_master_fails_closed(tmp_path):
+    p = book(tmp_path / "s.xlsx", products(), footer=("sum",))
+    _share(p, [(0, ["D10", "F10", "G10", "H10"])])
+    xml_fix = Path(p).read_bytes()
+    import io
+    import re
+    import zipfile
+    zin = zipfile.ZipFile(io.BytesIO(xml_fix))
+    xml = zin.read("xl/worksheets/sheet1.xml").decode()
+    xml = re.sub(r'<f t="shared" ref="[^"]*" si="0">.*?</f>', '<f t="shared" si="9"/>', xml)   # master removed
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as zout:
+        for item in zin.infolist():
+            zout.writestr(item, xml.encode() if item.filename == "xl/worksheets/sheet1.xml" else zin.read(item))
+    Path(p).write_bytes(out.getvalue())
+    a = analyze(p)
+    assert a.footer_rows == () and len(a.ambiguous_rows) == 1

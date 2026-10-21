@@ -313,6 +313,7 @@ class StockRowAnalysis:
 def _read_cells(content: bytes, sheet_index: int = 0) -> tuple[dict[int, dict[int, _Cell]], list[int]]:
     """Every non-empty cell (formula text + cached value), by Excel row / column. Small sheets only (stock export)."""
     rows: dict[int, dict[int, _Cell]] = {}
+    shared: dict[str, tuple[str, str]] = {}           # shared-formula index → (master formula, master cell ref)
     with zipfile.ZipFile(io.BytesIO(content)) as z:
         strings = _shared_strings(z)
         part = _sheet_part(z, sheet_index)
@@ -336,6 +337,17 @@ def _read_cells(content: bytes, sheet_index: int = 0) -> tuple[dict[int, dict[in
                     is_ = c.find(f"{_NS}is")
                     raw = v.text if v is not None else None
                     ftxt = (f.text or "") if f is not None else None
+                    if f is not None and f.get("t") == "shared":
+                        # Excel stores a run of identical formulas once ("shared"); the other cells carry only the
+                        # index. Expand them exactly as Excel does (relative references shifted to the cell) so a
+                        # dependent cell is judged by its real formula (found on the real export, M8-ACCURACY-2B).
+                        si = f.get("si")
+                        if ftxt and ref:
+                            shared[si] = (ftxt, ref)
+                        elif si in shared and ref:
+                            ftxt = _translate(shared[si][0], shared[si][1], ref)
+                        else:
+                            ftxt = "\x00unresolved-shared"           # never matches a footer rule (fails closed)
                     if ftxt is None and raw is None and is_ is None:
                         continue
                     if t == "s" and raw is not None:
@@ -363,6 +375,12 @@ def _read_cells(content: bytes, sheet_index: int = 0) -> tuple[dict[int, dict[in
                     rows.setdefault(r, {})[col] = cell
                 el.clear()
     return rows, hidden
+
+
+def _translate(formula: str, origin: str, dest: str) -> str:
+    """The master formula of a shared-formula run, as it reads in cell `dest` (Excel's relative reference rule)."""
+    from openpyxl.formula.translate import Translator
+    return Translator("=" + formula, origin=origin).translate_formula(dest)[1:]
 
 
 def _blank(cell: _Cell | None) -> bool:
