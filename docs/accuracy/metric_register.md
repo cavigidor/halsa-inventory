@@ -42,8 +42,17 @@ most four short reasons (no numbers, names, paths or exception text).
    values). `validate_register(production=True)` still refuses any VERIFIED certification while
    `GENERATION_BOUND_API_EVIDENCE` is False — it stays False until the owner's real-data acceptance
    (`release_gate.md` §8.3).
-5. **Dependencies.** A combined output is the worst of its own state and every output it depends on.
-6. Any error while deciding, an unknown key or an unclassified API route = `INVALID` (fail-closed).
+5. **Dependency scoping (M8-ACCURACY-2B).** A metric may declare `requires`: per source, the fields it reads and the
+   named cross-source joins it uses (`services/source_validation.JOINS`). Such a metric is judged on those fields and
+   joins only (Excel errors, missing caches, blank amounts, invalid dates and duplicated headers per field; join
+   counts per join). Missing field- or join-level evidence is NOT_VERIFIED. Source integrity (availability, inspection
+   failures, explicit selection, external links, layout, missing identity, duplicate records, totals, mapping, dates)
+   always applies. A metric WITHOUT a declaration keeps the strict source-wide judgement. Declared after tracing the
+   code: `stock.reorder`, `stock.overstock` (stock fields incl. `STOK Kontrol %`, no join), `stock.product_counts`
+   (identity only), `receivables.collections` (aging account / name / representative / every bucket, no join). All
+   other metrics are still strict until audited.
+6. **Dependencies.** A combined output is the worst of its own state and every output it depends on.
+7. Any error while deciding, an unknown key or an unclassified API route = `INVALID` (fail-closed).
 
 Enforcement points (backend / shared response layer, never only JavaScript):
 - **Dashboard HTML** — `dashboard_builder.build(..., gate=None)`: a withheld module is emitted with `rows: []`,
@@ -326,3 +335,12 @@ Field legend: **UI** · **API** · **Source** (workbook / sheet / columns) · **
 - **Control totals** (`totals_consistent`) are not available for the core exports; unknown → NOT_VERIFIED.
 - **Customer 360 field-level audit** (each card), **Günlük Satış scoring** and **fair edition arithmetic** were audited
   at the module level only, because each is withheld as a whole.
+
+### `stock.product_counts` — Stok ürün sayıları (M8-ACCURACY-2B) · NOT_VERIFIED
+- **Surfaces:** dashboard header ("N ürün") and the refresh report count `products`. Both are now withheld (before
+  2B the raw row count, including the export's report-total rows, was shown as system information).
+- **Definition:** the number of rows that carry a product code (not deduplicated). Separate diagnostics: parsed rows,
+  recognized report-control rows, product-code rows, distinct codes, duplicate occurrences, rows with missing or
+  ambiguous identity (`source_validation.StockRowAnalysis`).
+- **Blockers:** STOCK-CODE-AUTHORITY (two different columns are both labelled `Stok_Kodu`), STOCK-REPORT-SCOPE (what
+  the report lists; the duplicated code), STOCK-DATE, REAL-DATA.

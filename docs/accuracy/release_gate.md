@@ -382,3 +382,51 @@ outside the publication lock.
 
 **Readiness:** technical foundation — ready for final technical review; owner-local real-data acceptance — not started;
 metric promotion — none (§11.3).
+
+## 13. M8-ACCURACY-2B — precise validation and safe diagnostics (2026-10-21)
+Follows the first owner-local real-data acceptance (2A, read-only on the owner's Mac; no values left the Mac).
+
+**Bugs fixed (each found on the real exports, reproduced synthetically):**
+1. *Report-total rows counted as data.* The stock export ends with report-control rows (a `SUM` row, a label row, a
+   `SUBTOTAL(9)` row). They were counted as rows with a missing product code (FAIL), as duplicates of each other
+   (`astype(str)` turned blank codes into `"nan"`), as products in the header / refresh count, and in the DQ-4 count.
+2. *Shared formulas.* Excel stores runs of identical formulas once; the streaming reader saw empty formula text in the
+   dependent cells. They are now expanded with Excel's relative-reference rule (a dependent without its master never
+   matches a footer rule).
+3. *Office lock files.* While a workbook is open in Excel, `~$<name>.xlsx` (165 bytes) is the newest matching file;
+   the fallback selection picked it for stock. `~$…`, `._…` and `.~lock…` are never sources; `sources.json` refuses
+   them.
+4. *Source-wide contamination.* A cross-source join problem (e.g. products sold but absent from stock) made every
+   metric on the source INVALID — also lists that never use that join. Metrics can now declare their dependencies
+   (metric register "How a decision is made" 5).
+5. *Restart re-publication 503.* GET / no longer answers a needless 503 while the warm-up thread re-publishes the
+   dashboard of a re-validated generation: it waits, bounded (`DASHBOARD_REPUBLISH_WAIT_SECONDS`, default 60 s, max
+   300 s); a timeout is 503 `publication_pending`; failures stay 503.
+
+**Footer recognition (`source_validation.analyze_stock_rows`).** Only rows after the last product row can be footers;
+a blank-code row between products is always a missing identity. A trailing row is recognized when identity and name
+are blank and either (a) AGGREGATE: every aggregate cell is `SUM(X a:X b)` or `SUBTOTAL(9|109, X a:X b)` over its own
+column X with exactly the product range, other formulas are row-local with a blank cached result, no numeric literal;
+or (b) LABEL: adjacent to a recognized aggregate row, one identical text in the aggregated columns, otherwise only the
+aggregate row's own text label. Everything else is AMBIGUOUS and stays a row with missing identity (fail closed).
+Every aggregate cell is reconciled against the rows it covers: matched / mismatched (contradictory → the source's
+totals are INVALID) / error_propagated (an error inside the range) / missing_cache / unsupported (SUBTOTAL on a sheet
+with hidden rows). Recognized footers are excluded from the field scan and reported separately; nothing is dropped,
+repaired or deduplicated; the workbook is never written.
+
+**Counting definitions (Turkish labels in the reconciliation output):** Okunan satır (parsed rows) · Tanınan rapor
+toplam satırı (recognized footers) · Ürün kodlu satır (product-code rows) · Farklı ürün kodu (distinct codes) ·
+Yinelenen ürün kodu tekrarı (duplicate occurrences) · Kimliği eksik / belirsiz satır (missing or ambiguous identity).
+The product count = product-code rows; it is the new withheld metric `stock.product_counts`.
+
+**Real-data result of this branch (private rerun, counts only):** 3 footers recognized (2 aggregate, 1 label),
+0 ambiguous; 94 aggregate cells: 92 matched, 2 error-propagated (an unused cost column with error cells), 0
+contradictory; 3,311 product-code rows, 3,310 distinct codes, 1 duplicate occurrence, 0 missing identity; coverage
+1,178 undefined (472 with stock), 2,133 numeric, 0 blank. Core technical failures 8 → 7 (overall still FAIL on genuine
+items: coverage `#DIV/0!`, one duplicated code, sales duplicate rows, joins). With scoping, `stock.reorder` /
+`stock.overstock` remain INVALID for their own fields (coverage errors, duplicated identity header, duplicate code);
+`receivables.collections` is no longer INVALID through the unrelated aging↔sales join (NOT_VERIFIED: date,
+selection, totals, mapping, blank buckets). No metric is VERIFIED.
+
+**Not done here (documented):** dependency declarations for the remaining metrics (strict until audited); supplier
+(`320`) accounts in collections (owner question, no rule); cross-response consistency; native macOS browser tests.

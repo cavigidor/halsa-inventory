@@ -837,3 +837,17 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   dashboard from the re-derived evidence and publishes page + manifest + digest as one locked step.
 - A plain `dashboard_builder.py` build is not served; publication goes through the refresh.
 - **Unchanged:** `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; Kredi DURUM, D-003, DQ-1 … DQ-6 open.
+
+### D-055 · 2026-10-21 · Report-control rows, dependency-scoped judgement, lock files, bounded re-publication wait (M8-ACCURACY-2B)
+- **Stock report-control rows** are recognized only by deterministic structure (aggregate over the own column and
+  exactly the product range, or an adjacent label row) and reconciled cell by cell; anything else stays a row with
+  missing identity. They are never products, never duplicates and never silently dropped.
+- **Product count** = rows carrying a product code (not deduplicated), withheld as `stock.product_counts` until code
+  authority (two `Stok_Kodu` columns), report scope and source dates are confirmed.
+- **Scoped judgement:** a metric may declare the fields and joins it reads; it is then judged on those, source
+  integrity always applies, missing dependency evidence is NOT_VERIFIED, undeclared metrics stay strict. No
+  relationship is approved because it is common; D-003, DQ-5, DQ-6 unchanged.
+- **Lock files** (`~$`, `._`, `.~lock`) are never sources.
+- **Restart:** GET / waits (bounded, default 60 s) for an in-progress valid re-publication; never serves old bytes.
+- **Unchanged:** no metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False; no financial calculation changed except
+  that report-total rows no longer count as products (and in the DQ-4 count).
