@@ -45,8 +45,10 @@ most four short reasons (no numbers, names, paths or exception text).
 5. **Dependency scoping (M8-ACCURACY-2B).** A metric may declare `requires`: per source, the fields it reads and the
    named cross-source joins it uses (`services/source_validation.JOINS`). Such a metric is judged on those fields and
    joins only (Excel errors, missing caches, blank amounts, invalid dates, duplicated headers and — for the stock
-   export — the field's own footer reconciliation (contradiction → INVALID, partial → NOT_VERIFIED; D-058) per field;
-   join counts per join). Missing field- or join-level evidence is NOT_VERIFIED. Source integrity (availability, inspection
+   export — the field's own footer reconciliation (contradiction → INVALID, partial or missing → NOT_VERIFIED;
+   D-058 / D-059) per field; join counts per join). The source-level totals verdict is replaced by "declaration +
+   used fields' footers" only when the column footers can stand on their own (`footer_scope = per_field`) and the
+   record is consistent; otherwise the strict source-level verdict applies. Missing field- or join-level evidence is NOT_VERIFIED. Source integrity (availability, inspection
    failures, explicit selection, external links, layout, missing identity, duplicate records, totals, mapping, dates)
    always applies. A metric WITHOUT a declaration keeps the strict source-wide judgement. Declared after tracing the
    code: `stock.reorder`, `stock.overstock` (stock fields incl. `STOK Kontrol %`, no join), `stock.product_counts`

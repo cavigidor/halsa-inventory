@@ -431,12 +431,16 @@ def build_core_records(frozen: Mapping[str, FrozenSource], frames: Mapping[str, 
         # ambiguous) caps the totals judgement at "not verified": no declaration can turn it into True
         # (an export without any footer row has no footer evidence: the declaration alone decides, as before)
         fstat = rows.footer_status() if (rows is not None and rows.footer_checks.get("checked")) else None
+        declared_totals = ap.get("totals_consistent") if applies else None
         if fstat == "FAIL":
             totals = False
         elif fstat == "OPEN":
             totals = None
         else:
-            totals = ap.get("totals_consistent") if applies else None
+            totals = declared_totals
+        # the strict verdict above stays source-wide; these keep its origin apart for scoped metrics (review 2)
+        fscope = (rows.footer_scope() if rows is not None
+                  else ("source_wide" if (key == "stock" and ins.rows is not None) else None))
         observed["approval_status"] = ("applied" if applies else ("fingerprint_mismatch" if ap else "not_supplied"))
         ev = ACC.SourceEvidence(
             key, available=True, layout_supported=ins.layout_supported, report_date=report_date,
@@ -452,7 +456,8 @@ def build_core_records(frozen: Mapping[str, FrozenSource], frames: Mapping[str, 
             duplicate_records=dup,
             join_unmatched=j.get("join_unmatched"), join_ambiguous=j.get("join_ambiguous"),
             joins_validated=j.get("joins_validated"),
-            totals_consistent=totals,
+            totals_consistent=totals, declared_totals_consistent=declared_totals, footer_totals=fstat,
+            footer_scope=fscope,
             fields=ins.fields() if ins.ok else None, joins=jchecks,
             mapping_approved=(ap.get("mapping_approved") if applies else None),
             date_contradictions=contradictions, selection_explicit=(origin == "explicit"),

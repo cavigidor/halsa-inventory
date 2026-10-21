@@ -900,3 +900,23 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   invalidate an independent field.
 - Veri Kontrol Merkezi (design, `docs/m8_veri_kontrol_merkezi.md`): reviewing or acknowledging a data issue records a
   human decision; it **never** certifies a metric, never changes source data and never deletes a suspected duplicate.
+
+### D-059 · 2026-10-21 · Column-footer problems are judged per field; source-wide totals stay strict (2nd review of PR #29)
+- **Defect:** D-058 kept footer evidence per field, but a scoped metric still inherited the source-level
+  `totals_consistent` verdict, which a partial / contradictory footer in ANY column caps at None / False — so an
+  unrelated cost-column footer withheld a quantity-only metric.
+- **Fix:** `SourceEvidence` now records where that verdict comes from: `declared_totals_consistent` (the
+  fingerprint-bound declaration alone), `footer_totals` (whole-footer PASS / OPEN / FAIL) and `footer_scope`
+  (`per_field` only when the rows are recognized, at least one footer cell was checked AND matched, and there is no
+  ambiguous trailing row; otherwise `source_wide`; None without footer rows). `totals_consistent` and the strict
+  judgement are unchanged.
+- **Scoped judgement** replaces the source-level totals verdict only when the per-column evidence can stand on its own
+  (`per_field`), the record is internally consistent (the strict verdict equals the declaration capped by the footer
+  status) and the metric reads at least one field of the source. It then applies: the declaration source-wide (False →
+  INVALID, unknown → NOT_VERIFIED) and, per used field, its own footer result — PASS or `not_aggregated` (no footer
+  totals that column) pass; OPEN → NOT_VERIFIED; FAIL → INVALID; missing / unknown → NOT_VERIFIED. In every other case
+  the strict source-level verdict applies (fail closed).
+- **Unchanged:** the source's overall reconciliation stays OPEN / FAIL and is reported; every other source-integrity
+  check and every used join still applies; unscoped metrics keep the strict judgement; a record whose totals verdict
+  is more optimistic than its own footer reconciliation is INVALID. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE`
+  False. D-056–D-058, Kredi, revenue, DQ-1–DQ-6, duplicate-record and supplier-account rules unchanged.

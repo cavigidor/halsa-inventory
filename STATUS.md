@@ -23,13 +23,14 @@ _Updated 2026-10-21 (M8-ACCURACY-2A owner-local real-data acceptance run (read-o
   - Dependency-scoped judgement for traced metrics.
   - Bounded restart re-publication wait.
 - **Private rerun of 2B on the real exports:** 3 footers recognized, 0 ambiguous; 92 of 94 footer cells matched, 2 error-propagated, 0 contradictory. Core technical failures 8 → 7 (overall still FAIL on genuine items). No metric VERIFIED.
-- **Tests (cloud, synthetic, `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled`):** before 2B 1320 passed / 7 skipped / 2 xfailed; with 2B 1369 passed; after the correction pass **1390 passed, 7 skipped, 2 xfailed** (+49 in `tests/test_m8_accuracy2b.py`, +21 in `tests/test_m8_accuracy2b_review.py`; skips = owner-local `local_data`; xfails = DQ-1, DQ-6).
+- **Tests (cloud, synthetic, `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled`):** before 2B 1320 passed / 7 skipped / 2 xfailed; with 2B 1369 passed; after the correction pass 1390; after the second review **1411 passed, 7 skipped, 2 xfailed** (+49 in `tests/test_m8_accuracy2b.py`, +21 in `tests/test_m8_accuracy2b_review.py`, +21 in `tests/test_m8_accuracy2b_review2.py`; skips = owner-local `local_data`; xfails = DQ-1, DQ-6).
 - **PR #29 correction pass (`release_gate.md` §14, D-056–D-058):**
   - Partial footer reconciliation is OPEN (never PASS) and never makes `totals_consistent` True; field-level footer evidence.
   - Owner-confirmed DinamikCRM stock template: A = product code, J = country of origin; enforced by header digest; altered or reordered layouts refused. Column identity only.
   - DinamikCRM report conventions recorded (not evidence).
   - Veri Kontrol Merkezi designed (`docs/m8_veri_kontrol_merkezi.md`); implementation is checkpoint M8-VKM-1.
   - Private rerun: footers 92/94 matched, 2 error-propagated → OPEN; template approved (A/J); no metric VERIFIED.
+- **Second review of PR #29 (`release_gate.md` §15, D-059):** a scoped metric no longer inherits an unrelated column's footer problem through the source-level totals verdict; the overall reconciliation stays OPEN/FAIL, unscoped metrics stay strict, missing or inconsistent footer evidence fails closed (+21 tests in `tests/test_m8_accuracy2b_review2.py`).
 
 ## Milestone
 **Milestone 5 — AI Aksiyon Merkezi: COMPLETE** (M5-1 to M5-6; final acceptance in the M5-6 section below).

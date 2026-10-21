@@ -466,3 +466,20 @@ errors, duplicate code), `stock.overstock` INVALID, `stock.product_counts` INVAL
 
 **Veri Kontrol Merkezi** — designed in `docs/m8_veri_kontrol_merkezi.md`, separate checkpoint M8-VKM-1; review never
 certifies a metric, never changes source data, never deletes a suspected duplicate.
+
+## 15. Second review of PR #29 — column footers vs source-wide totals (2026-10-21; D-059)
+**Defect.** A scoped metric still inherited the source-level `totals_consistent` verdict, which a partial or
+contradictory footer in any column caps — so the real export's error-propagated cost column (BA) would also withhold a
+metric that reads only quantities whose footers reconcile.
+
+**Fix.** The evidence records the verdict's origin (`declared_totals_consistent`, `footer_totals`, `footer_scope`). A
+metric with an audited scope is judged on the declaration (source-wide) plus each used field's own footer result
+(PASS / `not_aggregated` pass, OPEN or missing → NOT_VERIFIED, FAIL → INVALID) — but only when the per-column
+evidence can stand on its own: footer rows recognized, at least one cell checked and matched, no ambiguous trailing
+row, a self-consistent record, and at least one used field. Otherwise the strict source-level verdict applies. The
+source's overall reconciliation stays OPEN / FAIL; unscoped metrics, the other integrity checks and used joins are
+unchanged. Regression tests: `tests/test_m8_accuracy2b_review2.py` (pipeline-built evidence judged by the real gate).
+
+**Effect on the real export:** none on any production decision — every stock metric is still withheld by its own
+problems (coverage errors, the duplicated code, dates, approvals). No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE`
+False.

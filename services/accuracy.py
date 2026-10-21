@@ -615,6 +615,14 @@ class SourceEvidence:
     fields: dict | None = None                      # header → error_cells / missing_cached_formulas / blank_cells /
                                                     #          invalid_dates / external_refs / duplicate_header
     joins: dict | None = None                       # join id → unmatched / ambiguous / validated
+    # M8-ACCURACY-2B review 2: where the source-level totals verdict comes from. `totals_consistent` (above) stays the
+    # STRICT source-wide verdict = the fingerprint-bound declaration capped by the footer reconciliation. These three
+    # let a SCOPED metric separate a column-footer problem from a genuinely source-wide one:
+    declared_totals_consistent: bool | None = None  # the declaration alone (before any footer evidence)
+    footer_totals: str | None = None                # whole-footer status PASS / OPEN / FAIL; None = no footer evidence
+    footer_scope: str | None = None                 # "per_field": each column's footer result can stand on its own
+                                                    # (rows recognized, ≥1 cell checked AND matched, no ambiguous
+                                                    # row); "source_wide": it cannot; None: no footer rows
 
     def problems(self, scope: "Requirement | None" = None) -> list[tuple[State, str]]:
         """Source-intrinsic problems (not time). Unknown → NOT_VERIFIED; a known defect or failed inspection → INVALID.
@@ -669,6 +677,11 @@ class SourceEvidence:
             out.append((INV, "Kaynaktaki toplamlar birbiriyle çelişiyor."))
         elif self.totals_consistent is None:
             out.append((NV, "Kaynak toplamlarının mutabakatı yapılmadı."))
+        # a record whose totals verdict is more optimistic than its own footer reconciliation is corrupt: fail closed
+        if (self.footer_totals == "FAIL" and self.totals_consistent is not False) or \
+                (self.footer_totals == "OPEN" and self.totals_consistent is True) or \
+                (self.footer_totals is not None and self.footer_totals not in self._FOOTER_STATES):
+            out.append((INV, "Kaynak toplam kanıtı rapor toplam satırlarıyla tutarsız."))
         if self.mapping_approved is False:
             out.append((NV, "Kaynak eşlemesi onaylanmadı."))
         elif self.mapping_approved is None:
@@ -682,11 +695,40 @@ class SourceEvidence:
                     "Formül önbelleği denetimi yapılmadı.", "Müşteri veya ürün eşleşmesi hatalı.",
                     "Müşteri veya ürün eşleşmeleri doğrulanmadı."}
 
+    _TOTALS = {"Kaynaktaki toplamlar birbiriyle çelişiyor.", "Kaynak toplamlarının mutabakatı yapılmadı."}
+    _FOOTER_STATES = ("PASS", "OPEN", "FAIL")
+    _FOOTER_FIELD_OK = ("PASS", "not_aggregated")       # not_aggregated: the footer does not total this column
+
+    def _field_level_totals(self, scope: "Requirement") -> bool:
+        """May this metric's totals be judged on its own fields' footers instead of the whole-footer verdict?
+        Only when the per-column evidence can stand on its own, the record is internally consistent (the strict
+        verdict is exactly the declaration capped by the footer status) and the metric reads at least one field.
+        Anything else keeps the strict source-wide verdict (fail closed)."""
+        if self.footer_scope != "per_field" or self.footer_totals not in self._FOOTER_STATES:
+            return False
+        expected = {"FAIL": False, "OPEN": None}.get(self.footer_totals, self.declared_totals_consistent)
+        if self.totals_consistent is not expected:
+            return False
+        return bool(scope.fields) and self.fields is not None
+
     def _scoped_problems(self, scope: "Requirement") -> list[tuple[State, str]]:
         # every source-integrity check of the strict judgement, minus the field- and join-level ones …
-        out = [p for p in self.problems() if p[1] not in self._FIELD_LEVEL]
+        field_totals = self._field_level_totals(scope)
+        out = [p for p in self.problems() if p[1] not in self._FIELD_LEVEL
+               and not (field_totals and p[1] in self._TOTALS)]
         if self.available is False:
             return out
+        if field_totals:
+            # … the source-level totals verdict without the column footers: the declaration (source-wide) …
+            if self.declared_totals_consistent is False:
+                out.append((INV, "Kaynaktaki toplamlar birbiriyle çelişiyor."))
+            elif self.declared_totals_consistent is not True:
+                out.append((NV, "Kaynak toplamlarının mutabakatı yapılmadı."))
+            # … plus every used field's own footer result (FAIL / OPEN are judged in the field loop below)
+            for f in scope.fields:
+                d = self.fields.get(f)
+                if d is not None and d.get("footer_totals") not in self._FOOTER_FIELD_OK + ("FAIL", "OPEN"):
+                    out.append((NV, f"Kullanılan alanın rapor toplamı kanıtı yok: {f}."))
         # … which are then judged on the fields this metric reads
         if self.fields is None:
             out.append((NV, "Alan düzeyinde kaynak kanıtı yok."))

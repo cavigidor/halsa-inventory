@@ -101,7 +101,7 @@ def test_footer_evidence_is_field_level_and_does_not_spread(tmp_path):
     f = ins.fields()
     assert f["Envanter değeri"]["footer_totals"] == "OPEN"
     assert f["TOPLAM STOK MİKTAR "]["footer_totals"] == "PASS" and f["minseviye"]["footer_totals"] == "PASS"
-    assert "footer_totals" not in f["Stok_Kodu"]                                   # never aggregated
+    assert f["Stok_Kodu"]["footer_totals"] == "not_aggregated"                     # never aggregated
     m = _manifest(tmp_path / "s.xlsx")
     ev = m.record("stock").evidence
     reorder = ACC.REGISTER["stock.reorder"]                                         # does NOT read Envanter değeri

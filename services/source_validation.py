@@ -320,6 +320,15 @@ class StockRowAnalysis:
         (error-propagated, missing cache, unsupported, ambiguous rows, or nothing checked). Partial ≠ verified."""
         return _footer_status(self.footer_checks or {}, self.ambiguous_rows)
 
+    def footer_scope(self) -> str | None:
+        """"per_field" when each column's footer result can stand on its own: rows recognized, at least one cell
+        checked AND matched, no ambiguous trailing row. "source_wide" otherwise (a footer that reconciles nothing, or
+        ambiguous rows, says nothing column-specific). None when the export has no footer cell at all."""
+        c = self.footer_checks or {}
+        if not self.ok or not c.get("checked"):
+            return None if self.ok else "source_wide"
+        return "per_field" if (c.get("matched") and not self.ambiguous_rows) else "source_wide"
+
 
 def _read_cells(content: bytes, sheet_index: int = 0) -> tuple[dict[int, dict[int, _Cell]], list[int]]:
     """Every non-empty cell (formula text + cached value), by Excel row / column. Small sheets only (stock export)."""
@@ -731,8 +740,12 @@ class CoreInspection:
             d["invalid_dates"] += c.get("invalid_dates", 0)
             d["external_refs"] += c.get("external_ref", 0)
             d["duplicate_header"] = d["duplicate_header"] or (h in self.duplicate_headers and h not in resolved)
-            if self.rows is not None and self.rows.ok and h in self.rows.footer_by_header:
-                d["footer_totals"] = self.rows.footer_by_header[h]   # PASS / OPEN / FAIL for this field's totals
+            if self.rows is not None and self.rows.ok and self.rows.footer_checks.get("checked"):
+                # PASS / OPEN / FAIL for this field's own footer cells; "not_aggregated" when no footer totals it
+                prev = d.get("footer_totals")
+                cur = self.rows.footer_by_header.get(h, "not_aggregated")
+                order = ("not_aggregated", "PASS", "OPEN", "FAIL")
+                d["footer_totals"] = cur if prev is None else max(prev, cur, key=order.index)
         return out
 
     def resolved_headers(self) -> frozenset[str]:
