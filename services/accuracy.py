@@ -98,6 +98,17 @@ class Blocker:
 
 
 @dataclass(frozen=True)
+class Requirement:
+    """What a metric ACTUALLY reads from one source (M8-ACCURACY-2B): the fields (column headers as the M5 pipeline
+    reads them; `bucket:*` = every aging month bucket) and the named cross-source joins
+    (services/source_validation.JOINS). Declared only after tracing the metric's code; an undeclared metric keeps
+    the strict source-wide judgement."""
+    source: str
+    fields: tuple[str, ...] = ()
+    joins: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class Metric:
     key: str
     title_tr: str
@@ -114,6 +125,15 @@ class Metric:
     approval_refs: tuple[str, ...] = ()        # required for VERIFIED
     regression_tests: tuple[str, ...] = ()     # required for VERIFIED
     reconciliation_ref: str | None = None      # required for VERIFIED (real-data reconciliation evidence)
+    # M8-ACCURACY-2B: field / join dependencies per source. Empty = not audited yet → every problem of every source
+    # it uses applies (the strict PR #27 / #28 behaviour). Non-empty = one Requirement per source in `sources`.
+    requires: tuple[Requirement, ...] = ()
+
+    def scope(self, source: str) -> "Requirement | None":
+        for r in self.requires:
+            if r.source == source:
+                return r
+        return None
 
 
 # ---------------------------------------------------------------------------------------------
@@ -171,9 +191,19 @@ B_DQ6 = Blocker("DQ-6", INV, "Vadesi geçen borç, sipariş müşterisi kodu ile
                 "(invoice account); tests/test_m8_accuracy.py::test_dq6_winback_overdue_identity_mismatch.")
 B_DQ4 = Blocker("DQ-4", NV, "Kapsamı hesaplanamayan (#DIV/0!) ürünler listeye girmiyor; liste eksik (DQ-4).",
                 "dashboard_builder.m_stock requires STOK Kontrol % (num() coerces #DIV/0! to NaN); "
-                "docs/m6_source_inventory.md §12 (1,178 of 3,314 products on the 5 Oct 2026 export).")
+                "docs/m6_source_inventory.md §12 (1,178 of the 3,311 product rows on the 5 Oct 2026 export; the "
+                "export's 3 trailing rows are report totals, M8-ACCURACY-2B).")
 B_STOCK_DATE = Blocker("STOCK-DATE", NV, "Stok raporunun tarihi doğrulanmıyor.",
                        "dashboard_builder.select_sources picks the newest file by mtime; no report date is read.")
+# STOCK-CODE-AUTHORITY (2A/2B) is resolved by the owner's column-identity decision D-056 (2026-10-21): column A is
+# the product code, column J the country of origin. It is no longer a static blocker; instead the evidence decides —
+# the duplicated `Stok_Kodu` header counts as resolved ONLY when the workbook's header row is exactly the approved
+# template (services/source_validation.STOCK_TEMPLATES); any other duplicated-identity layout is refused (INVALID).
+# The approval covers column identity only — not freshness, completeness, quantities, totals or product correctness.
+B_STOCK_SCOPE = Blocker("STOCK-REPORT-SCOPE", NV, "Stok raporunun hangi ürünleri listelediği (kapsamı) ve tekrarlanan "
+                        "ürün kodunun anlamı doğrulanmadı.",
+                        "M8-ACCURACY-2A: one product code appears in two rows with different values; report scope "
+                        "not documented.")
 B_INV_VALUE = Blocker("INV-VALUE", NV, "Envanter değerinin hesap esası onaylanmadı.",
                       "m_stock uses the export's cached 'Envanter değeri' column; its basis is not documented.")
 B_DQ2 = Blocker("DQ-2", INV, "KAPALI müşteriler alıcı listesinde yer alabiliyor (DQ-2).",
@@ -238,10 +268,21 @@ _M = Metric
 REGISTER: dict[str, Metric] = {m.key: m for m in (
     # ---- static dashboard modules (dashboard_builder.build) ----
     _M("stock.reorder", "Azalan Stok", ("dashboard:reorder", "dashboard:stat:min_alti", "api:/api/context"),
-       ("stock",), ("stock_coverage_rule",), blockers=(B_DQ4, B_STOCK_DATE, B_REAL)),
+       ("stock",), ("stock_coverage_rule",), blockers=(B_DQ4, B_STOCK_DATE, B_STOCK_SCOPE, B_REAL),
+       # traced: dashboard_builder.m_stock `low` (code, name, quantity, coverage, min, max, DURUM); no join
+       requires=(Requirement("stock", ("Stok_Kodu", "Stok_Adı", "TOPLAM STOK MİKTAR ", "STOK Kontrol %", "minseviye",
+                                        "maxseviye", "DURUM")),)),
     _M("stock.overstock", "Fazla Stok", ("dashboard:overstock", "dashboard:stat:maks_ustu",
                                          "dashboard:stat:fazla_stok_degeri"),
-       ("stock",), ("stock_coverage_rule", "inventory_valuation"), blockers=(B_DQ4, B_STOCK_DATE, B_INV_VALUE, B_REAL)),
+       ("stock",), ("stock_coverage_rule", "inventory_valuation"),
+       blockers=(B_DQ4, B_STOCK_DATE, B_INV_VALUE, B_STOCK_SCOPE, B_REAL),
+       # traced: m_stock `over` (code, name, quantity, coverage, max, inventory value, DURUM); no join
+       requires=(Requirement("stock", ("Stok_Kodu", "Stok_Adı", "TOPLAM STOK MİKTAR ", "STOK Kontrol %", "maxseviye",
+                                        "Envanter değeri", "DURUM")),)),
+    _M("stock.product_counts", "Stok ürün sayıları", ("dashboard:header:urun_sayisi", "refresh:products"),
+       ("stock",), blockers=(B_STOCK_SCOPE, B_STOCK_DATE, B_REAL),
+       # traced: dashboard_builder.stock_row_counts (identity column only); no join
+       requires=(Requirement("stock", ("Stok_Kodu",)),)),
     _M("stock.clearance_buyers", "Stok Eritme", ("dashboard:osmove",), ("stock", "sales"),
        ("revenue_basis", "kapali_attribute_source", "customer_identity"), ("stock.overstock",),
        blockers=(B_DQ2, B_AMOUNT_ZERO, B_REAL), certified=INV),
@@ -263,7 +304,10 @@ REGISTER: dict[str, Metric] = {m.key: m for m in (
        blockers=(B_AGING_DATE, B_OVERDUE_DEF, B_REVENUE, B_SALESPERSON, B_REAL)),
     _M("receivables.collections", "Tahsilat (vadesi geçen alacak)", ("dashboard:collections",
                                                                       "dashboard:stat:vadesi_gecen_toplam"),
-       ("aging",), ("overdue_definition",), blockers=(B_AGING_DATE, B_OVERDUE_DEF, B_REAL)),
+       ("aging",), ("overdue_definition",), blockers=(B_AGING_DATE, B_OVERDUE_DEF, B_REAL),
+       # traced: dashboard_builder.m_collections (account code, name, representative, every month bucket); no join
+       # (it neither reads sales nor the customer master). Supplier-prefix accounts: open question (2A), not a rule.
+       requires=(Requirement("aging", ("Hesap kodu", "Hesap adı", "Temsilci kodu", "bucket:*")),)),
     # ---- server-driven views / APIs ----
     _M("actions.real_decline", "Reel Satış Düşüşü", ("api:/api/agent/actions",), ("sales",),
        ("inflation_source", "revenue_basis"), ("customers.momentum",), blockers=(B_INFLATION, B_REVENUE)),
@@ -360,7 +404,7 @@ PANEL_METRIC = {"ai": "actions.queue", "sq": "sales_queue", "c360": "customer360
 # Controlled-refresh report counts → metric (`products` is the stock export's row count: system information).
 REFRESH_COUNT_METRIC = {"low_stock": "stock.reorder", "lapsed": "customers.winback",
                         "overstock_value": "stock.overstock", "overdue_total": "receivables.collections",
-                        "actions": "actions.queue", "products": None}
+                        "actions": "actions.queue", "products": "stock.product_counts"}
 
 # ---------------------------------------------------------------------------------------------
 # API route classification. EVERY route must be listed (tests enforce it); an unlisted route is withheld.
@@ -465,6 +509,8 @@ def validate_register(register: dict[str, Metric] | None = None,
         for dep in m.depends_on:
             if dep not in reg:
                 raise RegisterError(f"{k}: unknown dependency {dep}")
+        if m.requires:
+            _validate_requires(k, m)
         for b in m.blockers:
             if b.state == State.VERIFIED:
                 raise RegisterError(f"{k}: a blocker cannot be VERIFIED")
@@ -507,6 +553,26 @@ def validate_register(register: dict[str, Metric] | None = None,
                                     "shared by the dashboard, the API, the owner views and the refresh (M8-ACCURACY-2)")
 
 
+def _validate_requires(key: str, m: "Metric") -> None:
+    """A declared metric names every source it uses exactly once, only fields the source inspection knows and only
+    named joins (M8-ACCURACY-2B)."""
+    from services import source_validation as SV
+    srcs = [r.source for r in m.requires]
+    if sorted(srcs) != sorted(set(srcs)) or set(srcs) != set(m.sources):
+        raise RegisterError(f"{key}: requires must name each of its sources exactly once")
+    for r in m.requires:
+        spec = SV.CORE.get(r.source)
+        if spec is None:
+            raise RegisterError(f"{key}: field-level requirements are only defined for core sources ({r.source})")
+        known = set(spec["required"]) | ({"bucket:*"} if spec.get("buckets") else set())
+        unknown = [f for f in r.fields if f not in known]
+        if unknown or not r.fields:
+            raise RegisterError(f"{key}: unknown or empty field requirements {unknown} for {r.source}")
+        bad = [j for j in r.joins if j not in SV.JOINS]
+        if bad:
+            raise RegisterError(f"{key}: unknown joins {bad}")
+
+
 # ---------------------------------------------------------------------------------------------
 # runtime source evidence (can only downgrade). Unknown (None) is NEVER treated as passing.
 # ---------------------------------------------------------------------------------------------
@@ -545,9 +611,29 @@ class SourceEvidence:
     selection_explicit: bool | None = None          # the file was named explicitly (not picked by modification time)
     inspection_failures: tuple[str, ...] = ()       # inspections that could not run (fail closed)
     notes: tuple[str, ...] = ()
+    # M8-ACCURACY-2B: field-level and join-level evidence (None = not inspected → a scoped metric is NOT_VERIFIED)
+    fields: dict | None = None                      # header → error_cells / missing_cached_formulas / blank_cells /
+                                                    #          invalid_dates / external_refs / duplicate_header
+    joins: dict | None = None                       # join id → unmatched / ambiguous / validated
+    # M8-ACCURACY-2B review 2: where the source-level totals verdict comes from. `totals_consistent` (above) stays the
+    # STRICT source-wide verdict = the fingerprint-bound declaration capped by the footer reconciliation. These three
+    # let a SCOPED metric separate a column-footer problem from a genuinely source-wide one:
+    declared_totals_consistent: bool | None = None  # the declaration alone (before any footer evidence)
+    footer_totals: str | None = None                # whole-footer status PASS / OPEN / FAIL; None = no footer evidence
+    footer_scope: str | None = None                 # "per_field": each column's footer result can stand on its own
+                                                    # (rows recognized, ≥1 cell checked AND matched, no ambiguous
+                                                    # row); "source_wide": it cannot; None: no footer rows
 
-    def problems(self) -> list[tuple[State, str]]:
-        """Source-intrinsic problems (not time). Unknown → NOT_VERIFIED; a known defect or failed inspection → INVALID."""
+    def problems(self, scope: "Requirement | None" = None) -> list[tuple[State, str]]:
+        """Source-intrinsic problems (not time). Unknown → NOT_VERIFIED; a known defect or failed inspection → INVALID.
+
+        `scope` (M8-ACCURACY-2B): the fields and joins one metric actually uses. Field-level checks (Excel errors,
+        missing caches, blank amounts, invalid dates, duplicated headers) and join checks are then judged on those
+        fields / joins only; a dependency without evidence is NOT_VERIFIED. Source-integrity checks (availability,
+        inspection failures, explicit selection, external links, layout, missing identity, duplicate records,
+        totals, mapping) always apply. Without a scope every check applies (the strict source-wide judgement)."""
+        if scope is not None:
+            return self._scoped_problems(scope)
         out: list[tuple[State, str]] = []
         if self.available is False:
             return [(NV, "Kaynak rapor sağlanmadı.")]
@@ -591,10 +677,90 @@ class SourceEvidence:
             out.append((INV, "Kaynaktaki toplamlar birbiriyle çelişiyor."))
         elif self.totals_consistent is None:
             out.append((NV, "Kaynak toplamlarının mutabakatı yapılmadı."))
+        # a record whose totals verdict is more optimistic than its own footer reconciliation is corrupt: fail closed
+        if (self.footer_totals == "FAIL" and self.totals_consistent is not False) or \
+                (self.footer_totals == "OPEN" and self.totals_consistent is True) or \
+                (self.footer_totals is not None and self.footer_totals not in self._FOOTER_STATES):
+            out.append((INV, "Kaynak toplam kanıtı rapor toplam satırlarıyla tutarsız."))
         if self.mapping_approved is False:
             out.append((NV, "Kaynak eşlemesi onaylanmadı."))
         elif self.mapping_approved is None:
             out.append((NV, "Kaynak eşlemesinin onayı bilinmiyor."))
+        return out
+
+    _FIELD_LEVEL = {"Kaynakta geçersiz tarihler var.", "Tarih denetimi yapılmadı.", "Kaynakta yinelenen başlıklar var.",
+                    "Başlık denetimi yapılmadı.", "Tutar alanlarında boş hücreler var (sıfır sayılması onaylanmadı).",
+                    "Boş tutar denetimi yapılmadı.", "Kaynakta hatalı Excel formülleri var.",
+                    "Excel hata denetimi yapılmadı.", "Kaynakta hesaplanmamış (önbelleksiz) formüller var.",
+                    "Formül önbelleği denetimi yapılmadı.", "Müşteri veya ürün eşleşmesi hatalı.",
+                    "Müşteri veya ürün eşleşmeleri doğrulanmadı."}
+
+    _TOTALS = {"Kaynaktaki toplamlar birbiriyle çelişiyor.", "Kaynak toplamlarının mutabakatı yapılmadı."}
+    _FOOTER_STATES = ("PASS", "OPEN", "FAIL")
+    _FOOTER_FIELD_OK = ("PASS", "not_aggregated")       # not_aggregated: the footer does not total this column
+
+    def _field_level_totals(self, scope: "Requirement") -> bool:
+        """May this metric's totals be judged on its own fields' footers instead of the whole-footer verdict?
+        Only when the per-column evidence can stand on its own, the record is internally consistent (the strict
+        verdict is exactly the declaration capped by the footer status) and the metric reads at least one field.
+        Anything else keeps the strict source-wide verdict (fail closed)."""
+        if self.footer_scope != "per_field" or self.footer_totals not in self._FOOTER_STATES:
+            return False
+        expected = {"FAIL": False, "OPEN": None}.get(self.footer_totals, self.declared_totals_consistent)
+        if self.totals_consistent is not expected:
+            return False
+        return bool(scope.fields) and self.fields is not None
+
+    def _scoped_problems(self, scope: "Requirement") -> list[tuple[State, str]]:
+        # every source-integrity check of the strict judgement, minus the field- and join-level ones …
+        field_totals = self._field_level_totals(scope)
+        out = [p for p in self.problems() if p[1] not in self._FIELD_LEVEL
+               and not (field_totals and p[1] in self._TOTALS)]
+        if self.available is False:
+            return out
+        if field_totals:
+            # … the source-level totals verdict without the column footers: the declaration (source-wide) …
+            if self.declared_totals_consistent is False:
+                out.append((INV, "Kaynaktaki toplamlar birbiriyle çelişiyor."))
+            elif self.declared_totals_consistent is not True:
+                out.append((NV, "Kaynak toplamlarının mutabakatı yapılmadı."))
+            # … plus every used field's own footer result (FAIL / OPEN are judged in the field loop below)
+            for f in scope.fields:
+                d = self.fields.get(f)
+                if d is not None and d.get("footer_totals") not in self._FOOTER_FIELD_OK + ("FAIL", "OPEN"):
+                    out.append((NV, f"Kullanılan alanın rapor toplamı kanıtı yok: {f}."))
+        # … which are then judged on the fields this metric reads
+        if self.fields is None:
+            out.append((NV, "Alan düzeyinde kaynak kanıtı yok."))
+        else:
+            for f in scope.fields:
+                d = self.fields.get(f)
+                if d is None:
+                    out.append((NV, f"Alan denetimi yapılmadı: {f}."))
+                    continue
+                if d.get("error_cells"):
+                    out.append((INV, f"Kullanılan alanda hatalı Excel formülleri var: {f}."))
+                if d.get("missing_cached_formulas"):
+                    out.append((INV, f"Kullanılan alanda hesaplanmamış formüller var: {f}."))
+                if d.get("invalid_dates"):
+                    out.append((INV, f"Kullanılan alanda geçersiz tarihler var: {f}."))
+                if d.get("duplicate_header"):
+                    out.append((NV, f"Kullanılan alanın başlığı kaynakta birden fazla sütunda var: {f}."))
+                if d.get("footer_totals") == "FAIL":
+                    out.append((INV, f"Kullanılan alanın rapor toplamı satırlarla çelişiyor: {f}."))
+                elif d.get("footer_totals") == "OPEN":
+                    out.append((NV, f"Kullanılan alanın rapor toplamı doğrulanamadı (kısmi mutabakat): {f}."))
+                if d.get("amount") and d.get("blank_cells"):     # as in the strict judgement: amount fields only
+                    out.append((NV, f"Kullanılan tutar alanında boş hücreler var (sıfır sayılması onaylanmadı): {f}."))
+        # … and on the joins it uses (a metric that uses none is not judged by any join)
+        for j in scope.joins:
+            d = (self.joins or {}).get(j)
+            if d is None:
+                out.append((NV, f"Eşleşme denetimi yapılmadı: {j}."))
+            elif d.get("validated") is False or d.get("unmatched") or d.get("ambiguous"):
+                out.append((INV, f"Kullanılan eşleşme sorunlu: {j}."))
+            elif d.get("validated") is not True:
+                out.append((NV, f"Kullanılan eşleşme doğrulanmadı: {j}."))
         return out
 
 
@@ -745,7 +911,7 @@ class Gate:
                                else "Kaynak doğrulama kanıtı yok.")
                 codes.append(f"{code}:{src}")
                 continue
-            for st, why in ev.problems() + temporal_problems(m, ev, self.today):
+            for st, why in ev.problems(m.scope(src) if m.requires else None) + temporal_problems(m, ev, self.today):
                 states.append(st)
                 reasons.append(why)
                 codes.append(f"SRC:{src}")
@@ -808,7 +974,13 @@ def _stock_evidence(df, declared) -> SourceEvidence:
     fails: list[str] = []
     errs = _sum_counts([_excel_errors(df[c]) for c in have], fails, "excel_errors")
     miss = int(df["STOK Kontrol %"].isna().sum()) if "STOK Kontrol %" in df.columns else None
-    dup = int(df["Stok_Kodu"].astype(str).duplicated().sum()) if "Stok_Kodu" in df.columns else None
+    # M8-ACCURACY-2B: duplicates among REAL product codes only — astype(str) turned every blank code into "nan", so
+    # blank rows (e.g. the export's report-total rows) were counted as duplicates of each other
+    if "Stok_Kodu" in df.columns:
+        codes = df["Stok_Kodu"].dropna().astype(str).str.strip()
+        dup = int(codes[codes != ""].duplicated().sum())
+    else:
+        dup = None
     return SourceEvidence("stock", available=True, layout_supported=len(have) == len(req), error_cells=errs,
                           missing_required_values=miss, duplicate_records=dup, report_date=declared.get("stock"),
                           report_date_origin="declared" if declared.get("stock") else None,
@@ -996,6 +1168,6 @@ validate_register()
 
 __all__ = ["State", "Definition", "Blocker", "Metric", "SourceEvidence", "EvidenceSnapshot", "Decision", "Gate",
            "current_gate", "collect_core_evidence", "temporal_problems",
-           "redact_directory", "GENERATION_BOUND_API_EVIDENCE", "validate_register", "RegisterError", "REGISTER", "DEFINITIONS", "ROUTES",
+           "redact_directory", "GENERATION_BOUND_API_EVIDENCE", "validate_register", "Requirement", "RegisterError", "REGISTER", "DEFINITIONS", "ROUTES",
            "STAT_METRIC", "MODULE_METRIC", "accuracy_known_issues", "PANEL_METRIC", "REFRESH_COUNT_METRIC", "WITHHELD_MESSAGE",
            "WITHHELD_CODE", "WITHHELD_HTTP_STATUS", "POLICY_VERSION", "worst"]

@@ -24,8 +24,11 @@ Owner questions are numbered as in `docs/m8_owner_questions_tr.md` (Q#). "Withhe
   DQ-4 and DQ-6 resolved for the buyer scoring.
 
 ### DQ-4 — `#DIV/0!` stock coverage removes products from Azalan / Fazla Stok · NOT_VERIFIED
-- **Evidence:** `m_stock` requires `STOK Kontrol %`; `num()` coerces `#DIV/0!` to NaN. 1,178 of 3,314 products on the
-  5 Oct 2026 export (`docs/m6_source_inventory.md` §12). The lists and the "min altı" / "maks üstü" counts are therefore
+- **Evidence:** `m_stock` requires `STOK Kontrol %`; `num()` coerces `#DIV/0!` to NaN. 1,178 of the 3,311 product rows
+  on the 5 Oct 2026 export (the export's 3 trailing rows are report totals, recognized since M8-ACCURACY-2B). The
+  formula is stock ÷ average outflow 2024–2026: every `#DIV/0!` row has zero outflow in those years (undefined
+  coverage, not corrupt data); 472 of them still hold stock. The validator keeps undefined apart from blank and
+  numeric coverage; nothing is substituted (no zero, no infinity, no classification). The lists and the "min altı" / "maks üstü" counts are therefore
   incomplete while being presented as complete. The pandas reader cannot tell error cells from blanks.
 - **Now:** `reorder`, `overstock` modules and their stat cards withheld. The DQ-4 count stays visible in Yönetim.
 - **To resolve:** owner rule (Q9) (e.g. a separate "kapsam hesaplanamadı" list), a declared stock report date, the
@@ -156,6 +159,16 @@ Owner questions are numbered as in `docs/m8_owner_questions_tr.md` (Q#). "Withhe
 - **Second review pass on PR #28 (fixed 2026-10-20):** `GET /` now authorizes the exact dashboard bytes against the
   accepted generation and the current gate; the reconciliation command can no longer overwrite an input or an
   existing file (`release_gate.md` §11).
+- **Owner-local real-data acceptance (M8-ACCURACY-2A, 2026-10-21) and corrections (2B):** see `release_gate.md` §13.
+  Answered 2026-10-21 (D-056, column identity only): `Stok_Kodu` column A = product code, column J = country of
+  origin. Recorded conventions (D-057, not evidence): staff generate recurring exports in DinamikCRM, the owner uploads
+  them manually, layouts stay fixed, the intended period runs from 1 January of the earliest selected year to the
+  selected reporting date. Footer totals of the real stock export: partial (OPEN, D-058).
+  Still open for Halsa staff: the one duplicated product code (row grain); the four
+  identical 2022 sales-row pairs; products sold but absent from the stock report; order customers absent from the
+  master; order customer ↔ invoice account relationships (DQ-5) and the DQ-6 account; supplier-prefix (`320`)
+  accounts in the Cari aging export and in the collections list; source authority and business dates; the Kredi
+  workbook (not present on the Mac).
 - **Hedef** is not part of the generation manifest yet; outputs that use it stay without evidence.
 - **Owner-source approvals:** core sources can carry a fingerprint-bound approval (§9); owner sources (Kredi,
   Gider/Gelir, Bütçe) have no approval mechanism yet, so their outputs cannot verify.

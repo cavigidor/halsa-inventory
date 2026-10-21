@@ -444,7 +444,7 @@ def find_kredi_candidates(folder: str | Path) -> list[dict[str, Any]]:
     types or arithmetic — only `import_kredi` decides whether a workbook is supported."""
     out = []
     for p in sorted(Path(folder).glob("*.xlsx")):
-        if p.name.startswith("~$") or not KREDI_SPEC.matches_filename(p.name):
+        if p.name.startswith(("~$", "._", ".~lock")) or not KREDI_SPEC.matches_filename(p.name):   # lock files (2B)
             continue
         try:
             probe = probe_layout(p, p.read_bytes())

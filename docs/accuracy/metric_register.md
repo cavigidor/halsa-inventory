@@ -42,8 +42,20 @@ most four short reasons (no numbers, names, paths or exception text).
    values). `validate_register(production=True)` still refuses any VERIFIED certification while
    `GENERATION_BOUND_API_EVIDENCE` is False — it stays False until the owner's real-data acceptance
    (`release_gate.md` §8.3).
-5. **Dependencies.** A combined output is the worst of its own state and every output it depends on.
-6. Any error while deciding, an unknown key or an unclassified API route = `INVALID` (fail-closed).
+5. **Dependency scoping (M8-ACCURACY-2B).** A metric may declare `requires`: per source, the fields it reads and the
+   named cross-source joins it uses (`services/source_validation.JOINS`). Such a metric is judged on those fields and
+   joins only (Excel errors, missing caches, blank amounts, invalid dates, duplicated headers and — for the stock
+   export — the field's own footer reconciliation (contradiction → INVALID, partial or missing → NOT_VERIFIED;
+   D-058 / D-059) per field; join counts per join). The source-level totals verdict is replaced by "declaration +
+   used fields' footers" only when the column footers can stand on their own (`footer_scope = per_field`) and the
+   record is consistent; otherwise the strict source-level verdict applies. Missing field- or join-level evidence is NOT_VERIFIED. Source integrity (availability, inspection
+   failures, explicit selection, external links, layout, missing identity, duplicate records, totals, mapping, dates)
+   always applies. A metric WITHOUT a declaration keeps the strict source-wide judgement. Declared after tracing the
+   code: `stock.reorder`, `stock.overstock` (stock fields incl. `STOK Kontrol %`, no join), `stock.product_counts`
+   (identity only), `receivables.collections` (aging account / name / representative / every bucket, no join). All
+   other metrics are still strict until audited.
+6. **Dependencies.** A combined output is the worst of its own state and every output it depends on.
+7. Any error while deciding, an unknown key or an unclassified API route = `INVALID` (fail-closed).
 
 Enforcement points (backend / shared response layer, never only JavaScript):
 - **Dashboard HTML** — `dashboard_builder.build(..., gate=None)`: a withheld module is emitted with `rows: []`,
@@ -125,14 +137,16 @@ Field legend: **UI** · **API** · **Source** (workbook / sheet / columns) · **
 - **UI:** dashboard tab `reorder`; overview stat "min altı". **API:** inside `/api/context` (`low_stock`).
 - **Source:** stock export `STOK <date>.xlsx`, header row 4; `Stok_Kodu`, `Stok_Adı`, `TOPLAM STOK MİKTAR `,
   `STOK Kontrol %` (cached ERP formula), `minseviye`, `maxseviye`, `DURUM`.
-- **Identity:** `Stok_Kodu` as read (no join).
+- **Identity:** `Stok_Kodu` = physical column A (no join). The export has a second `Stok_Kodu` column (J = country of
+  origin, owner-confirmed, D-056); the duplicated header is accepted only for the exact approved template
+  (`source_validation.STOCK_TEMPLATES`), any other duplicated-identity layout is INVALID. Column identity only.
 - **Function:** `dashboard_builder.m_stock`.
 - **Formula:** rows with `maxseviye > 0`, coverage present, `coverage < minseviye`, not `ÜRETİMDEN KALKTI`; sorted by
   `coverage / minseviye`; `crit` when coverage < 0.
 - **Missing data:** coverage coerced with `pd.to_numeric(errors='coerce')`; rows with missing/error coverage are
   dropped silently (DQ-4). Stock quantity missing → 0 in the `ins` test.
 - **Business date:** none read; the file is chosen by modification time (`select_sources` → `_latest`).
-- **Completeness:** **not complete** — on the 5 Oct 2026 export 1,178 of 3,314 products have `#DIV/0!` coverage and
+- **Completeness:** **not complete** — on the 5 Oct 2026 export 1,178 of the 3,311 product-code rows have `#DIV/0!` coverage and
   never appear (`docs/m6_source_inventory.md` §12).
 - **Reconciliation:** refresh checks `low_stock_count` context ↔ dashboard equality only (same code path).
 - **Definition approval:** coverage rule for no-coverage products pending (owner question #9).
@@ -326,3 +340,12 @@ Field legend: **UI** · **API** · **Source** (workbook / sheet / columns) · **
 - **Control totals** (`totals_consistent`) are not available for the core exports; unknown → NOT_VERIFIED.
 - **Customer 360 field-level audit** (each card), **Günlük Satış scoring** and **fair edition arithmetic** were audited
   at the module level only, because each is withheld as a whole.
+
+### `stock.product_counts` — Stok ürün sayıları (M8-ACCURACY-2B) · NOT_VERIFIED
+- **Surfaces:** dashboard header ("N ürün") and the refresh report count `products`. Both are now withheld (before
+  2B the raw row count, including the export's report-total rows, was shown as system information).
+- **Definition:** the number of rows that carry a product code (not deduplicated). Separate diagnostics: parsed rows,
+  recognized report-control rows, product-code rows, distinct codes, duplicate occurrences, rows with missing or
+  ambiguous identity (`source_validation.StockRowAnalysis`).
+- **Blockers:** STOCK-REPORT-SCOPE (what
+  the report lists; the duplicated code), STOCK-DATE, REAL-DATA.

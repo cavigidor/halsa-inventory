@@ -837,3 +837,86 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   dashboard from the re-derived evidence and publishes page + manifest + digest as one locked step.
 - A plain `dashboard_builder.py` build is not served; publication goes through the refresh.
 - **Unchanged:** `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; Kredi DURUM, D-003, DQ-1 … DQ-6 open.
+
+### D-055 · 2026-10-21 · Report-control rows, dependency-scoped judgement, lock files, bounded re-publication wait (M8-ACCURACY-2B)
+- **Stock report-control rows** are recognized only by deterministic structure (aggregate over the own column and
+  exactly the product range, or an adjacent label row) and reconciled cell by cell; anything else stays a row with
+  missing identity. They are never products, never duplicates and never silently dropped.
+- **Product count** = rows carrying a product code (not deduplicated), withheld as `stock.product_counts` until code
+  authority (two `Stok_Kodu` columns), report scope and source dates are confirmed.
+- **Scoped judgement:** a metric may declare the fields and joins it reads; it is then judged on those, source
+  integrity always applies, missing dependency evidence is NOT_VERIFIED, undeclared metrics stay strict. No
+  relationship is approved because it is common; D-003, DQ-5, DQ-6 unchanged.
+- **Lock files** (`~$`, `._`, `.~lock`) are never sources.
+- **Restart:** GET / waits (bounded, default 60 s) for an in-progress valid re-publication; never serves old bytes.
+- **Unchanged:** no metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False; no financial calculation changed except
+  that report-total rows no longer count as products (and in the DQ-4 count).
+
+### D-056 · 2026-10-21 · Owner-confirmed DinamikCRM stock layout: column A = product code, column J = country of origin (column identity only)
+- **Owner statement (2026-10-21, review of PR #29):** in the DinamikCRM stock export, physical column **A** is the
+  actual product / stock code and physical column **J** is the country of origin. Both are labelled `Stok_Kodu`.
+- **Implementation:** `services/source_validation.STOCK_TEMPLATES["dinamikcrm_stok_v1"]` pins the approved layout by
+  header row 4, column count (89), the SHA-256 of every header label in physical order (no label or data is
+  committed; measured owner-locally), identity column A, country-of-origin column J, and the physical column of every
+  pipeline field (Stok_Kodu A, Stok_Adı B, TOPLAM STOK MİKTAR W, STOK Kontrol % AI, Envanter değeri AV, minseviye BN,
+  maxseviye BO, DURUM CB). `check_stock_template` decides the identity column:
+  - exactly one `Stok_Kodu` header → unambiguous, unchanged behaviour (read by name);
+  - more than one → accepted only when the whole header row is exactly an approved template; then A is the product
+    code, J is recorded as country of origin and never read, and the duplicated header counts as resolved;
+  - any other duplicated-identity layout (moved, renamed, added, removed or reordered column) → refused:
+    `identity_header_ambiguous`, `layout_supported = False`, every stock metric INVALID. Never "the first column".
+- **Residual risk (documented, not hidden):** a header-only signature cannot tell the two identically-labelled
+  columns apart if their CONTENTS were swapped with the labels unchanged. No content heuristic is used to "detect"
+  that (it would be an inference); it stays an item for the Veri Kontrol Merkezi and owner review.
+- **Scope of the approval:** column identity ONLY. It does not establish freshness, completeness, report date,
+  quantities, totals, financial accuracy or product-level correctness. The duplicated product code (row grain) stays
+  open (`STOCK-REPORT-SCOPE`); nothing is merged or deleted. `STOCK-CODE-AUTHORITY` is no longer a static blocker —
+  the template evidence decides. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` stays False.
+
+### D-057 · 2026-10-21 · DinamikCRM report conventions (owner statement; not evidence)
+- Halsa staff generate all recurring ERP reports in DinamikCRM; the owner uploads the Excel files manually. No
+  DinamikCRM integration exists or is required.
+- Recurring exports keep the established layout (D-056 enforces this for the stock export; any layout change is
+  refused until a new template is approved).
+- The intended reporting period runs from 1 January of the earliest selected year to the selected / latest
+  reporting date.
+- **These conventions are NOT proof** of completeness, of the snapshot / report date, or of any figure. Dates still
+  have to be declared per upload (D-051 rules unchanged: no date from file timestamps or mtime), and period
+  completeness is never inferred from the earliest / latest transaction dates.
+- Historical SKUs absent from today's stock **may** be discontinued, but no SKU is classified as discontinued without
+  source evidence.
+- **Still open:** the duplicated stock-code row grain; the four 2022 duplicate sales rows; 120 / 320 account treatment
+  in collections; Kredi `DURUM`; unknown source dates. Kredi `DURUM`, revenue definitions, DQ-1–DQ-6 and D-003
+  unchanged.
+
+### D-058 · 2026-10-21 · Partial footer reconciliation is OPEN, never PASS; review never certifies (PR #29 correction pass)
+- `stock_footer_totals` is **PASS only when every checked footer cell reconciled** (matched == checked, no ambiguous
+  row); any contradictory total is **FAIL**; error-propagated, missing-cache or unsupported cells, ambiguous rows or
+  nothing checked are **OPEN**, with matched / unreconciled counts and the affected column letters shown.
+- A partial reconciliation caps `totals_consistent` at "not verified" (None) — no declaration can turn it into True;
+  a contradiction makes it False (INVALID).
+- Footer evidence is also **field level** (`footer_totals` per field): a metric is NOT_VERIFIED only when a field it
+  reads has a partial footer, INVALID when a field it reads contradicts; an unrelated column's formula errors never
+  invalidate an independent field.
+- Veri Kontrol Merkezi (design, `docs/m8_veri_kontrol_merkezi.md`): reviewing or acknowledging a data issue records a
+  human decision; it **never** certifies a metric, never changes source data and never deletes a suspected duplicate.
+
+### D-059 · 2026-10-21 · Column-footer problems are judged per field; source-wide totals stay strict (2nd review of PR #29)
+- **Defect:** D-058 kept footer evidence per field, but a scoped metric still inherited the source-level
+  `totals_consistent` verdict, which a partial / contradictory footer in ANY column caps at None / False — so an
+  unrelated cost-column footer withheld a quantity-only metric.
+- **Fix:** `SourceEvidence` now records where that verdict comes from: `declared_totals_consistent` (the
+  fingerprint-bound declaration alone), `footer_totals` (whole-footer PASS / OPEN / FAIL) and `footer_scope`
+  (`per_field` only when the rows are recognized, at least one footer cell was checked AND matched, and there is no
+  ambiguous trailing row; otherwise `source_wide`; None without footer rows). `totals_consistent` and the strict
+  judgement are unchanged.
+- **Scoped judgement** replaces the source-level totals verdict only when the per-column evidence can stand on its own
+  (`per_field`), the record is internally consistent (the strict verdict equals the declaration capped by the footer
+  status) and the metric reads at least one field of the source. It then applies: the declaration source-wide (False →
+  INVALID, unknown → NOT_VERIFIED) and, per used field, its own footer result — PASS or `not_aggregated` (no footer
+  totals that column) pass; OPEN → NOT_VERIFIED; FAIL → INVALID; missing / unknown → NOT_VERIFIED. In every other case
+  the strict source-level verdict applies (fail closed).
+- **Unchanged:** the source's overall reconciliation stays OPEN / FAIL and is reported; every other source-integrity
+  check and every used join still applies; unscoped metrics keep the strict judgement; a record whose totals verdict
+  is more optimistic than its own footer reconciliation is INVALID. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE`
+  False. D-056–D-058, Kredi, revenue, DQ-1–DQ-6, duplicate-record and supplier-account rules unchanged.

@@ -38,6 +38,18 @@ DATA_FOLDER = os.environ.get("DATA_FOLDER", os.path.join(ROOT, "data"))
 DASHBOARD_PATH = os.environ.get("DASHBOARD_PATH", os.path.join(ROOT, "dashboard.html"))
 INFLATION = C.MANUAL_INFLATION_RATE
 WARMUP_CONTEXT = os.environ.get("WARMUP_CONTEXT", "true").lower() != "false"
+
+
+def _bounded_wait(raw: str | None, default: float = 60.0) -> float:
+    try:
+        v = float(raw) if raw not in (None, "") else default
+    except ValueError:
+        v = default
+    return min(max(v, 0.0), 300.0)
+
+
+# M8-ACCURACY-2B: how long GET / waits for an in-progress dashboard re-publication after a restart (never unbounded)
+REPUBLISH_WAIT_SECONDS = _bounded_wait(os.environ.get("DASHBOARD_REPUBLISH_WAIT_SECONDS"))
 GUARD_HEADER, GUARD_VALUE = "x-stockagent", "1"
 # M7-1 Customer 360: Hedef only from an explicitly configured file (no automatic Feb/June/other selection).
 HEDEF_PATH = os.environ.get("HEDEF_PATH") or None
@@ -265,6 +277,14 @@ def dashboard():
     store = getattr(app.state, "generations", None)
     if store is not None and store.pending is not None and store.current() is None:
         _await_revalidation()                         # restart: re-derive the candidate (and re-publish) first
+    if store is not None:
+        cur = store.current()
+        # M8-ACCURACY-2B: a valid, re-validated generation whose dashboard is being re-published (e.g. by the warm-up
+        # thread) — wait for it, bounded, instead of answering a needless 503. Nothing is served meanwhile; the exact
+        # byte / generation checks below still decide.
+        if (cur is not None and cur.dashboard_sha256 is None and store.dashboard_pending == cur.core_id
+                and not store.wait_dashboard(REPUBLISH_WAIT_SECONDS)):
+            return _dashboard_unavailable("publication_pending")
     with RP.PUBLISH_LOCK:                              # bytes and accepted generation captured as ONE step
         m = store.current() if store is not None else None
         try:
@@ -297,6 +317,7 @@ def _republish_dashboard(manifest, paths, frames):
     dash, folder = DASHBOARD_PATH, DATA_FOLDER
     staged = dash + ".restore.new"
     mstaged = GEN.manifest_path(dash) + ".restore.new"
+    published = False
     try:
         db.build(folder, staged, sources=paths, frames=frames, manifest=manifest)
         digest = GEN.sha256_file(staged)
@@ -308,11 +329,13 @@ def _republish_dashboard(manifest, paths, frames):
                                                      cur.policy_version, digest))
             os.replace(staged, dash)
             os.replace(mstaged, GEN.manifest_path(dash))
-            store.set_dashboard(cur.core_id, digest)
+            published = store.set_dashboard(cur.core_id, digest) is not None
         log.info("dashboard re-published after restart (generation %s)", manifest.core_id[:12])
     except Exception as e:
         log.warning("dashboard re-publication failed (%s); GET / stays withheld", type(e).__name__)
     finally:
+        if not published:                                   # failed or superseded: release any waiting GET /
+            store.dashboard_failed(manifest.core_id)
         for f in (staged, mstaged):
             try:
                 os.remove(f)
@@ -345,6 +368,7 @@ _UNAVAILABLE_TEXT = {
     "displayed_marker_missing": "Bu pano doğrulama kuralları uygulanmadan oluşturulmuş. Verileri yenileyin.",
     "not_authorized": "Panodaki bazı sonuçlar artık doğrulanmış sayılmıyor (ör. kaynak tarihi eskidi). Verileri "
                       "yenileyin.",
+    "publication_pending": "Pano yeniden doğrulandı ve yeniden yayımlanıyor; birkaç saniye sonra sayfayı yenileyin.",
 }
 
 
@@ -472,6 +496,7 @@ def accuracy_status():
             "selection_origin": m.selection_origin if m else None,
             "restore_reason": getattr(store, "restore_reason", None) if store else None,
             "restore_pending": bool(store is not None and store.pending is not None),
+            "dashboard_publication_pending": bool(store is not None and store.dashboard_pending is not None),
             "generation_bound_api_evidence": ACC.GENERATION_BOUND_API_EVIDENCE, "sources": sources,
             "metrics": [{"key": k, "state": gate.decide(k).state.value, "codes": list(gate.decide(k).codes)}
                         for k in ACC.REGISTER], "ai_used": False}

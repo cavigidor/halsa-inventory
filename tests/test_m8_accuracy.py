@@ -57,9 +57,23 @@ def clean(source="src", **kw):
                 missing_cached_formulas=0, missing_required_values=0, duplicate_records=0, join_unmatched=0,
                 join_ambiguous=0, joins_validated=True, totals_consistent=True, mapping_approved=True,
                 blank_amount_cells=0, invalid_dates=0, ambiguous_headers=0, external_references=0, date_contradictions=0,
-                selection_explicit=True)
+                selection_explicit=True, fields=_clean_fields(source), joins=_clean_joins())
     base.update(kw)
     return ACC.SourceEvidence(source, **base)
+
+
+def _clean_fields(source):
+    """M8-ACCURACY-2B: field-level evidence where every inspected field passed (scoped metrics need it)."""
+    from services import source_validation as SV
+    spec = SV.CORE.get(source)
+    names = list(spec["required"]) + (["bucket:*"] if spec.get("buckets") else []) if spec else []
+    return {h: {"error_cells": 0, "missing_cached_formulas": 0, "blank_cells": 0, "invalid_dates": 0,
+                "external_refs": 0, "duplicate_header": False, "amount": False} for h in names}
+
+
+def _clean_joins():
+    from services import source_validation as SV
+    return {j: {"unmatched": 0, "ambiguous": 0, "validated": True} for j in SV.JOINS}
 
 
 GEN = "gen-test-1"
@@ -505,7 +519,8 @@ def test_redactions_in_shared_response_layer():
     assert ops["daily_sales_customers"] is None and ops["cross_sell_share"] is None and ops["crm_overdue"] == 1
     rep = ACC.redact_refresh_report({"counts": {"products": 5, "low_stock": 1, "lapsed": 2, "overstock_value": 9,
                                                 "overdue_total": 7, "actions": 3, "surprise": 1}}, g)
-    assert rep["counts"] == {"products": 5, "low_stock": None, "lapsed": None, "overstock_value": None,
+    # M8-ACCURACY-2B: the product count is a withheld metric too (stock.product_counts: code authority, report scope)
+    assert rep["counts"] == {"products": None, "low_stock": None, "lapsed": None, "overstock_value": None,
                              "overdue_total": None, "actions": None, "surprise": None}
 
 
@@ -602,8 +617,8 @@ def test_refresh_success_publishes_only_a_gated_dashboard_and_no_unverified_tota
     dash = str(tmp_path / "dashboard.html")
     rep = RF.run_refresh(data, dash, inflation_rate=0.40, today=SE.AS_OF)
     assert rep["ok"], rep
-    assert rep["counts"]["products"] == 5
-    assert all(rep["counts"][k] is None for k in ("low_stock", "lapsed", "overstock_value", "overdue_total", "actions"))
+    assert all(rep["counts"][k] is None for k in ("products", "low_stock", "lapsed", "overstock_value",
+                                                   "overdue_total", "actions"))     # 2B: products withheld too
     html = open(dash, encoding="utf-8").read()
     assert all(m["rows"] == [] for m in _data_blob(html).values())
 

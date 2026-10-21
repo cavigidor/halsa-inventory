@@ -79,8 +79,12 @@ def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sour
     if raw_stock is None:
         raw_stock = db.read_stock(sp)
     low, over, total = db.m_stock(sp, raw_stock)
-    dq = {"stock_coverage_unavailable_products": int(db.num(raw_stock[db.SC["cov"]]).isna().sum())
-          if db.SC["cov"] in raw_stock.columns else None}
+    # DQ-4 count among rows that carry a product code (M8-ACCURACY-2B: the export's report-total rows have no
+    # coverage and are not products; previously they were counted)
+    _codes = raw_stock[db.SC["code"]].astype(str).str.strip() if db.SC["code"] in raw_stock.columns else None
+    _has = (raw_stock[db.SC["code"]].notna() & (_codes != "") & (_codes.str.lower() != "nan")) if _codes is not None else None
+    dq = {"stock_coverage_unavailable_products": int((db.num(raw_stock[db.SC["cov"]]).isna() & _has).sum())
+          if (db.SC["cov"] in raw_stock.columns and _has is not None) else None}
     del raw_stock
     coll, owed = (db.m_collections(ap, fr.get("aging")) if ap else ([], {}))
     raw_sales = fr.get("sales")

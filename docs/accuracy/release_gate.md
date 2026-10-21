@@ -382,3 +382,104 @@ outside the publication lock.
 
 **Readiness:** technical foundation — ready for final technical review; owner-local real-data acceptance — not started;
 metric promotion — none (§11.3).
+
+## 13. M8-ACCURACY-2B — precise validation and safe diagnostics (2026-10-21)
+Follows the first owner-local real-data acceptance (2A, read-only on the owner's Mac; no values left the Mac).
+
+**Bugs fixed (each found on the real exports, reproduced synthetically):**
+1. *Report-total rows counted as data.* The stock export ends with report-control rows (a `SUM` row, a label row, a
+   `SUBTOTAL(9)` row). They were counted as rows with a missing product code (FAIL), as duplicates of each other
+   (`astype(str)` turned blank codes into `"nan"`), as products in the header / refresh count, and in the DQ-4 count.
+2. *Shared formulas.* Excel stores runs of identical formulas once; the streaming reader saw empty formula text in the
+   dependent cells. They are now expanded with Excel's relative-reference rule (a dependent without its master never
+   matches a footer rule).
+3. *Office lock files.* While a workbook is open in Excel, `~$<name>.xlsx` (165 bytes) is the newest matching file;
+   the fallback selection picked it for stock. `~$…`, `._…` and `.~lock…` are never sources; `sources.json` refuses
+   them.
+4. *Source-wide contamination.* A cross-source join problem (e.g. products sold but absent from stock) made every
+   metric on the source INVALID — also lists that never use that join. Metrics can now declare their dependencies
+   (metric register "How a decision is made" 5).
+5. *Restart re-publication 503.* GET / no longer answers a needless 503 while the warm-up thread re-publishes the
+   dashboard of a re-validated generation: it waits, bounded (`DASHBOARD_REPUBLISH_WAIT_SECONDS`, default 60 s, max
+   300 s); a timeout is 503 `publication_pending`; failures stay 503.
+
+**Footer recognition (`source_validation.analyze_stock_rows`).** Only rows after the last product row can be footers;
+a blank-code row between products is always a missing identity. A trailing row is recognized when identity and name
+are blank and either (a) AGGREGATE: every aggregate cell is `SUM(X a:X b)` or `SUBTOTAL(9|109, X a:X b)` over its own
+column X with exactly the product range, other formulas are row-local with a blank cached result, no numeric literal;
+or (b) LABEL: adjacent to a recognized aggregate row, one identical text in the aggregated columns, otherwise only the
+aggregate row's own text label. Everything else is AMBIGUOUS and stays a row with missing identity (fail closed).
+Every aggregate cell is reconciled against the rows it covers: matched / mismatched (contradictory → the source's
+totals are INVALID) / error_propagated (an error inside the range) / missing_cache / unsupported (SUBTOTAL on a sheet
+with hidden rows). Recognized footers are excluded from the field scan and reported separately; nothing is dropped,
+repaired or deduplicated; the workbook is never written.
+
+**Counting definitions (Turkish labels in the reconciliation output):** Okunan satır (parsed rows) · Tanınan rapor
+toplam satırı (recognized footers) · Ürün kodlu satır (product-code rows) · Farklı ürün kodu (distinct codes) ·
+Yinelenen ürün kodu tekrarı (duplicate occurrences) · Kimliği eksik / belirsiz satır (missing or ambiguous identity).
+The product count = product-code rows; it is the new withheld metric `stock.product_counts`.
+
+**Real-data result of this branch (private rerun, counts only):** 3 footers recognized (2 aggregate, 1 label),
+0 ambiguous; 94 aggregate cells: 92 matched, 2 error-propagated (an unused cost column with error cells), 0
+contradictory; 3,311 product-code rows, 3,310 distinct codes, 1 duplicate occurrence, 0 missing identity; coverage
+1,178 undefined (472 with stock), 2,133 numeric, 0 blank. Core technical failures 8 → 7 (overall still FAIL on genuine
+items: coverage `#DIV/0!`, one duplicated code, sales duplicate rows, joins). With scoping, `stock.reorder` /
+`stock.overstock` remain INVALID for their own fields (coverage errors, duplicated identity header, duplicate code);
+`receivables.collections` is no longer INVALID through the unrelated aging↔sales join (NOT_VERIFIED: date,
+selection, totals, mapping, blank buckets). No metric is VERIFIED.
+
+**Not done here (documented):** dependency declarations for the remaining metrics (strict until audited); supplier
+(`320`) accounts in collections (owner question, no rule); cross-response consistency; native macOS browser tests.
+
+## 14. PR #29 correction pass — partial footers, owner-confirmed stock template (2026-10-21; D-056–D-058)
+Follows the independent review of PR #29.
+
+**Footer reconciliation (fixed).** `stock_footer_totals` reported PASS while 2 of 94 footer cells were
+error-propagated. It is now **PASS only when every checked footer cell matched** (matched == checked, no ambiguous
+row); a contradiction is **FAIL**; error-propagated, missing-cache or unsupported cells, ambiguous rows or nothing
+checked are **OPEN**, with the matched and unreconciled counts and the affected column letters printed. A partial
+reconciliation caps `totals_consistent` at None — no declaration can make it True; a contradiction makes it False.
+Without any footer row the declaration decides, as before. The evidence is also kept **per field**
+(`footer_totals`), so a metric is withheld by a partial / contradictory footer only when it reads that field.
+
+**Owner-confirmed stock template (D-056).** Column A = product code, column J = country of origin (both labelled
+`Stok_Kodu`). `STOCK_TEMPLATES["dinamikcrm_stok_v1"]` pins header row 4, 89 columns, the SHA-256 of the header labels
+in order (measured owner-locally; no label or value committed), A / J and the physical column of every pipeline
+field. One `Stok_Kodu` header → unchanged; a duplicated one → accepted only for the exact approved header row,
+otherwise refused (`identity_header_ambiguous`, layout unsupported → every stock metric INVALID). Never "the first
+column". Residual risk: swapped column contents under unchanged labels are not detectable from the header (no
+content heuristic is used). The approval covers column identity only; `STOCK-CODE-AUTHORITY` is replaced by this
+evidence, `STOCK-REPORT-SCOPE` (the duplicated code's row grain) stays.
+
+**DinamikCRM conventions (D-057)** recorded as owner statements, not evidence: staff generate the recurring exports,
+the owner uploads them manually, layouts stay fixed, the intended period runs from 1 January of the earliest selected
+year to the selected reporting date. Dates are still declared per upload; completeness is never inferred; no SKU is
+classified discontinued without source evidence.
+
+**Real-data private rerun (counts and statuses only):** footers 3 recognized (2 aggregate, 1 label), 0 ambiguous;
+94 checked, 92 matched, 2 error-propagated (one column, BA), 0 contradictory → **OPEN**; `totals_consistent` None.
+Template: `approved_template` (`dinamikcrm_stok_v1`), identity A, country of origin J; the `Stok_Kodu`
+duplicated-header reason no longer applies. Counts unchanged (3,314 parsed, 3,311 product-code rows, 3,310 distinct,
+1 duplicate occurrence, 0 missing identity). Core technical failures 7, OPEN 29. `stock.reorder` INVALID (coverage
+errors, duplicate code), `stock.overstock` INVALID, `stock.product_counts` INVALID (duplicate code),
+`receivables.collections` NOT_VERIFIED. **No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False.**
+
+**Veri Kontrol Merkezi** — designed in `docs/m8_veri_kontrol_merkezi.md`, separate checkpoint M8-VKM-1; review never
+certifies a metric, never changes source data, never deletes a suspected duplicate.
+
+## 15. Second review of PR #29 — column footers vs source-wide totals (2026-10-21; D-059)
+**Defect.** A scoped metric still inherited the source-level `totals_consistent` verdict, which a partial or
+contradictory footer in any column caps — so the real export's error-propagated cost column (BA) would also withhold a
+metric that reads only quantities whose footers reconcile.
+
+**Fix.** The evidence records the verdict's origin (`declared_totals_consistent`, `footer_totals`, `footer_scope`). A
+metric with an audited scope is judged on the declaration (source-wide) plus each used field's own footer result
+(PASS / `not_aggregated` pass, OPEN or missing → NOT_VERIFIED, FAIL → INVALID) — but only when the per-column
+evidence can stand on its own: footer rows recognized, at least one cell checked and matched, no ambiguous trailing
+row, a self-consistent record, and at least one used field. Otherwise the strict source-level verdict applies. The
+source's overall reconciliation stays OPEN / FAIL; unscoped metrics, the other integrity checks and used joins are
+unchanged. Regression tests: `tests/test_m8_accuracy2b_review2.py` (pipeline-built evidence judged by the real gate).
+
+**Effect on the real export:** none on any production decision — every stock metric is still withheld by its own
+problems (coverage errors, the duplicated code, dates, approvals). No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE`
+False.

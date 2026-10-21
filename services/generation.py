@@ -167,7 +167,8 @@ def load_selection(data_folder: str) -> dict | None:
         if key not in CORE_KEYS or not isinstance(entry, dict):
             raise SelectionError(f"bilinmeyen kaynak: {key}")
         name = entry.get("file")
-        if not isinstance(name, str) or not name or os.path.basename(name) != name or name.startswith("."):
+        if (not isinstance(name, str) or not name or os.path.basename(name) != name or name.startswith(".")
+                or name.startswith("~$")):
             raise SelectionError(f"{key}.file yalnızca dosya adı olmalı")
         full = os.path.join(data_folder, name)
         if not os.path.isfile(full):
@@ -395,6 +396,7 @@ def build_core_records(frozen: Mapping[str, FrozenSource], frames: Mapping[str, 
     except Exception as e:
         joins = {"failure": type(e).__name__}
     jev = SV.join_evidence(joins) if "failure" not in joins else {}
+    jchecks = SV.join_checks(joins) if "failure" not in joins else None
     records = []
     for key, fs in sorted(frozen.items()):
         ins = insp[key]
@@ -419,6 +421,26 @@ def build_core_records(frozen: Mapping[str, FrozenSource], frames: Mapping[str, 
         j = jev.get(key, {})
         ap = declared.get("approval")
         applies = bool(ap) and ap.get("sha256") == fs.sha256
+        # M8-ACCURACY-2B: stock rows — duplicates among real product codes only (blank identities are counted as
+        # missing identity, never as duplicates); a recognized footer whose cached total contradicts the rows it
+        # covers makes the source's totals contradictory (INVALID)
+        rows = ins.rows if (key == "stock" and ins.rows is not None and ins.rows.ok) else None
+        dup = (rows.duplicate_code_occurrences if rows is not None
+               else (pdup.duplicate_records if pdup is not None else None))
+        # … and a footer reconciliation that is only PARTIAL (error-propagated / missing cache / unsupported /
+        # ambiguous) caps the totals judgement at "not verified": no declaration can turn it into True
+        # (an export without any footer row has no footer evidence: the declaration alone decides, as before)
+        fstat = rows.footer_status() if (rows is not None and rows.footer_checks.get("checked")) else None
+        declared_totals = ap.get("totals_consistent") if applies else None
+        if fstat == "FAIL":
+            totals = False
+        elif fstat == "OPEN":
+            totals = None
+        else:
+            totals = declared_totals
+        # the strict verdict above stays source-wide; these keep its origin apart for scoped metrics (review 2)
+        fscope = (rows.footer_scope() if rows is not None
+                  else ("source_wide" if (key == "stock" and ins.rows is not None) else None))
         observed["approval_status"] = ("applied" if applies else ("fingerprint_mismatch" if ap else "not_supplied"))
         ev = ACC.SourceEvidence(
             key, available=True, layout_supported=ins.layout_supported, report_date=report_date,
@@ -431,10 +453,12 @@ def build_core_records(frozen: Mapping[str, FrozenSource], frames: Mapping[str, 
             invalid_dates=ins.invalid_dates, ambiguous_headers=ins.ambiguous_headers,
             external_references=(None if ins.external_links is None or ins.external_references is None
                                  else ins.external_links + ins.external_references),
-            duplicate_records=pdup.duplicate_records if pdup is not None else None,
+            duplicate_records=dup,
             join_unmatched=j.get("join_unmatched"), join_ambiguous=j.get("join_ambiguous"),
             joins_validated=j.get("joins_validated"),
-            totals_consistent=(ap.get("totals_consistent") if applies else None),
+            totals_consistent=totals, declared_totals_consistent=declared_totals, footer_totals=fstat,
+            footer_scope=fscope,
+            fields=ins.fields() if ins.ok else None, joins=jchecks,
             mapping_approved=(ap.get("mapping_approved") if applies else None),
             date_contradictions=contradictions, selection_explicit=(origin == "explicit"),
             inspection_failures=fails + (pdup.inspection_failures if pdup is not None else ()))
@@ -447,7 +471,7 @@ def build_core_records(frozen: Mapping[str, FrozenSource], frames: Mapping[str, 
                 if master is not None else None, report_date=report_date,
                 report_date_origin="declared" if report_date else None, date_kind=DATE_KINDS["liste"],
                 join_unmatched=j2.get("join_unmatched"), join_ambiguous=j2.get("join_ambiguous"),
-                joins_validated=j2.get("joins_validated"), selection_explicit=(origin == "explicit"))
+                joins_validated=j2.get("joins_validated"), selection_explicit=(origin == "explicit"), joins=jchecks)
             records.append(SourceRecord("liste", "core", SOURCE_TYPES["liste"], DATE_KINDS["liste"], fs.file,
                                         fs.sha256, fs.size, origin, declared, {}, {"master_available": master is not None},
                                         mev, fs.file_modified))
@@ -606,9 +630,37 @@ class GenerationStore:
 
     def __init__(self, manifest: Manifest | None = None) -> None:
         self._lock = threading.Lock()
+        self._cond = threading.Condition(self._lock)
         self._m = manifest
         self._pending: Manifest | None = None
+        self._dash_pending: str | None = None        # core_id whose dashboard re-publication is expected (2B)
         self.restore_reason: str | None = None
+
+    # -- dashboard re-publication after a restart (M8-ACCURACY-2B) ---------------------------------------------
+    @property
+    def dashboard_pending(self) -> str | None:
+        with self._lock:
+            return self._dash_pending
+
+    def dashboard_failed(self, core_id: str) -> None:
+        """The expected re-publication for `core_id` will not happen (failed / nobody publishes)."""
+        with self._cond:
+            if self._dash_pending == core_id:
+                self._dash_pending = None
+                self._cond.notify_all()
+
+    def wait_dashboard(self, timeout: float) -> bool:
+        """Wait (bounded) while the CURRENT generation's dashboard is being re-published. True when nothing is
+        pending any more (published, failed or superseded); False on timeout. Never waits without a limit."""
+        import time as _t
+        deadline = _t.monotonic() + max(0.0, timeout)
+        with self._cond:
+            while (self._dash_pending is not None and self._m is not None and self._m.core_id == self._dash_pending):
+                left = deadline - _t.monotonic()
+                if left <= 0:
+                    return False
+                self._cond.wait(left)
+            return True
 
     def current(self) -> Manifest | None:
         with self._lock:
@@ -640,9 +692,10 @@ class GenerationStore:
                 rederived = dataclasses.replace(rederived, owner=self._m.owner)
             # the dashboard file on disk is NOT carried over: its recorded digest came from the (untrusted) saved file.
             # Until the server re-publishes a dashboard built from the re-derived evidence (`set_dashboard`), GET /
-            # serves no dashboard bytes.
+            # serves no dashboard bytes; the re-publication is now EXPECTED (GET / may wait for it, bounded).
             rederived = dataclasses.replace(rederived, dashboard_sha256=None)
             self._m, self._pending = rederived, None
+            self._dash_pending = rederived.core_id
             self.restore_reason = None
             return rederived
 
@@ -653,6 +706,9 @@ class GenerationStore:
             if self._m is None or self._m.core_id != core_id:
                 return None
             self._m = dataclasses.replace(self._m, dashboard_sha256=dashboard_sha256)
+            if self._dash_pending == core_id:
+                self._dash_pending = None
+                self._cond.notify_all()
             return self._m
 
     def reject_candidate(self, candidate: Manifest, reason: str) -> None:
@@ -677,6 +733,8 @@ class GenerationStore:
                 manifest = dataclasses.replace(manifest, owner=self._m.owner)
             self._m = manifest
             self._pending = None                                  # a published generation supersedes a candidate
+            self._dash_pending = None                             # … and any expected re-publication (2B)
+            self._cond.notify_all()
             return manifest
 
     def replace_owner(self, key: str, record: SourceRecord | None) -> Manifest:

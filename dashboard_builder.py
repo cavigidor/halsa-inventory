@@ -9,8 +9,12 @@ SC={'code':'Stok_Kodu','name':'Stok_Adı','stock':'TOPLAM STOK MİKTAR ','cov':'
     'min':'minseviye','max':'maxseviye','inv':'Envanter değeri','status':'DURUM'}
 AYLAR=['','Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık']
 
+def is_temp_file(n):
+    """Office owner/lock files ('~$…', created while a workbook is open in Excel) and macOS resource forks ('._…')
+    are never sources (M8-ACCURACY-2B: an open stock workbook made the fallback pick its 165-byte lock file)."""
+    return n.startswith('~$') or n.startswith('._') or n.startswith('.~lock')
 def _latest(folder,pred):
-    m=[f for f in glob.glob(os.path.join(folder,'*.xlsx')) if pred(os.path.basename(f))]
+    m=[f for f in glob.glob(os.path.join(folder,'*.xlsx')) if not is_temp_file(os.path.basename(f)) and pred(os.path.basename(f))]
     return max(m,key=os.path.getmtime) if m else None
 def is_stock(n): return 'stok' in n.lower()
 def is_aging(n):
@@ -48,7 +52,21 @@ def m_stock(path,df=None):
                'cov':_n(r[SC['cov']],2),'min':_n(r[SC['min']],2),'crit':bool(r[SC['cov']]<0)} for _,r in low.iterrows()]
     over_rows=[{'code':str(r[SC['code']]),'name':str(r[SC['name']]),'stock':_n(r[SC['stock']]),
                 'cov':_n(r[SC['cov']],2),'inv':_n(r[SC['inv']]),'disc':bool(r['_d'])} for _,r in over.iterrows()]
-    return low_rows,over_rows,int(len(df))
+    return low_rows,over_rows,stock_row_counts(df)['code_rows']
+
+def stock_row_counts(df):
+    """M8-ACCURACY-2B: stock row diagnostics from the frame as read (counts only, nothing dropped or deduplicated).
+    The product count is the number of rows that carry a product code. Identity column = physical column A, the first
+    'Stok_Kodu' (the one pandas reads); the owner confirmed A = product code and J = country of origin (D-056), and the
+    gate accepts the duplicated header only for the exact approved template (source_validation.STOCK_TEMPLATES) —
+    any other duplicated-identity layout is refused before anything is shown. Rows without a code — e.g. the export's trailing
+    report-total rows — are never counted as products. Footer recognition itself is formula-aware and lives in
+    services/source_validation.analyze_stock_rows."""
+    code=df[SC['code']] if SC['code'] in df.columns else pd.Series([],dtype=object)
+    txt=code.astype(str).str.strip(); has=code.notna()&(txt!='')&(txt.str.lower()!='nan')
+    codes=txt[has]
+    return {'parsed_rows':int(len(df)),'code_rows':int(has.sum()),'distinct_codes':int(codes.nunique()),
+            'duplicate_code_occurrences':int(has.sum()-codes.nunique()),'rows_without_code':int((~has).sum())}
 
 def load_sales(path,df=None,copy=True):
     # copy=False (M7-6, build_context only): the caller read this frame itself and hands over ownership, exactly
@@ -334,6 +352,7 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
           'aging':os.path.basename(ap) if ap else '','tiers':tier_counts,'total':total,'has_aging':has_aging,
           'asof':_asof_iso(sdf),'show_tiers':show_tiers,'withheld_stats':withheld_stats,
           'withheld_panels':panel_notice,'accuracy_policy':ACC.POLICY_VERSION,'generation':core_gen,
+          'total_shown':_dec('stock.product_counts').displayable,
           # M8-ACCURACY-2: every metric whose output this HTML embeds; GET / re-authorizes exactly these keys
           'displayed':sorted(k for k,d in decisions.items() if d.displayable)}
     with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel,opp_panel=opp_panel,fair_panel=fair_panel,crm_panel=crm_panel,own_panel=own_panel))
@@ -2582,7 +2601,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 </style></head><body><div class="wrap">
 <header><div class="eyebrow">Şirket Panosu</div>
 <h1>Şirket Panosu — {meta['date']}</h1>
-<div class="sub">{src} · {meta['total']:,} ürün</div></header>
+<div class="sub">{src}{f" · {meta['total']:,} ürün" if meta.get('total_shown') else ''}</div></header>
 <div class="tabs">{tabbtns}{sq_btn}{c3_btn}{op_btn}{fm_btn}{cr_btn}{ow_btn}{ai_btn}</div>
 <div id="overview" class="panel on">
 <h2 class="sec">Aktif Analizler</h2>

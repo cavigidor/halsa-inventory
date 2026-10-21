@@ -158,6 +158,9 @@ def reconcile_core(data_folder: str, out: Out, *, today: dt.date) -> dict:
     m = GEN.build_manifest(frozen, v["frames"], decl, origin, today)
     for r in m.core:
         out.line(f"{r.key}: {r.file} · SHA-256 {r.sha256}")
+        rows = (r.validation or {}).get("rows") if r.key == "stock" else None
+        if rows:
+            _stock_rows(out, rows)
         ev = r.evidence
         rd = ev.report_date
         out.check(f"{r.key}:report_date", "PASS" if rd else "OPEN",
@@ -174,6 +177,45 @@ def reconcile_core(data_folder: str, out: Out, *, today: dt.date) -> dict:
         out.line(f"      {k}: {val}")
     return {"ok": True, "core_id": m.core_id, "sources": [{"key": r.key, "file": r.file, "sha256": r.sha256}
                                                            for r in m.core]}
+
+
+def _stock_rows(out: Out, rows: dict) -> None:
+    """M8-ACCURACY-2B: stock row diagnostics (counts only) — report-control rows are recognized, reconciled and never
+    counted as products; nothing is dropped, repaired or deduplicated."""
+    from services import source_validation as SV
+    counts = rows.get("counts") or {}
+    out.line("  Stok satırları (sayılar):")
+    for k, label in SV.StockRowAnalysis.LABELS_TR.items():
+        out.line(f"      {label}: {counts.get(k)}")
+    fk, chk = rows.get("footer_kinds") or {}, rows.get("footer_checks") or {}
+    out.line(f"      tanınan toplam satırı türleri: toplam formülü={fk.get('aggregate', 0)} · etiket={fk.get('label', 0)}"
+             f" · belirsiz={rows.get('ambiguous_rows', 0)}")
+    # PASS only when EVERY checked footer cell reconciled (matched == checked); a contradiction is FAIL; anything
+    # partial (error-propagated, missing cache, unsupported, ambiguous rows, nothing checked) is OPEN — the matched
+    # and the unreconciled counts stay visible, and a partial reconciliation never verifies the totals
+    st = rows.get("footer_status") or "OPEN"
+    out.check("stock_footer_totals", st, "Rapor toplam satırları = kapsadıkları ürün satırlarının toplamı "
+              "(tümü eşleşmeden PASS yok)", **{f"footer_{k}": v for k, v in chk.items()})
+    for col, c in sorted((rows.get("footer_by_column") or {}).items()):
+        if c.get("matched", 0) != c.get("checked", 0):       # only the columns that did not fully reconcile
+            out.line("      toplamı doğrulanamayan sütun: {0} · kontrol={1} · eşleşen={2} · çelişen={3} · "
+                     "hata yayılımı={4} · önbelleksiz={5} · desteklenmeyen={6}".format(
+                         col, c.get("checked"), c.get("matched"), c.get("mismatched"), c.get("error_propagated"),
+                         c.get("missing_cache"), c.get("unsupported")))
+    t = rows.get("template") or {}
+    tstat = t.get("status")
+    out.check("stock_identity_header",
+              "PASS" if tstat in ("approved_template", "single_identity_header") else "FAIL",
+              "Ürün kodu sütunu belirlenebilir: tek 'Stok_Kodu' başlığı ya da sahip onaylı şablon (D-056; A = ürün "
+              f"kodu, J = menşe ülke) — onaysız/değişmiş düzen reddedilir · durum={tstat} · şablon={t.get('template')}"
+              f" · ürün kodu sütunu={t.get('identity_column')} · menşe ülke sütunu={t.get('country_of_origin_column')}",
+              columns=t.get("columns"), identity_headers=t.get("identity_header_columns"))
+    cov = rows.get("coverage") or {}
+    if cov:
+        out.line("      STOK Kontrol % (kapsam): tanımsız (#DIV/0!)={0} · diğer hata={1} · boş={2} · sayı={3} · "
+                 "tanımsız ama stoklu={4} · stok miktarı eksik={5}".format(
+                     cov.get("undefined_div0"), cov.get("other_error"), cov.get("blank"), cov.get("numeric"),
+                     cov.get("undefined_with_stock"), cov.get("stock_quantity_missing")))
 
 
 def main(argv=None) -> int:

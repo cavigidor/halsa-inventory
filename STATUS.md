@@ -1,12 +1,36 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-20 (M8-ACCURACY-2 PR #28 technical foundation squash-merged at `5baa92a`, GitHub CI 1320 passed / 7 skipped / 2 xfailed; next is owner-local private real-data acceptance. No financial/business metric is VERIFIED; no real Halsa source has been checked with this checkpoint)._
+_Updated 2026-10-21 (M8-ACCURACY-2A owner-local real-data acceptance run (read-only; core FAIL on genuine source issues, Kredi NOT RUN — file absent); M8-ACCURACY-2B corrections and the PR #29 correction pass on branch `claude/m8-accuracy-2b-precise-validation`, one PR, not merged. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False)._
 
 ## Git
 - **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), and M8 source-evidence foundation PR #28 (`5baa92a`) merged.
 - **`claude/m8-accuracy-2-shared-evidence`:** PR #28 merged as technical infrastructure 2026-10-20; all production metrics still withheld and `GENERATION_BOUND_API_EVIDENCE` remains False.
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
 - **Owner's Mac folder:** current checkout state was not inspected in this checkpoint. Previous notes reported an older checkout; verify `git status` before pulling, protect private `.env`, data and SQLite, and follow `docs/owner_launch_checklist.md`. Browser/real-data acceptance remains owner-local.
+
+## M8-ACCURACY-2A / 2B — real-data acceptance and precise validation (Current)
+- **2A (owner's Mac, 2026-10-20/21, read-only, AI disabled; counts only left the Mac):**
+  - Checkout fast-forwarded to `c2a3df5`; `data/` untouched.
+  - Sources: one stock, one sales, one Cari export. Authority and business dates NOT confirmed (no `sources.json`).
+  - Core reconciliation FAIL (8 technical, 29 OPEN). Kredi NOT RUN (`kredi takip(1).xlsx` absent).
+  - Real-data tests 7/7 passed. Suite in the Mac's Linux VM: 1281 passed, 46 skipped (browser: Chromium download blocked; the macOS `.venv` has no Playwright), 2 xfailed, 0 failed.
+  - Refresh, restart and API refresh on an isolated copy passed; one transient 503 at restart.
+- **2B (`release_gate.md` §13, D-055):**
+  - Stock report-control rows are recognized and reconciled (shared formulas expanded).
+  - Product counts are separated and withheld (`stock.product_counts`).
+  - Duplicate counting covers real codes only; the DQ-4 count excludes footers.
+  - Office lock files are never sources.
+  - Dependency-scoped judgement for traced metrics.
+  - Bounded restart re-publication wait.
+- **Private rerun of 2B on the real exports:** 3 footers recognized, 0 ambiguous; 92 of 94 footer cells matched, 2 error-propagated, 0 contradictory. Core technical failures 8 → 7 (overall still FAIL on genuine items). No metric VERIFIED.
+- **Tests (cloud, synthetic, `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled`):** before 2B 1320 passed / 7 skipped / 2 xfailed; with 2B 1369 passed; after the correction pass 1390; after the second review **1411 passed, 7 skipped, 2 xfailed** (+49 in `tests/test_m8_accuracy2b.py`, +21 in `tests/test_m8_accuracy2b_review.py`, +21 in `tests/test_m8_accuracy2b_review2.py`; skips = owner-local `local_data`; xfails = DQ-1, DQ-6).
+- **PR #29 correction pass (`release_gate.md` §14, D-056–D-058):**
+  - Partial footer reconciliation is OPEN (never PASS) and never makes `totals_consistent` True; field-level footer evidence.
+  - Owner-confirmed DinamikCRM stock template: A = product code, J = country of origin; enforced by header digest; altered or reordered layouts refused. Column identity only.
+  - DinamikCRM report conventions recorded (not evidence).
+  - Veri Kontrol Merkezi designed (`docs/m8_veri_kontrol_merkezi.md`); implementation is checkpoint M8-VKM-1.
+  - Private rerun: footers 92/94 matched, 2 error-propagated → OPEN; template approved (A/J); no metric VERIFIED.
+- **Second review of PR #29 (`release_gate.md` §15, D-059):** a scoped metric no longer inherits an unrelated column's footer problem through the source-level totals verdict; the overall reconciliation stays OPEN/FAIL, unscoped metrics stay strict, missing or inconsistent footer evidence fails closed (+21 tests in `tests/test_m8_accuracy2b_review2.py`).
 
 ## Milestone
 **Milestone 5 — AI Aksiyon Merkezi: COMPLETE** (M5-1 to M5-6; final acceptance in the M5-6 section below).
