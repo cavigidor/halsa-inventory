@@ -53,11 +53,14 @@ class ContextRepository:
                 self.last_error = None
                 self._cust_idx = self._prod_idx = None
         job, self._post_build = self._post_build, None
-        if job is not None and self._on_accepted is not None:   # outside the build lock (it takes the publish lock)
-            try:
-                self._on_accepted(*job)
-            except Exception:
-                pass                                         # the dashboard stays unpublished → GET / withholds
+        if job is not None:
+            if self._on_accepted is None:                    # nobody re-publishes here: nothing to wait for
+                self._generations.dashboard_failed(job[0].core_id)
+            else:                                            # outside the build lock (it takes the publish lock)
+                try:
+                    self._on_accepted(*job)
+                except Exception:                            # the dashboard stays unpublished → GET / withholds
+                    self._generations.dashboard_failed(job[0].core_id)
         return self._ctx
 
     def _build(self):
