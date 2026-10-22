@@ -428,7 +428,7 @@ def test_35_to_43_status_and_known_issues(client):
     assert codes["detailed_collections_missing"]["status"] == "blocked"
     assert "dq3" not in json.dumps(codes).lower()                                                    # DQ-3 is fixed
     assert codes["dq4_stock_coverage"]["count"] == 0 and codes["crm_incomplete"]["count"] == 0
-    assert d["access_controlled"] is False and "erişim kontrollü DEĞİLDİR" in d["audience_note"]
+    assert d["access_controlled"] is True and "erişim kontrollüdür" in d["audience_note"]   # M8-CP1 (D-061)
     core = d["system"]["core"]
     assert (core["sales_file"], core["as_of_data_date"]) == (FX.SALES_FILE, "2026-06-30")
     assert d["system"]["hedef"] == {"configured": False, "file": None, "status": "not_configured"}
@@ -832,6 +832,6 @@ def test_tab_script_safe(built):
                    "sessionStorage", "/api/agent/", "confirm(", "alert(", "prompt(", "/api/context/refresh"):
         assert banned not in js
     assert "Yönetim için panoyu http://127.0.0.1:8000/ üzerinden açın." in js and "textContent" in js
-    assert "Yönetim verilerini yeniden oku" in block and "erişim kontrollü DEĞİLDİR" in block
+    assert "Yönetim verilerini yeniden oku" in block and "erişim kontrollüdür" in block   # M8-CP1 (D-061)
     for bad in ("leaderboard", "temsilci sıralaması", "nakit akış tahmini:", "roi"):
         assert bad not in block.lower()

@@ -37,9 +37,9 @@ def test_father_opens_the_link_and_navigates_without_login(browser, tmp_path):
         page.wait_for_selector("#ai .aic")                                      # the action queue is readable
         page.click('.tab[data-t="crm"]')
         page.wait_for_selector('#crm [data-sec="summary"]:not([hidden]) .cr-tile')   # CRM is readable
-        page.click('.tab[data-t="own"]')                                        # owner finances: owner only
-        page.wait_for_function("() => /yalnızca yönetici girişiyle/.test(document.querySelector('#own .ow-state')"
-                               "?.textContent || '')")
+        page.click('.tab[data-t="own"]')                                        # finances: password form (D-061)
+        page.wait_for_selector("#own .ow-login:not([hidden])")
+        assert page.is_hidden('#own [data-sec="kredi"]')
         assert page.errors == []
 
 
@@ -99,3 +99,65 @@ def test_owner_logs_in_changes_data_and_logs_out(browser, tmp_path):
         page.wait_for_selector('#halsa-access[data-mode="viewer"]')
         assert "halsa_owner" not in {c["name"] for c in page.context.cookies()}
         assert page.errors == []
+
+
+# ---------------- D-061: financial viewer (father) — password once, read-only Yönetim ----------------
+def test_father_unlocks_yonetim_with_the_financial_password_read_only(browser, tmp_path):
+    from tests.test_m7_owner_browser import all_owner, server
+    import os
+    owner_files = all_owner(tmp_path)
+    with server(tmp_path, owner=owner_files) as srv:
+        page = viewer_page(browser)
+        page.goto(srv["base"] + "/#yonetim")                                   # direct link to the financial section
+        page.wait_for_selector("#own.on .ow-login:not([hidden])")
+        assert "finans görüntüleme şifresini" in page.inner_text("#own .ow-login")
+        assert page.is_hidden('#own [data-sec="kredi"]') and page.is_hidden('#own [data-sec="system"]')
+        page.fill("#own .ow-pw", "yanlis-parola-0000")
+        page.click("#own .ow-unlock")
+        page.wait_for_function("() => document.querySelector('#own .ow-loginmsg').textContent === 'Şifre hatalı.'")
+        assert page.input_value("#own .ow-pw") == ""
+        page.fill("#own .ow-pw", BA.TEST_FINANCE_PASSWORD)
+        page.click("#own .ow-unlock")
+        for sec in ("kredi", "gg", "butce"):                                    # financial sections only
+            page.wait_for_selector(f'#own [data-sec="{sec}"][data-state="ready"]')
+        assert page.get_attribute("#own", "data-access") == "finance"
+        assert page.is_hidden('#own [data-sec="ops"]') and page.is_hidden('#own [data-sec="system"]')
+        assert page.is_hidden("#own .ow-bar"), "no reload control for a financial viewer"
+        assert page.is_hidden("#own .ow-login")
+        shown = page.inner_text("#own")
+        for f in owner_files.values():                                          # no source file names
+            assert os.path.basename(str(f)) not in shown
+        assert "Kaynak:" not in shown
+        page.wait_for_selector('#halsa-access[data-mode="finance"]')
+        assert "Finans görüntüleme açık" in page.inner_text("#halsa-access")
+        page.reload()                                                           # entered once per session
+        page.click('.tab[data-t="own"]')
+        page.wait_for_selector('#own [data-sec="kredi"][data-state="ready"]')
+        assert page.is_hidden("#own .ow-login")
+        page.click('.tab[data-t="ai"]')                                         # still read-only everywhere else
+        page.wait_for_selector("#ai .aic")
+        before = page.eval_on_selector_all("#ai .aic", "els => els.map(e => e.dataset.id)")
+        page.click(f'#ai .aic[data-id="{before[0]}"] .aic-done')
+        page.wait_for_selector("#halsa-access-msg:not([hidden])")
+        assert "Finans görüntüleme şifresi yalnızca finans bölümlerini" in page.inner_text("#halsa-access-msg")
+        page.reload()
+        page.click('.tab[data-t="ai"]')
+        page.wait_for_selector("#ai .aic")
+        assert page.eval_on_selector_all("#ai .aic", "els => els.map(e => e.dataset.id)") == before
+        page.click("#halsa-access button")                                     # Çıkış yap
+        page.wait_for_selector('#halsa-access[data-mode="viewer"]')
+        page.click('.tab[data-t="own"]')
+        page.wait_for_selector("#own .ow-login:not([hidden])")                  # locked again
+        assert page.errors == []
+
+
+def test_owner_sees_full_yonetim_without_the_financial_password(browser, tmp_path):
+    from tests.test_m7_owner_browser import all_owner, open_own, server
+    with server(tmp_path, owner=all_owner(tmp_path)) as srv:
+        ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+        BA.authorize(ctx)                                                       # owner session
+        page = ctx.new_page()
+        open_own(page, srv["base"])
+        assert page.get_attribute("#own", "data-access") == "owner"
+        assert page.is_visible('#own [data-sec="ops"]') and page.is_visible('#own [data-sec="system"]')
+        assert page.is_visible("#own .ow-bar") and page.is_hidden("#own .ow-login")

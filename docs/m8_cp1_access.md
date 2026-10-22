@@ -1,169 +1,144 @@
-# M8-CP1 — Simplified web access and owner administration (D-060)
+# M8-CP1 — Web access: public viewer, financial viewer, owner (D-060, revised by D-061)
 
-**Status:** implemented and tested locally (synthetic data). **Not deployed.** Public hosting needs the owner's
-explicit, written sign-off on §6 first. Accuracy gate unchanged: no metric is VERIFIED and
-`GENERATION_BOUND_API_EVIDENCE = False`.
+**Status:** implemented and tested locally (synthetic data), PR #30. **Not deployed.** Accuracy gate unchanged: no
+metric is VERIFIED and `GENERATION_BOUND_API_EVIDENCE = False`.
 
-Halsa Analysis is a **browser-based web application** (existing FastAPI + HTML/JS + SQLite). Nobody installs
-anything. The owner's father opens a link; the owner logs in only to change things.
+Halsa Analysis is ONE **browser-based web application** (existing FastAPI + HTML/JS + SQLite). Nobody installs
+anything.
 
-## 1. Access model
+## 1. Access model (owner-approved 2026-10-22, D-061)
 
-| Who | How | Can |
+| Level | How | Can |
 |---|---|---|
-| **Viewer** (anyone who can reach the server; the father) | opens the link, no login | open the dashboard, switch tabs, read every permitted read-only view and the customer drawer, search Customer 360, read CRM / follow-ups and fair campaigns |
-| **Owner** | `/giris` → one password | everything a viewer can, plus every data-changing and administrative operation, and the owner-only views |
+| **1. Public viewer** | opens the link, no password | the normal dashboard: every tab, the action queue, Günlük Satış, Customer 360 search, CRM / follow-ups, fair campaigns — **including customer names, CRM notes, follow-ups and fair notes (explicitly approved)** |
+| **2. Financial viewer** (the owner's father and other trusted financial viewers) | one shared **financial viewing password**, entered once per session in the Yönetim tab | everything a public viewer sees + the **financial sections of Yönetim** (Kredi, Gider/Gelir, Bütçe) — **read-only**, nothing else |
+| **3. Owner administrator** | separate **owner password** at `/giris` | everything, incl. full Yönetim (operations, system state, known issues, reload), and every data-changing / administrative operation |
 
-There are no user accounts, usernames, e-mail, OAuth, password recovery or roles (owner decision 2026-10-22). The
-father does not need, and does not get, a login.
+No usernames, no accounts. The financial password can never create an owner session; the owner session opens the
+financial view without the financial password.
 
-**Logging in never reveals an unverified number.** The accuracy gate (D-049) applies to the owner exactly as to a
-viewer. Today every analytical metric is still withheld for both.
+**No login reveals an unverified number.** The accuracy gate applies identically at every level; today every
+analytical metric and every financial section is withheld for all three.
 
-## 2. Route classification (every route; `services/access.py`)
+## 2. Route permissions (every route; `services/access.py`)
 
-Unlisted routes are refused for everyone (403 `access_unclassified`). A state-changing method can never be viewer
-level, even by mistake (it is treated as owner-write). Each GET was checked for side effects (§2.5).
+Levels: `viewer` (anyone), `finance_read` (financial viewer or owner, GET only), `owner_read`, `owner_write`
+(owner + CSRF token), `auth` (the login/session endpoints). Unlisted routes → 403 for everyone. A state-changing
+method can never be a read level.
 
-### 2.1 Viewer-safe read-only (no login)
-| Route | Notes |
-|---|---|
-| `GET /` | dashboard; only the published, gate-authorized bytes (unchanged D-053/D-054 checks) |
-| `GET /giris` | fixed login page, no data |
-| `GET /api/health` | the context-error text is replaced by a generic sentence for viewers (it can name local files) |
-| `GET /api/agent/categories`, `GET /api/macro` | reference / status |
-| `GET /api/agent/actions` | action queue (metric-gated; withheld today) — see §2.5 |
-| `GET /api/agent/customer/{code}`, `GET /api/agent/product/{code}` | drawer facts (metric-gated; withheld today) |
-| `GET /api/customer360/status` | **`?retry=true` is owner-only** (restarts the build) |
-| `GET /api/customer360/search`, `GET /api/customer360/{code}` | directory: code + recorded name; profile metric-gated |
-| `GET /api/sales-queue` | Günlük Satış (metric-gated; withheld today) — see §2.5 |
-| `GET /api/opportunities/summary`, `GET /api/opportunities/territories` | metric-gated |
-| `GET /api/fairs/history`, `/history/{id}`, `/candidates` | metric-gated |
-| `GET /api/fairs/campaigns`, `/campaigns/{id}`, `/campaigns/{id}/customers` | operational records, analytic fields redacted |
-| `GET /api/crm/summary`, `/followups`, `/recent`, `/customers/{code}` | operational records, analytic fields redacted |
+| Route | Public | Financial viewer | Owner |
+|---|:-:|:-:|:-:|
+| `GET /`, `GET /giris` | ✔ | ✔ | ✔ |
+| `GET /api/health` (exception text only for the owner) | ✔ | ✔ | ✔ |
+| `GET /api/agent/categories`, `GET /api/macro` | ✔ | ✔ | ✔ |
+| `GET /api/agent/actions`, `/api/agent/customer/{code}`, `/api/agent/product/{code}` | ✔ | ✔ | ✔ |
+| `GET /api/customer360/status` · `?retry=true` | ✔ · ✗ | ✔ · ✗ (403) | ✔ · ✔ |
+| `GET /api/customer360/search`, `/api/customer360/{code}`, `/api/sales-queue` | ✔ | ✔ | ✔ |
+| `GET /api/opportunities/summary`, `/territories` | ✔ | ✔ | ✔ |
+| `GET /api/fairs/history`, `/history/{id}`, `/candidates`, `/campaigns`, `/campaigns/{id}`, `/campaigns/{id}/customers` | ✔ | ✔ | ✔ |
+| `GET /api/crm/summary`, `/followups`, `/recent`, `/customers/{code}` | ✔ | ✔ | ✔ |
+| **`GET /api/finance/overview`** (Kredi / Gider-Gelir / Bütçe projection) | ✗ 401 | ✔ | ✔ |
+| `GET /api/owner/overview`, `GET /api/owner/status` (full Yönetim, system) | ✗ 401 | ✗ 403 | ✔ |
+| `GET /api/accuracy/status`, `GET /api/context`, `GET /api/ai/calls` | ✗ 401 | ✗ 403 | ✔ |
+| every POST / PUT below | ✗ 401 | ✗ 403 | ✔ (+ CSRF) |
+| `GET /api/auth/session`, `POST /api/auth/login`, `POST /api/auth/finance-login`, `POST /api/auth/logout` | ✔ | ✔ | ✔ |
+| `/docs`, `/redoc`, `/openapi.json` | 404 | 404 | 404 |
 
-### 2.2 Owner-only read
-| Route | Why |
-|---|---|
-| `GET /api/owner/overview`, `GET /api/owner/status` | Yönetim: company loans, expenses / income, budget, source file names, system state; the first call also loads the owner workbooks |
-| `GET /api/accuracy/status` | source file names, fingerprints, declared dates (diagnostics) |
-| `GET /api/context` | bulk export of the entire analysis context (no screen uses it) |
-| `GET /api/ai/calls` | AI usage / cost telemetry |
-
-### 2.3 Owner-only write / administration (session + CSRF token)
-`POST /api/context/refresh` (re-reads the selected reports and replaces the dashboard — the report-replacement
-operation that exists today), `POST /api/owner/reload`, `POST /api/agent/actions/enrich`,
-`POST /api/agent/customer/{code}/analyze`, `POST /api/agent/product/{code}/analyze`, `POST /api/agent/draft-message`
-(all paid AI), `POST /api/scenario`, `POST /api/actions/{id}/complete|defer|dismiss|reopen`,
+Owner-write routes: `POST /api/context/refresh` (report refresh; future upload), `POST /api/owner/reload`,
+`POST /api/agent/actions/enrich`, `POST /api/agent/customer/{code}/analyze`, `POST /api/agent/product/{code}/analyze`,
+`POST /api/agent/draft-message` (paid AI), `POST /api/scenario`, `POST /api/actions/{id}/complete|defer|dismiss|reopen`,
 `POST /api/fairs/campaigns`, `PUT /api/fairs/campaigns/{id}`, `POST /api/fairs/campaigns/{id}/archive`,
 `POST|PUT /api/fairs/campaigns/{id}/customers`, `POST /api/crm/customers/{code}/interactions`,
-`PUT /api/crm/customers/{code}/followup`, `POST /api/auth/logout-all`.
+`PUT /api/crm/customers/{code}/followup`, `POST /api/auth/logout-all`, `POST /api/auth/finance-sessions/revoke`.
+Future upload (CP3), publication (CP4) and Veri Kontrol Merkezi decisions (VKM-1) must be registered as owner-write.
 
-Future upload (CP3), publication (CP4) and Veri Kontrol Merkezi decisions (VKM-1) must be registered here as
-owner-write; the register test fails on any unclassified route.
+### 2.1 What a financial viewer receives (`GET /api/finance/overview`)
+Built from the same gate-redacted sections as the owner view, then projected (`OV.finance_section`) and validated
+against the allow-list schema `FinanceOverview`:
+- top level: `today`, `audience: "finance"`, `audience_note`, `read_only: true`, `kredi`, `gider_gelir`, `butce`;
+- per section: `key`, `label`, `configured`, `state`, `state_label`, fixed failure text `message`, the section's
+  fixed notes, `data` (financial content, withheld today) and the `withheld` notice.
+- **Removed:** source file names, error codes, failed step, issue codes, load time, reload flag; and the whole
+  operations summary, system status, known issues and reload state.
 
-### 2.4 Session endpoints and disabled interfaces
-- `GET /api/auth/session` (viewer → `authenticated: false`), `POST /api/auth/login`, `POST /api/auth/logout`.
-- **Disabled:** `/docs`, `/redoc`, `/openapi.json`, `/docs/oauth2-redirect` (404 for everyone). No static-file mount,
-  no directory listing, no raw workbook, database, manifest or `dashboard.prev.html` route exists.
-
-### 2.5 GET side effects found and how they are handled
-- `GET /api/customer360/status?retry=true` restarts a failed build → **owner-only** parameter.
-- `GET /api/owner/*` lazily loads the owner workbooks → owner-only routes.
-- `GET /api/agent/actions` and `GET /api/sales-queue` insert the published deterministic queue into the action table
-  (insert-only; status `open`, history event `generated`). They never change a status, note, follow-up or campaign,
-  and the client cannot choose what is inserted. Kept, because owner actions refer to those rows; a test proves a
-  full anonymous GET sweep changes no human decision and a second sweep changes nothing at all.
-- `GET /` and the context reads may finish the deterministic build of the already-selected sources (same as the
-  startup warm-up). No source is selected, uploaded or replaced by a GET.
+### 2.2 GET side effects (audited)
+- `?retry=true` on Customer 360 status restarts a build → owner-only.
+- `/api/owner/*` and `/api/finance/overview` may lazily load the configured owner workbooks on first open (read-only,
+  the same load; never a reload — reload is owner-write).
+- `/api/agent/actions` and `/api/sales-queue` insert the published deterministic queue rows (insert-only; never a
+  status, note or decision); a test proves an anonymous GET sweep changes no human decision.
 
 ## 3. Security protections
 
-- **Password:** never stored or committed. Only an scrypt hash (Python `hashlib.scrypt`, N=2¹⁵, r=8, p=1, 16-byte
-  salt) in the private `.env` as `HALSA_OWNER_PASSWORD_HASH`. Minimum 12 characters; weaker scrypt parameters and
-  malformed values are refused (administration then stays disabled). Constant-time comparison.
-- **Session:** random 256-bit token in cookie `halsa_owner` — `HttpOnly`, `SameSite=Strict`, `Path=/`, `Secure` over
-  HTTPS (or `HALSA_COOKIE_SECURE=1`). SQLite stores only its SHA-256. Absolute limit 12 h (1–72), idle limit 120 min
-  (5–720). At most 5 sessions. Revocable by logout, "log out everywhere", `python -m services.owner_auth
-  revoke-sessions` and by changing the password hash. The session rotates on every login.
-- **CSRF:** every owner write needs `X-CSRF-Token` = HMAC of the session token (only the same-origin page can read
-  it from `/api/auth/session`), and a browser-sent `Origin` must be this server. `SameSite=Strict` as a second layer.
-  `X-StockAgent` is still required on mutations as before, but it is **not** authentication.
-- **Login throttling:** 5 failures per client and 20 failures overall per 15 minutes → HTTP 429 with `Retry-After`
-  (even for the right password). Stored in SQLite (survives restart); client addresses only as pseudonymous hashes.
-  Login attempts are serialized.
-- **Transport:** a password is accepted only over HTTPS, or over plain HTTP when both the browser and the typed
-  address are on the same computer (`http://127.0.0.1:8000`). Otherwise 403 `https_required`.
-- **Fail closed:** no / malformed hash → login 503, every owner route 401; unclassified route → 403; state store
-  error during the session check → treated as anonymous.
-- **Headers:** `X-Frame-Options: DENY` + CSP `frame-ancestors 'none'` (no click-jacking of owner buttons), `nosniff`,
-  `Referrer-Policy: same-origin`, COOP/CORP same-origin, HSTS over HTTPS, `Cache-Control: no-store` on owner and
-  session responses.
-- **No leakage:** login validation errors never echo the body; logs never contain the password, token, hash, client
-  address or attempt counts; the health endpoint hides exception text from viewers.
+- **Passwords:** never stored or committed; only scrypt hashes (N=2¹⁵, r=8, p=1, 16-byte salt) in the private `.env`:
+  `HALSA_OWNER_PASSWORD_HASH`, `HALSA_FINANCE_PASSWORD_HASH`. ≥12 characters. Malformed / weak → that login disabled.
+  The provisioning command refuses one password for both roles.
+- **Sessions:** random 256-bit token in the HttpOnly, SameSite=Strict cookie `halsa_owner` (Secure over HTTPS); SQLite
+  keeps only its SHA-256 **and its role**. 12 h absolute / 120 min idle (bounded env). Per-role caps (owner 5, finance
+  10). Rotation on login. Revocation: logout; owner "log out everywhere" (all roles); owner "end financial sessions";
+  `python -m services.owner_auth revoke-sessions [--owner|--finance]`; changing a role's password revokes **only that
+  role's** sessions.
+- **Role separation:** the role comes from the login endpoint, never from the request; the middleware checks the
+  session's role for every owner route (403 `owner_required` for a financial session) and for the financial route.
+- **CSRF:** owner writes need the session's HMAC-derived CSRF token + same-origin `Origin`; `SameSite=Strict`.
+  `X-StockAgent` is a legacy guard, not authentication.
+- **Throttling:** per client (5) and global (20) failures per 15 minutes, **per role**; HTTP 429 + `Retry-After`;
+  pseudonymous client keys; login attempts serialized.
+- **Transport:** passwords only over HTTPS, or plain HTTP on the loopback interface (local use) — otherwise 403.
+- **Headers:** frame-deny + CSP `frame-ancestors 'none'`, nosniff, same-origin referrer/COOP/CORP, HSTS over HTTPS,
+  `Cache-Control: no-store` on every financial, owner and session response.
+- **No leakage:** login bodies never echoed; logs never contain passwords, tokens, hashes, client addresses or counts.
 
-## 4. Configure the owner login locally
+## 4. Configure locally
 
 ```bash
 source .venv/bin/activate
-python -m services.owner_auth hash-password      # asks twice; prints ONE line HALSA_OWNER_PASSWORD_HASH=scrypt:…
-# paste that line into your PRIVATE .env (never into .env.example, chat or GitHub)
-uvicorn app:app --host 127.0.0.1 --port 8000      # restart after changing .env
-python -m services.owner_auth status              # "Yönetici girişi: yapılandırıldı", open sessions
+python -m services.owner_auth hash-password             # owner password  → HALSA_OWNER_PASSWORD_HASH=…
+python -m services.owner_auth hash-password --finance   # financial password (must differ) → HALSA_FINANCE_PASSWORD_HASH=…
+# paste both lines into your PRIVATE .env (never .env.example, chat or GitHub); restart the server
+python -m services.owner_auth status                    # both roles configured? open sessions per role
 ```
 
-Open `http://127.0.0.1:8000/` — viewer mode, no login. Click **Yönetici girişi** (or open `/giris`), enter the
-password; the header shows "Yönetici girişi açık" and a **Çıkış yap** button.
-
-- Lost password: run `hash-password` again, replace the line, restart. All old sessions stop working.
-- Lost / shared device: `python -m services.owner_auth revoke-sessions`, or "log out everywhere"
-  (`POST /api/auth/logout-all` while logged in).
-- Over the local network (e.g. a phone on `http://192.168.x.x:8000`) viewing works, **login is refused** because the
-  password would travel unencrypted. Use HTTPS (hosting checkpoint) for remote administration.
+- **Father / financial viewer:** open `http://127.0.0.1:8000/#yonetim` (or click **Yönetim**) → "Finans
+  görüntüleme şifresi" → **Aç**. The header then shows "🔓 Finans görüntüleme açık (salt okunur)" and **Çıkış yap**.
+  The password lasts for the session (12 h, or 120 min without activity).
+- **Owner:** `http://127.0.0.1:8000/giris`.
+- **Lost phone / leaked financial password:** run `hash-password --finance` again (all financial sessions end), or
+  `revoke-sessions --finance`, or (logged in as owner) `POST /api/auth/finance-sessions/revoke`.
+- Over the local network (`http://192.168.x.x`) viewing works but **both password logins are refused** (unencrypted).
 
 ## 5. Remaining risks
 
-1. **Public-by-link means public.** A URL is not a secret: it leaks through browser history, sharing, screenshots,
-   referrers and scanners. Anyone who has it sees everything in §6.
-2. **Today's viewer-visible personal data** (§6 "visible now"): customer codes and names, CRM outcomes, next actions,
-   owner labels, free-text notes and legacy memory text, fair-member notes and stages. This is customer / contact
-   data under KVKK; a privacy and cross-border assessment is required before hosting.
-3. **Future metric promotion widens disclosure automatically.** Whenever a metric becomes VERIFIED it becomes
-   visible to every viewer, not just the owner. Each promotion PR must state that.
-4. **Lockout:** an attacker who can reach the login can trigger the global throttle and lock the owner out for up to
-   15 minutes (viewing unaffected). Accepted trade-off for a single password.
-5. **Single factor:** one password, no second factor. A password manager and a long passphrase are recommended.
-6. **Reverse proxy:** behind a proxy, uvicorn must trust the forwarded scheme / client (`--proxy-headers
-   --forwarded-allow-ips=<proxy>`), otherwise login is refused (fail closed) and throttling becomes global-only.
-7. **No viewer rate limits / bot protection** on read routes; the deterministic build can be triggered by the first
-   viewer after a restart (same work as the warm-up).
-8. **CSP** forbids framing only; the existing inline-script dashboard prevents a strict script CSP for now.
-9. **Owner-only views are not hidden in the UI:** a viewer sees the Yönetim tab and an explanatory message; owner
-   buttons are visible and explain that a login is needed when pressed.
-10. Not yet built: upload UX (CP3), one-generation publication (CP4), backups (CP5), hosting/TLS (CP8).
+1. **Public-by-link means public** (approved for the normal dashboard): customer codes / names, CRM outcomes / notes /
+   owner labels, follow-ups, fair notes. The URL can leak via history, sharing, screenshots and scanners.
+2. **Every metric later promoted to VERIFIED becomes public** — not just visible to the father. Financial sections
+   promoted later become visible to every financial-password holder. Each promotion PR must say so.
+3. **A shared password is shared:** anyone told the financial password reads the financial sections until it is
+   rotated. No per-person audit trail (no accounts, by decision).
+4. **Lockout:** someone who can reach the site can throttle a role's login for up to 15 minutes (per role; viewing
+   unaffected). Single factor, no MFA.
+5. **Reverse proxy** must forward the real scheme/client (`--proxy-headers --forwarded-allow-ips=<proxy>`), or logins
+   are refused (fail closed) and throttling becomes global-only.
+6. No viewer rate limits / bot protection; CSP limited to framing (inline-script dashboard).
+7. Not built yet: upload UX (CP3), publication (CP4), backups (CP5), hosting / TLS (CP8).
 
-## 6. What would become internet-accessible (owner sign-off required before any public hosting)
+## 6. What is internet-accessible by link (before any public hosting)
 
-| Information | Viewer can see now | After metric verification | Owner only |
-|---|---|---|---|
-| Dashboard shell: tab names, data date, source **file names** in the header, withheld notices | ✔ | ✔ | |
-| Analytical tables (stock, reorder, overstock, win-back, momentum, order size, margin, receivables, risk) | notice only | ✔ every verified one | |
-| AI Aksiyon Merkezi queue, customer / product drawer facts | notice only | ✔ | |
-| Günlük Satış, Customer 360 profile, Fırsatlar, fair history and segments | notice only | ✔ | |
-| Customer directory search: **customer code + recorded name** | ✔ | ✔ | |
-| CRM: follow-up list (code, name, due date, purpose, next action), recent contacts (outcome), customer CRM page incl. **free-text notes, owner labels, legacy memory text** | ✔ | ✔ | |
-| Fair campaigns: names, dates, members (code, name, stage, next-action date, **note**) | ✔ | ✔ | |
-| Health: AI provider / model name, data folder name, data date | ✔ | ✔ | |
-| Yönetim: Kredi, Gider/Gelir, Bütçe, operations summary, source file names, system state, known issues | | | ✔ |
-| Source fingerprints / declared dates / verification states (`/api/accuracy/status`) | | | ✔ |
-| Whole analysis context export (`/api/context`), AI call telemetry | | | ✔ |
-| Any change: refresh / reports, owner reload, actions, CRM, fairs, AI drafts and analyses | | | ✔ |
-| Raw Excel files, SQLite database, manifests, `.env`, logs | never served | never | never served |
+| Information | Public | Financial viewer | Owner |
+|---|:-:|:-:|:-:|
+| Dashboard shell, tab names, data date, source **file names** in the header, withheld notices | ✔ | ✔ | ✔ |
+| Analytical tables, action queue, drawer facts, Günlük Satış, Customer 360 profile, Fırsatlar, fair history | notice today; ✔ once VERIFIED | same | same |
+| Customer directory (code + recorded name) — **approved** | ✔ | ✔ | ✔ |
+| CRM follow-ups, contacts, **notes, owner labels, legacy memory text** — **approved** | ✔ | ✔ | ✔ |
+| Fair campaigns and members incl. **notes** — **approved** | ✔ | ✔ | ✔ |
+| Health: AI provider / model, data folder name, data date | ✔ | ✔ | ✔ |
+| Kredi / Gider-Gelir / Bütçe sections (withheld today) | | ✔ | ✔ |
+| Owner workbook file names, error details, operations summary, system state, known issues, reload | | | ✔ |
+| Source fingerprints / declared dates, context export, AI telemetry | | | ✔ |
+| Any change (refresh / upload, CRM, fairs, actions, AI, data review, settings) | | | ✔ |
+| Raw Excel, SQLite, manifests, `.env`, logs | never | never | never |
 
-**Sign-off questions for the owner (record the answers as a dated decision):**
-1. Is it acceptable that anyone with the link can read the customer names, CRM notes and fair notes listed above?
-   If not: make those routes owner-only, or keep the link private behind network-level protection.
-2. Should Yönetim stay owner-only (current) or become viewer-visible for the father once its metrics verify?
-3. Is public-by-link acceptable at all for this data, or should hosting add a network gate (VPN / IP allow-list /
-   access proxy) in front of the viewer pages?
-4. Which hosting region is acceptable for this data under KVKK?
+**Answered by the owner (D-061):** viewer visibility of customer names, CRM / follow-up / fair notes — approved;
+Yönetim financial sections — financial password, read-only.
+**Still required before public hosting (record as a dated decision):** whether to add a network gate (VPN / IP
+allow-list / access proxy) in front of public pages; the hosting region under KVKK; final CP8 checklist.

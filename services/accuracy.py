@@ -422,6 +422,9 @@ ROUTES: dict[tuple[str, str], tuple[str, str | tuple[str, ...] | None]] = {
     ("POST", "/api/auth/login"): ("operational", None),
     ("POST", "/api/auth/logout"): ("operational", None),
     ("POST", "/api/auth/logout-all"): ("operational", None),
+    ("POST", "/api/auth/finance-login"): ("operational", None),          # D-061 financial-viewer login
+    ("POST", "/api/auth/finance-sessions/revoke"): ("operational", None),
+    ("GET", "/api/finance/overview"): ("redacted", ("owner.kredi", "owner.gider_gelir", "owner.butce")),
     ("GET", "/api/health"): ("system", None),
     ("GET", "/api/agent/categories"): ("system", None),
     ("GET", "/api/ai/calls"): ("system", None),

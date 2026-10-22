@@ -28,7 +28,9 @@ class OwnerLogin(BaseModel):
 
 class OwnerSession(BaseModel):
     configured: bool                      # is an owner password hash configured on this server?
-    authenticated: bool
+    finance_configured: bool = False      # D-061: is a financial-viewer password hash configured?
+    authenticated: bool                   # any session (owner or financial viewer)
+    role: Optional[Literal["owner", "finance"]] = None
     csrf_token: Optional[str] = None      # only to the session's own same-origin page
     expires_at: Optional[str] = None
     idle_expires_at: Optional[str] = None
@@ -1442,7 +1444,7 @@ class OwnerOverview(_OwnerOut):
     today: str
     audience: Literal["owner"] = "owner"
     audience_note: str
-    access_controlled: Literal[False] = False
+    access_controlled: Literal[True] = True       # M8-CP1 (D-060/D-061): owner-only routes
     reload: OwnerReloadState
     operations: OwnerOperations
     kredi: OwnerKredi
@@ -1455,10 +1457,58 @@ class OwnerOverview(_OwnerOut):
 
 class OwnerStatus(_OwnerOut):
     audience_note: str
-    access_controlled: Literal[False] = False
+    access_controlled: Literal[True] = True       # M8-CP1 (D-060/D-061): owner-only routes
     reload: OwnerReloadState
     system: OwnerSystem
     known_issues: List[OwnerKnownIssue]
+    ai_used: Literal[False] = False
+
+
+# ---------- M8-CP1 (D-061): financial-viewer projection of Yönetim ----------
+# An explicit allow-list: the three financial sections with their notes, state and data. No source file names, error
+# internals, issue codes, load times, reload state, operations, system status or known issues.
+class FinanceSourceHead(_OwnerOut):
+    key: Literal["kredi", "gider_gelir", "butce"]
+    label: str
+    configured: bool
+    state: OwnerState
+    state_label: str
+    message: Optional[str] = None              # fixed Turkish failure text only
+
+
+class FinanceKredi(FinanceSourceHead):
+    purpose: str
+    schedule_note: str
+    horizon_note: str
+    overdue_note: str
+    principal_note: str
+    withheld: Optional[WithheldNotice] = None
+    today: str
+    data: Optional[KrediData] = None
+
+
+class FinanceGiderGelir(FinanceSourceHead):
+    basis_note: str
+    mapping_note: str
+    reconciliation_note: str
+    data: Optional[GiderGelirData] = None
+    withheld: Optional[WithheldNotice] = None
+
+
+class FinanceButce(FinanceSourceHead):
+    warning: str
+    data: Optional[ButceHealth] = None
+    withheld: Optional[WithheldNotice] = None
+
+
+class FinanceOverview(_OwnerOut):
+    today: str
+    audience: Literal["finance"] = "finance"
+    audience_note: str
+    read_only: Literal[True] = True
+    kredi: FinanceKredi
+    gider_gelir: FinanceGiderGelir
+    butce: FinanceButce
     ai_used: Literal[False] = False
 
 

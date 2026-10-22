@@ -1,17 +1,23 @@
-"""M8-CP1 (D-060): ONE owner administration login. Viewing needs no login; every data-changing or administrative
-operation needs the owner's session.
+"""M8-CP1 (D-060, D-061): password roles for a browser web app. Viewing the normal dashboard needs no login.
+
+Two roles, each with its OWN password hash and its own sessions (no usernames, no accounts):
+- ``owner``   — administration: every data-changing or administrative operation, and every owner-only read
+                (``HALSA_OWNER_PASSWORD_HASH``);
+- ``finance`` — read-only financial viewing (Yönetim: Kredi / Gider-Gelir / Bütçe) for the owner's father and other
+                explicitly trusted financial viewers (``HALSA_FINANCE_PASSWORD_HASH``). It never grants any owner
+                permission; the owner's session also allows financial viewing.
 
 Deliberately small and conventional:
-- the password is never stored or committed; only an scrypt hash (Python's ``hashlib.scrypt``) lives in the private
-  environment (``HALSA_OWNER_PASSWORD_HASH`` in the gitignored ``.env``). Provision it with
-  ``python -m services.owner_auth hash-password``;
+- a password is never stored or committed; only an scrypt hash (Python's ``hashlib.scrypt``) lives in the private
+  environment (the gitignored ``.env``). Provision with ``python -m services.owner_auth hash-password [--finance]``;
 - a session is a random 256-bit token in an HttpOnly, SameSite=Strict cookie (Secure over HTTPS). The server keeps
-  only its SHA-256 in SQLite, with an absolute and an idle expiry; logout, "log out everywhere", the
-  ``revoke-sessions`` command and any change of the configured password hash revoke it;
+  only its SHA-256 and the role in SQLite, with an absolute and an idle expiry; logout, "log out everywhere", the
+  owner's "end financial sessions", the ``revoke-sessions`` command and any change of THAT role's password hash
+  revoke it (changing one role's password never touches the other role's sessions);
 - every state-changing request also needs the session's CSRF token in ``X-CSRF-Token`` (and a same-origin
   ``Origin`` when the browser sends one);
 - failed logins are throttled per client and globally (stored in SQLite, so a restart does not reset them);
-- fail closed: no or malformed hash → login disabled, every owner-only route refused; a password is never accepted
+- fail closed: no or malformed hash → that role's login disabled and its routes refused; a password is never accepted
   over plain HTTP except on the loopback interface (local use on the owner's own computer).
 
 No usernames, accounts, e-mail, OAuth or recovery flow (owner decision 2026-10-22). Nothing here logs a password,
@@ -36,8 +42,12 @@ from services import store as ST
 
 log = logging.getLogger("owner_auth")
 
+ROLE_OWNER, ROLE_FINANCE = "owner", "finance"
+ROLES = (ROLE_OWNER, ROLE_FINANCE)
 PASSWORD_ENV = "HALSA_OWNER_PASSWORD_HASH"
-COOKIE_NAME = "halsa_owner"
+FINANCE_PASSWORD_ENV = "HALSA_FINANCE_PASSWORD_HASH"
+PASSWORD_ENVS = {ROLE_OWNER: PASSWORD_ENV, ROLE_FINANCE: FINANCE_PASSWORD_ENV}
+COOKIE_NAME = "halsa_owner"                             # one cookie; the server-side row says which role
 CSRF_HEADER = "x-csrf-token"
 
 # scrypt parameters (RFC 7914). N = 2**15, r = 8, p = 1 is the commonly recommended interactive-login setting.
@@ -48,12 +58,13 @@ SCRYPT_MAXMEM = 1024 * 1024 * 1024                     # bound for N_MAX * r; no
 MIN_PASSWORD_LENGTH = 12
 MAX_PASSWORD_LENGTH = 256
 
-MAX_SESSIONS = 5                                        # oldest sessions are dropped beyond this
+MAX_SESSIONS = {ROLE_OWNER: 5, ROLE_FINANCE: 10}       # per role; oldest sessions are dropped beyond this
 LAST_SEEN_WRITE_SECONDS = 60                            # idle-timer write granularity
 
 THROTTLE_WINDOW_SECONDS = 15 * 60
-THROTTLE_PER_CLIENT = 5                                 # failures per client per window
-THROTTLE_GLOBAL = 20                                    # failures from everyone per window (one password to guess)
+THROTTLE_PER_CLIENT = 5                                 # failures per client per window (per role)
+THROTTLE_GLOBAL = 20                                    # failures from everyone per window, per role (one password
+                                                        # each; guessing the finance password never locks the owner out)
 
 _now = time.time                                        # monkeypatched by tests
 
@@ -140,23 +151,25 @@ def verify_password(password: str, encoded: str) -> bool:
 _warned: set[str] = set()
 
 
-def configured_hash() -> str | None:
-    """The owner's password hash from the private environment, or None (→ administration disabled). Read on every
-    call so a changed hash takes effect (and revokes old sessions) without code changes."""
-    raw = (os.environ.get(PASSWORD_ENV) or "").strip()
+def configured_hash(role: str = ROLE_OWNER) -> str | None:
+    """The role's password hash from the private environment, or None (→ that role is disabled). Read on every call so
+    a changed hash takes effect (and revokes that role's old sessions) without code changes."""
+    env = PASSWORD_ENVS[role]
+    raw = (os.environ.get(env) or "").strip()
     if not raw:
         return None
     if parse_hash(raw) is None:
-        if "malformed" not in _warned:                  # never log the value
-            log.warning("%s is set but malformed or too weak; owner administration is disabled", PASSWORD_ENV)
-            _warned.add("malformed")
+        if env not in _warned:                          # never log the value
+            log.warning("%s is set but malformed or too weak; that login is disabled", env)
+            _warned.add(env)
         return None
     return raw
 
 
-def credential_id(encoded: str) -> str:
-    """Binds sessions to the configured hash: replacing the password revokes every existing session."""
-    return hashlib.sha256(("halsa-owner-credential|" + encoded).encode()).hexdigest()[:32]
+def credential_id(encoded: str, role: str = ROLE_OWNER) -> str:
+    """Binds sessions to the role's configured hash: replacing that password revokes that role's sessions only."""
+    prefix = "halsa-owner-credential|" if role == ROLE_OWNER else f"halsa-{role}-credential|"
+    return hashlib.sha256((prefix + encoded).encode()).hexdigest()[:32]
 
 
 # ---------------- storage (same private SQLite file as the rest of the operator state) ----------------
@@ -167,6 +180,11 @@ def init_tables(c) -> None:
     c.execute("""CREATE TABLE IF NOT EXISTS owner_login_failures(
         id INTEGER PRIMARY KEY AUTOINCREMENT, client_key TEXT NOT NULL, at REAL NOT NULL)""")
     c.execute("CREATE INDEX IF NOT EXISTS owner_login_failures_at ON owner_login_failures(at)")
+    # D-061: the role of each session and failure (older rows are owner rows); non-destructive migration
+    for table in ("owner_sessions", "owner_login_failures"):
+        cols = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
+        if "role" not in cols:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN role TEXT NOT NULL DEFAULT 'owner'")
 
 
 def _conn():
@@ -192,43 +210,56 @@ class Session:
     created_at: float
     expires_at: float
     idle_expires_at: float
+    role: str = ROLE_OWNER
+
+    @property
+    def is_owner(self) -> bool:
+        return self.role == ROLE_OWNER
+
+    @property
+    def can_view_finance(self) -> bool:
+        return self.role in (ROLE_OWNER, ROLE_FINANCE)
 
     def csrf_ok(self, presented: str | None) -> bool:
         return bool(presented) and isinstance(presented, str) and hmac.compare_digest(
             presented.encode("utf-8", "replace"), self.csrf_token.encode("utf-8"))
 
 
-def create_session(encoded_hash: str) -> tuple[str, str, float]:
-    """New session for the configured credential → (token, csrf_token, expires_at). Only the token's SHA-256 is
-    stored."""
+def create_session(encoded_hash: str, role: str = ROLE_OWNER) -> tuple[str, str, float]:
+    """New session of `role` for that role's configured credential → (token, csrf_token, expires_at). Only the token's
+    SHA-256 is stored."""
+    if role not in ROLES:
+        raise ValueError("unknown role")
     token = secrets.token_urlsafe(32)
     csrf = csrf_for(token)
     now = _now()
     exp = now + session_absolute_seconds()
+    cid = credential_id(encoded_hash, role)
     with _conn() as c:
-        c.execute("DELETE FROM owner_sessions WHERE expires_at <= ? OR credential_id <> ?",
-                  (now, credential_id(encoded_hash)))
-        c.execute("INSERT INTO owner_sessions(token_hash,credential_id,created_at,last_seen,expires_at) "
-                  "VALUES(?,?,?,?,?)", (_sha(token), credential_id(encoded_hash), now, now, exp))
-        keep = [r[0] for r in c.execute("SELECT token_hash FROM owner_sessions ORDER BY created_at DESC LIMIT ?",
-                                        (MAX_SESSIONS,))]
-        c.execute(f"DELETE FROM owner_sessions WHERE token_hash NOT IN ({','.join('?' * len(keep))})", keep)
+        c.execute("DELETE FROM owner_sessions WHERE expires_at <= ? OR (role = ? AND credential_id <> ?)",
+                  (now, role, cid))
+        c.execute("INSERT INTO owner_sessions(token_hash,credential_id,created_at,last_seen,expires_at,role) "
+                  "VALUES(?,?,?,?,?,?)", (_sha(token), cid, now, now, exp, role))
+        keep = [r[0] for r in c.execute("SELECT token_hash FROM owner_sessions WHERE role=? ORDER BY created_at DESC "
+                                        "LIMIT ?", (role, MAX_SESSIONS[role]))]
+        c.execute(f"DELETE FROM owner_sessions WHERE role=? AND token_hash NOT IN ({','.join('?' * len(keep))})",
+                  [role, *keep])
     return token, csrf, exp
 
 
 def resolve(token: str | None) -> Session | None:
-    """The live session for this cookie value, or None. Expired, idle, revoked or credential-changed → None."""
+    """The live session for this cookie value, or None. Expired, idle, revoked, unknown role or credential-changed
+    (for that session's role) → None."""
     if not token or len(token) > 200:
-        return None
-    enc = configured_hash()
-    if enc is None:
         return None
     th, now, idle = _sha(token), _now(), session_idle_seconds()
     with _conn() as c:
         row = c.execute("SELECT * FROM owner_sessions WHERE token_hash=?", (th,)).fetchone()
         if row is None:
             return None
-        if (row["credential_id"] != credential_id(enc) or row["expires_at"] <= now
+        role = row["role"]
+        enc = configured_hash(role) if role in ROLES else None
+        if (enc is None or row["credential_id"] != credential_id(enc, role) or row["expires_at"] <= now
                 or row["last_seen"] + idle <= now):
             c.execute("DELETE FROM owner_sessions WHERE token_hash=?", (th,))
             return None
@@ -236,11 +267,12 @@ def resolve(token: str | None) -> Session | None:
         if now - last >= LAST_SEEN_WRITE_SECONDS:
             c.execute("UPDATE owner_sessions SET last_seen=? WHERE token_hash=?", (now, th))
             last = now
-    return Session(th, csrf_for(token), row["created_at"], row["expires_at"], min(row["expires_at"], last + idle))
+    return Session(th, csrf_for(token), row["created_at"], row["expires_at"], min(row["expires_at"], last + idle),
+                   role)
 
 
 def request_session(request) -> Session | None:
-    """The owner session presented by this HTTP request (cookie), or None."""
+    """The session (owner or finance) presented by this HTTP request (cookie), or None."""
     return resolve(request.cookies.get(COOKIE_NAME))
 
 
@@ -249,14 +281,20 @@ def revoke(token_hash: str) -> None:
         c.execute("DELETE FROM owner_sessions WHERE token_hash=?", (token_hash,))
 
 
-def revoke_all() -> int:
+def revoke_all(role: str | None = None) -> int:
+    """End every session (role=None) or every session of one role."""
     with _conn() as c:
-        return c.execute("DELETE FROM owner_sessions").rowcount
+        if role is None:
+            return c.execute("DELETE FROM owner_sessions").rowcount
+        return c.execute("DELETE FROM owner_sessions WHERE role=?", (role,)).rowcount
 
 
-def session_count() -> int:
+def session_count(role: str | None = None) -> int:
     with _conn() as c:
-        return c.execute("SELECT COUNT(*) FROM owner_sessions WHERE expires_at > ?", (_now(),)).fetchone()[0]
+        if role is None:
+            return c.execute("SELECT COUNT(*) FROM owner_sessions WHERE expires_at > ?", (_now(),)).fetchone()[0]
+        return c.execute("SELECT COUNT(*) FROM owner_sessions WHERE expires_at > ? AND role=?",
+                         (_now(), role)).fetchone()[0]
 
 
 # ---------------- login throttling ----------------
@@ -265,15 +303,17 @@ def client_key(host: str | None) -> str:
     return _sha("halsa-login|" + (host or "unknown"))[:24]
 
 
-def throttle_wait(key: str) -> int:
-    """Seconds to wait before another attempt is accepted (0 = allowed). Per client AND global."""
+def throttle_wait(key: str, role: str = ROLE_OWNER) -> int:
+    """Seconds to wait before another attempt at this role's password is accepted (0 = allowed). Per client AND
+    global, counted per role."""
     now = _now()
     since = now - THROTTLE_WINDOW_SECONDS
     with _conn() as c:
         c.execute("DELETE FROM owner_login_failures WHERE at <= ?", (since,))
-        mine = [r[0] for r in c.execute("SELECT at FROM owner_login_failures WHERE client_key=? AND at > ? "
-                                        "ORDER BY at", (key, since))]
-        every = [r[0] for r in c.execute("SELECT at FROM owner_login_failures WHERE at > ? ORDER BY at", (since,))]
+        mine = [r[0] for r in c.execute("SELECT at FROM owner_login_failures WHERE client_key=? AND role=? AND at > ? "
+                                        "ORDER BY at", (key, role, since))]
+        every = [r[0] for r in c.execute("SELECT at FROM owner_login_failures WHERE role=? AND at > ? ORDER BY at",
+                                         (role, since))]
     waits = []
     if len(mine) >= THROTTLE_PER_CLIENT:
         waits.append(mine[-THROTTLE_PER_CLIENT] + THROTTLE_WINDOW_SECONDS - now)
@@ -282,14 +322,14 @@ def throttle_wait(key: str) -> int:
     return max(1, int(max(waits)) + 1) if waits else 0
 
 
-def record_failure(key: str) -> None:
+def record_failure(key: str, role: str = ROLE_OWNER) -> None:
     with _conn() as c:
-        c.execute("INSERT INTO owner_login_failures(client_key, at) VALUES(?,?)", (key, _now()))
+        c.execute("INSERT INTO owner_login_failures(client_key, at, role) VALUES(?,?,?)", (key, _now(), role))
 
 
-def clear_failures(key: str) -> None:
+def clear_failures(key: str, role: str = ROLE_OWNER) -> None:
     with _conn() as c:
-        c.execute("DELETE FROM owner_login_failures WHERE client_key=?", (key,))
+        c.execute("DELETE FROM owner_login_failures WHERE client_key=? AND role=?", (key, role))
 
 
 # ---------------- transport ----------------
@@ -335,36 +375,49 @@ def origin_ok(origin: str | None, scheme: str, host_header: str | None) -> bool:
     return bool(host_header) and origin.strip().lower() == f"{scheme}://{host_header.strip().lower()}"
 
 
-# ---------------- command line (owner provisioning; nothing is printed except the hash line) ----------------
+# ---------------- command line (provisioning; nothing is printed except the hash line) ----------------
+_ROLE_TR = {ROLE_OWNER: "Yönetici", ROLE_FINANCE: "Finans görüntüleme"}
+
+
 def _cli(argv: list[str]) -> int:
     import getpass
     cmd = argv[0] if argv else ""
+    flags = set(argv[1:])
+    role = ROLE_FINANCE if "--finance" in flags else (ROLE_OWNER if "--owner" in flags or cmd == "hash-password"
+                                                      else None)
     if cmd == "hash-password":
-        pw = getpass.getpass(f"Yönetici şifresi (en az {MIN_PASSWORD_LENGTH} karakter): ")
+        pw = getpass.getpass(f"{_ROLE_TR[role]} şifresi (en az {MIN_PASSWORD_LENGTH} karakter): ")
         if pw != getpass.getpass("Şifre (tekrar): "):
             print("Şifreler eşleşmiyor; hiçbir şey yazılmadı.", file=sys.stderr)
+            return 2
+        other = ROLE_FINANCE if role == ROLE_OWNER else ROLE_OWNER
+        other_hash = configured_hash(other)
+        if other_hash is not None and verify_password(pw, other_hash):     # one password must never serve both roles
+            print(f"Reddedildi: bu şifre {_ROLE_TR[other].lower()} şifresiyle aynı. Farklı bir şifre seçin.",
+                  file=sys.stderr)
             return 2
         try:
             enc = hash_password(pw)
         except ValueError as e:
             print(f"Reddedildi: {e}", file=sys.stderr)
             return 2
-        print(f"{PASSWORD_ENV}={enc}")
-        print("Bu satırı yalnızca özel .env dosyanıza ekleyin (asla GitHub'a değil), sonra sunucuyu yeniden başlatın.",
-              file=sys.stderr)
+        print(f"{PASSWORD_ENVS[role]}={enc}")
+        print("Bu satırı yalnızca özel .env dosyanıza ekleyin (asla GitHub'a değil), sonra sunucuyu yeniden başlatın. "
+              "Bu rolün eski oturumları kapanır.", file=sys.stderr)
         return 0
     if cmd == "revoke-sessions":
         ST.init_db()
-        n = revoke_all()
-        print(f"{n} yönetici oturumu kapatıldı.")
+        n = revoke_all(role)
+        print(f"{n} oturum kapatıldı" + (f" ({_ROLE_TR[role].lower()})." if role else " (tüm roller)."))
         return 0
     if cmd == "status":
         ST.init_db()
-        enc = configured_hash()
-        print("Yönetici girişi: " + ("yapılandırıldı" if enc else "YAPILANDIRILMADI (yönetim işlemleri kapalı)"))
-        print(f"Açık oturum: {session_count()}")
+        for r in ROLES:
+            state = "yapılandırıldı" if configured_hash(r) else "YAPILANDIRILMADI (kapalı)"
+            print(f"{_ROLE_TR[r]} girişi: {state} · açık oturum: {session_count(r)}")
         return 0
-    print("Kullanım: python -m services.owner_auth {hash-password | revoke-sessions | status}", file=sys.stderr)
+    print("Kullanım: python -m services.owner_auth {hash-password [--finance] | revoke-sessions [--owner|--finance] "
+          "| status}", file=sys.stderr)
     return 2
 
 

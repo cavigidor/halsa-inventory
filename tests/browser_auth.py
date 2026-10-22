@@ -12,13 +12,15 @@ from services import owner_auth as AUTH
 
 TEST_PASSWORD = "sentetik-test-yonetici-sifresi"          # synthetic, tests only
 TEST_HASH = AUTH.hash_password(TEST_PASSWORD, n=2 ** 14)   # minimum accepted cost keeps the suite fast
+TEST_FINANCE_PASSWORD = "sentetik-test-finans-sifresi"     # synthetic, tests only (D-061 financial viewer)
+TEST_FINANCE_HASH = AUTH.hash_password(TEST_FINANCE_PASSWORD, n=2 ** 14)
 
 _current = {"base": None}
 _sessions: dict[str, tuple[str, str]] = {}
 
 
 def server_env() -> dict:
-    return {AUTH.PASSWORD_ENV: TEST_HASH}
+    return {AUTH.PASSWORD_ENV: TEST_HASH, AUTH.FINANCE_PASSWORD_ENV: TEST_FINANCE_HASH}
 
 
 def register(base: str) -> None:

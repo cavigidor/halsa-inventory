@@ -966,3 +966,49 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **Tests:** `tests/test_m8_cp1_access.py` (real sessions, `production_auth`), `tests/test_m8_cp1_browser.py` (real
   login in Chromium), jsdom access-mode tests. Pre-existing in-process feature tests run as the owner through the
   TEST-ONLY `tests/auth_harness.py` (same pattern as D-049's accuracy harness); production code has no bypass.
+
+### D-061 · 2026-10-22 · Three access levels: public viewer, financial viewer (password, read-only), owner (M8-CP1 revision)
+- **Owner approval (2026-10-22):** Halsa Analysis stays ONE browser web application with three levels:
+  1. **Public viewer, no password** — the normal dashboard sections. The owner **explicitly approves** that customer
+     names, CRM notes, follow-ups and fair-campaign notes are visible to anyone with the link (answers D-060's
+     disclosure question 1). The accuracy gate applies unchanged.
+  2. **Financial viewer, one shared financial password** — read-only Yönetim financial sections (Kredi, Gider/Gelir,
+     Bütçe and future approved financial reports) for the owner's father and other explicitly trusted financial
+     viewers. No usernames or accounts. Never any owner permission.
+  3. **Owner administrator, separate password** — unchanged from D-060: all viewing incl. full Yönetim, and every
+     data-changing or administrative operation. The owner session also opens the financial view.
+- **Supersedes in D-060:** "Yönetim is owner-only" (now: the financial sections are financial-viewer readable through
+  a projection; the full Yönetim stays owner-only), and disclosure question 1 (approved). Everything else in D-060
+  stands: owner login, CSRF, throttling, transport rule, route register, no deployment without sign-off.
+- **Decision:**
+  - new access level `finance_read` (GET only; a mutating route can never be a read level) for exactly one route,
+    `GET /api/finance/overview`: a server-side projection of the owner overview with ONLY the three financial
+    sections, built and gate-redacted exactly as for the owner, then stripped of source diagnostics (file name, error
+    code, failed step, issue codes, load time, reload flag) and validated against an explicit allow-list schema
+    (`schemas.FinanceOverview`, `extra="forbid"`). `/api/owner/overview`, `/api/owner/status`, `/api/accuracy/status`,
+    `/api/context`, `/api/ai/calls` and every write stay owner-only; a financial session gets 403 `owner_required`;
+  - `services/owner_auth.py` gains roles: separate hashes (`HALSA_OWNER_PASSWORD_HASH`, `HALSA_FINANCE_PASSWORD_HASH`),
+    sessions carry their role server-side, a role-bound credential id (rotating one password revokes only that role's
+    sessions), per-role session caps (owner 5, finance 10) and per-role throttling (guessing the financial password
+    never locks the owner out). The role always comes from the login ENDPOINT (`/api/auth/login` vs
+    `/api/auth/finance-login`), never from the request. The provisioning command refuses a financial password equal to
+    the owner's (and vice versa). An owner who submits the financial password is never downgraded;
+  - revocation: logout (either role), owner "log out everywhere" (all roles), owner `POST
+    /api/auth/finance-sessions/revoke` (financial sessions only, owner stays logged in), `revoke-sessions --finance`,
+    financial-password rotation;
+  - same cookie, CSRF, HTTPS-or-loopback password transport, expiry (12 h / 120 min) and headers as the owner;
+  - UI: opening Yönetim without a session shows a Turkish password form inside the tab ("Finans görüntüleme şifresi");
+    `/#yonetim` is a direct link to it; a financial viewer sees only the financial sections (no operations, system
+    state, known issues, file names or reload control); the header says "Finans görüntüleme açık (salt okunur)".
+- **Also corrected:** the Yönetim audience note still said "bu sekme erişim kontrollü DEĞİLDİR" after D-060 — false
+  since PR #30's first commit; now states the access control (`access_controlled: true`).
+- **Unchanged:** no metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False; every financial section is still withheld
+  for the financial viewer AND the owner; no financial calculation, reporting definition, Kredi `DURUM`, DinamikCRM
+  mapping, DQ-1–DQ-6 or source date changed. No deployment. Veri Kontrol Merkezi stays M8-VKM-1 (its decisions are
+  owner-write; a financial session can never make them).
+- **Residual risk:** a shared password is shared — anyone who learns it reads the financial sections (once verified)
+  until it is rotated; the financial view may lazily load the configured owner workbooks on first open (read-only,
+  same as the owner view; never a reload). Public hosting still needs the owner's recorded sign-off on the remaining
+  §6 questions (network gate / hosting region / KVKK).
+- **Tests:** `tests/test_m8_cp1_finance.py` (37, real sessions), 2 new browser tests (financial password flow incl.
+  `/#yonetim`; owner full view), 1 jsdom header test; the D-060 tests updated for the new session fields.

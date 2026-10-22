@@ -1,11 +1,13 @@
-"""M8-CP1 (D-060): who may call which route. One table, enforced by one middleware in app.py.
+"""M8-CP1 (D-060, revised by D-061): who may call which route. One table, enforced by one middleware in app.py.
 
 Levels
 - ``viewer``      anyone who can reach the server may call it without logging in. Read-only: it never changes a human
                   decision (action status, CRM, fair campaigns, notes) and never triggers a refresh, a reload, an upload
                   or a paid AI call. The accuracy gate (services/accuracy.py) still withholds every unverified metric,
                   for viewers AND the owner alike.
-- ``owner_read``  read-only, but for the owner only (owner finances / Yönetim, system diagnostics, bulk data export).
+- ``finance_read`` read-only financial views (Yönetim: Kredi / Gider-Gelir / Bütçe projection) for a financial-viewer
+                  session OR the owner session. GET only; never any owner permission.
+- ``owner_read``  read-only, but for the owner only (full Yönetim with system state, diagnostics, bulk data export).
 - ``owner_write`` changes persistent state, starts work, spends money or administers the system: owner session +
                   CSRF token (+ same-origin Origin when sent).
 - ``auth``        the login / session / logout endpoints themselves (handled inside the endpoint).
@@ -22,8 +24,8 @@ views' lazy workbook load is owner-only.
 """
 from __future__ import annotations
 
-VIEWER, OWNER_READ, OWNER_WRITE, AUTH = "viewer", "owner_read", "owner_write", "auth"
-LEVELS = (VIEWER, OWNER_READ, OWNER_WRITE, AUTH)
+VIEWER, FINANCE_READ, OWNER_READ, OWNER_WRITE, AUTH = "viewer", "finance_read", "owner_read", "owner_write", "auth"
+LEVELS = (VIEWER, FINANCE_READ, OWNER_READ, OWNER_WRITE, AUTH)
 MUTATING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 ACCESS: dict[tuple[str, str], str] = {
@@ -32,9 +34,11 @@ ACCESS: dict[tuple[str, str], str] = {
     ("GET", "/giris"): VIEWER,                                   # fixed login page (no data)
     # --- owner session ---
     ("GET", "/api/auth/session"): AUTH,                          # anonymous → {authenticated: false}
-    ("POST", "/api/auth/login"): AUTH,                           # throttled; HTTPS or loopback only
+    ("POST", "/api/auth/login"): AUTH,                           # owner password; throttled; HTTPS or loopback only
+    ("POST", "/api/auth/finance-login"): AUTH,                   # financial-viewer password; same protections
     ("POST", "/api/auth/logout"): AUTH,                          # revokes this session (CSRF-checked when live)
-    ("POST", "/api/auth/logout-all"): OWNER_WRITE,               # revokes every owner session
+    ("POST", "/api/auth/logout-all"): OWNER_WRITE,               # revokes every session (owner and financial)
+    ("POST", "/api/auth/finance-sessions/revoke"): OWNER_WRITE,  # ends every financial-viewer session only
     # --- system / reference ---
     ("GET", "/api/health"): VIEWER,                              # context error text redacted for viewers
     ("GET", "/api/agent/categories"): VIEWER,
@@ -82,8 +86,10 @@ ACCESS: dict[tuple[str, str], str] = {
     ("GET", "/api/crm/customers/{customer_code}"): VIEWER,
     ("POST", "/api/crm/customers/{customer_code}/interactions"): OWNER_WRITE,
     ("PUT", "/api/crm/customers/{customer_code}/followup"): OWNER_WRITE,
-    # --- M7-6 Yönetim (owner finances + system status) ---
-    ("GET", "/api/owner/overview"): OWNER_READ,                  # Kredi / Gider-Gelir / Bütçe (+ lazy workbook load)
+    # --- M7-6 Yönetim ---
+    ("GET", "/api/finance/overview"): FINANCE_READ,              # D-061: Kredi / Gider-Gelir / Bütçe ONLY, source
+                                                                 # diagnostics removed (services/owner_view.finance_*)
+    ("GET", "/api/owner/overview"): OWNER_READ,                  # full Yönetim: + operations, system, issues, reload
     ("GET", "/api/owner/status"): OWNER_READ,                    # source file names, system state
     ("POST", "/api/owner/reload"): OWNER_WRITE,                  # re-reads the owner workbooks
 }
@@ -98,8 +104,8 @@ _FALSE = {"", "0", "false", "no", "off"}
 def level(method: str, template: str | None) -> str | None:
     """The access level of a matched route, or None when it is not classified (→ refused)."""
     lv = ACCESS.get((method, template))
-    if lv == VIEWER and method in MUTATING:
-        return OWNER_WRITE                                   # fail closed: a viewer route can never mutate
+    if lv in (VIEWER, FINANCE_READ) and method in MUTATING:
+        return OWNER_WRITE                                   # fail closed: a read level can never mutate
     return lv
 
 

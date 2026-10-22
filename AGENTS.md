@@ -25,8 +25,10 @@ GitHub (`cavigidor/halsa-inventory`) is the source of truth. Do not rely on chat
   anything but a metric unless it carries no business conclusion; every new route must be listed in `ACC.ROUTES`.
 - The provider gets only a small evidence packet (`services/evidence.py`). It never gets
   Excel files, DataFrames, SQLite files, whole tables or paths.
-- **Access (D-060):** viewing needs no login; every state-changing, work-starting, paid-AI or administrative route is
-  `owner_write` and every owner-finance / diagnostic read is `owner_read` in `services/access.py`. Every new route must
+- **Access (D-060, D-061):** viewing the normal dashboard needs no login; the Yönetim financial projection is
+  `finance_read` (financial-viewer password or owner, GET only); every state-changing, work-starting, paid-AI or
+  administrative route is `owner_write` and every full-Yönetim / diagnostic read is `owner_read` in
+  `services/access.py`. A financial session must never gain an owner permission. Every new route must
   be listed there (as well as in `ACC.ROUTES`); never add a flag, header or parameter that skips the owner session or
   CSRF check, never treat `X-StockAgent` as identity, and never commit a password or its hash. A new viewer-visible
   field must be added to the disclosure inventory in `docs/m8_cp1_access.md` §6.

@@ -8,6 +8,13 @@
 > risk (customer names, CRM and fair notes are viewer-visible today; every future VERIFIED metric becomes viewer-visible
 > too) — see `docs/m8_cp1_access.md` §6. **External deployment still requires the owner's explicit, recorded
 > sign-off.** Points 1–2 and the CP1 paragraph below are kept for the record and marked where superseded.
+>
+> **Revision 2026-10-22 (D-061, owner-approved final access model):** three levels in the same web app —
+> **public viewer** (no password; normal dashboard incl. customer names, CRM / follow-up and fair notes — approved),
+> **financial viewer** (one shared financial viewing password for the father and other trusted financial viewers;
+> read-only Yönetim financial sections: Kredi, Gider/Gelir, Bütçe; opened from the Yönetim tab or `/#yonetim`), and
+> **owner administrator** (separate password; everything incl. every change). The father's routine: open the link;
+> enter the financial password once per session only when he wants Yönetim. See `docs/m8_cp1_access.md`.
 
 **Status:** Planning checkpoint, 2026-10-18. The owner lives in the USA and handles technical support, hosting,
 monthly uploads and business maintenance. His father in Türkiye (age 70) should only have to open a bookmarked

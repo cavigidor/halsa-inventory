@@ -64,8 +64,13 @@ GG_NO_RECON_NOTE = "Bütçe dosyasıyla karşılaştırma veya fark analizi yap�
 BUTCE_WARNING = ("Bütçe kaynağı kısmen kullanılabilir; geçersiz / dış bağımlı hücreler otomatik karar veya "
                  "bütçe-vs-gerçek analizinde kullanılmaz.")
 BUTCE_COMPLETE_NOTE = "Bütçe kaynağında geçersiz veya dış bağımlı hücre bulunmadı; yine de bütçe-vs-gerçek analizi yapılmaz."
-OWNER_AUDIENCE_NOTE = ("Yönetim bilgisidir. Uygulama yerel ve tek kullanıcılıdır: bu sekme erişim kontrollü DEĞİLDİR. "
-                       "Çok kullanıcılı kurulumda sahip/yönetici rolleri zorunlu olacaktır.")
+OWNER_AUDIENCE_NOTE = ("Yönetim bilgisidir ve erişim kontrollüdür: tam görünüm (sistem durumu, yeniden okuma) yalnızca "
+                       "yönetici girişiyle açılır; finans bölümleri finans görüntüleme şifresiyle salt okunur açılır.")
+FINANCE_AUDIENCE_NOTE = ("Finans görüntüleme (salt okunur): yalnızca Kredi, Gider / Gelir ve Bütçe bölümleri. Değişiklik, "
+                         "yeniden okuma ve sistem bilgisi yönetici girişi gerektirir.")
+# D-061: the only source-head fields a financial viewer receives (no file name, error internals, load time, reload)
+FINANCE_HEAD_FIELDS = ("key", "label", "configured", "state", "state_label", "message")
+FINANCE_DROPPED_FIELDS = frozenset({"file", "reloading", "error_code", "failed_step", "issue_codes", "loaded_at"})
 CROSS_SELL_BROAD_NOTE = ("Çapraz satış modeli geniş bir aday kitlesi üretiyor; eşikler yönetim tarafından henüz gözden "
                          "geçirilmedi.")
 LINE_LABELS = {"kirtasiye": "KIRTASIYE", "trodat": "TRODAT", "trotec": "TROTEC", "imalat": "IMALAT"}
@@ -576,6 +581,17 @@ def butce_section(repo: OwnerRepository, entry: dict) -> dict:
     return out
 
 
+def finance_section(section: dict) -> dict:
+    """D-061 financial-viewer projection of one owner section: drop the source-diagnostic head fields (file name,
+    error code, failed step, issue codes, load time, reload flag); keep the approved head fields, the fixed notes, the
+    (already gate-redacted) data and the withheld notice. The response schema is an explicit allow-list too."""
+    out = {k: v for k, v in section.items() if k not in FINANCE_DROPPED_FIELDS}
+    missing = [k for k in FINANCE_HEAD_FIELDS if k not in out]
+    if missing:                                          # a changed section shape must fail loudly, never leak
+        raise ValueError(f"finance projection: missing head fields {missing}")
+    return out
+
+
 def operations(ctx, snap, queue_counts: dict | None, crm_summary: dict | None, campaigns: list[dict]) -> dict:
     """Counts only, from already-computed live state. No new scoring; no person metrics."""
     model = getattr(ctx, "opportunities", None) if ctx is not None else None
@@ -648,4 +664,4 @@ def known_issues(dq: dict | None, ops: dict | None, crm: dict | None) -> list[di
 
 __all__ = ["OwnerRepository", "OwnerSourceConfig", "config_from_env", "build_kredi_view", "kredi_schedule",
            "build_gider_gelir_view", "build_butce_view", "kredi_section", "gider_gelir_section", "butce_section",
-           "operations", "known_issues", "SOURCES", "OWNER_AUDIENCE_NOTE"]
+           "operations", "known_issues", "SOURCES", "OWNER_AUDIENCE_NOTE", "FINANCE_AUDIENCE_NOTE", "finance_section"]

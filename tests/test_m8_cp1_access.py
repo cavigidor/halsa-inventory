@@ -33,6 +33,8 @@ pytestmark = pytest.mark.production_auth
 
 PASSWORD = "sentetik-yonetici-parolasi-42"         # synthetic test value
 HASH = AUTH.hash_password(PASSWORD, n=2 ** 14)
+FIN_PASSWORD = "sentetik-finans-parolasi-77"       # synthetic test value (D-061 financial viewer)
+FIN_HASH = AUTH.hash_password(FIN_PASSWORD, n=2 ** 14)
 CANARY = "/Users/sentetik/gizli/klasor/satis.xlsx"
 
 
@@ -63,6 +65,7 @@ def app_env(world, tmp_path, monkeypatch):
     monkeypatch.setattr(ST, "DB_PATH", str(tmp_path / "state.db"))
     ST.init_db()
     monkeypatch.setenv(AUTH.PASSWORD_ENV, HASH)
+    monkeypatch.setenv(AUTH.FINANCE_PASSWORD_ENV, FIN_HASH)
     spy = _Spy()
     provider = MockProvider()
     real = provider.generate_structured
@@ -187,7 +190,7 @@ def test_no_state_changing_route_is_viewer(monkeypatch):
         if method in AX.MUTATING:
             assert lv in (AX.OWNER_WRITE, AX.AUTH), (method, path, lv)
     assert {p for (m, p), lv in AX.ACCESS.items() if lv == AX.AUTH} == {
-        "/api/auth/session", "/api/auth/login", "/api/auth/logout"}
+        "/api/auth/session", "/api/auth/login", "/api/auth/finance-login", "/api/auth/logout"}
     monkeypatch.setattr(AX, "ACCESS", {**AX.ACCESS, ("POST", "/x"): AX.VIEWER})
     assert AX.level("POST", "/x") == AX.OWNER_WRITE                 # a viewer route can never mutate (fail closed)
     assert AX.level("GET", "/nope") is None and AX.level("POST", "/") is None
@@ -250,8 +253,8 @@ def test_dashboard_and_login_page_open_without_login(app_env):
 def test_viewer_session_endpoint_reports_viewer(app_env):
     cl = app_env()
     j = cl.get("/api/auth/session").json()
-    assert j == {"configured": True, "authenticated": False, "csrf_token": None, "expires_at": None,
-                 "idle_expires_at": None}
+    assert j == {"configured": True, "finance_configured": True, "authenticated": False, "role": None,
+                 "csrf_token": None, "expires_at": None, "idle_expires_at": None}
 
 
 @pytest.mark.parametrize("method,path", OWNER_READS)
@@ -525,9 +528,9 @@ def test_login_rotates_the_session_and_sessions_are_bounded(app_env):
     replay = app_env()
     replay.cookies.set(AUTH.COOKIE_NAME, first)
     assert replay.get("/api/owner/status").status_code == 401
-    for _ in range(AUTH.MAX_SESSIONS + 3):
+    for _ in range(AUTH.MAX_SESSIONS[AUTH.ROLE_OWNER] + 3):
         owner_client(app_env)
-    assert len(_raw_sessions()) == AUTH.MAX_SESSIONS
+    assert len(_raw_sessions()) == AUTH.MAX_SESSIONS[AUTH.ROLE_OWNER]
 
 
 def test_forged_or_garbage_cookie_is_anonymous(app_env):
@@ -670,7 +673,8 @@ def test_cli_provisioning_prints_only_the_hash_line(monkeypatch, capsys, tmp_pat
 def test_no_credentials_or_hashes_are_committed():
     root = Path(__file__).resolve().parent.parent
     env_example = (root / ".env.example").read_text(encoding="utf-8")
-    m = re.search(r"^HALSA_OWNER_PASSWORD_HASH=(.*)$", env_example, re.M)
-    assert m is not None and m.group(1).strip() == "", ".env.example documents the name with an empty value"
+    for name in ("HALSA_OWNER_PASSWORD_HASH", "HALSA_FINANCE_PASSWORD_HASH"):
+        m = re.search(rf"^{name}=(.*)$", env_example, re.M)
+        assert m is not None and m.group(1).strip() == "", f".env.example documents {name} with an empty value"
     for p in [root / "app.py", root / "config.py", *(root / "services").glob("*.py")]:
         assert not re.search(r"scrypt:\d+:\d+:\d+:[A-Za-z0-9_-]{16,}:[A-Za-z0-9_-]{40,}", p.read_text("utf-8")), p

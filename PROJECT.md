@@ -102,7 +102,7 @@ services/sales_projection.py  M7-6: Customer 360 projection of the sales frame b
 | `services/sales_projection.py` | M7-6: `prepare_sales` (moved from Customer 360, unchanged) and the one-use `SalesFrameHandoff` from the context build to Customer 360 |
 | `services/accuracy.py` | M8-ACCURACY (D-049): VERIFIED / NOT_VERIFIED / INVALID register, runtime source evidence, fail-closed `Gate`, route classification and response-layer redaction; used by the dashboard build, the API middleware and the refresh. Register docs: `docs/accuracy/` |
 | `services/access.py` | M8-CP1 (D-060): one access level per route (`viewer` / `owner_read` / `owner_write` / `auth`), owner-only query parameters; unlisted = refused. Disclosure inventory: `docs/m8_cp1_access.md` |
-| `services/owner_auth.py` | M8-CP1: one owner password (scrypt hash in the private `.env`), SQLite sessions storing token hashes only, HMAC CSRF token, login throttling, transport / Origin checks, `python -m services.owner_auth hash-password / revoke-sessions / status` |
+| `services/owner_auth.py` | M8-CP1: owner and financial-viewer passwords (scrypt hashes in the private `.env`), role-bound SQLite sessions storing token hashes only, HMAC CSRF token, per-role login throttling, transport / Origin checks, `python -m services.owner_auth hash-password [--finance] / revoke-sessions / status` |
 | `services/generation.py` | M8-ACCURACY-2 (D-051): explicit source selection (`data/sources.json`), frozen source bytes, SHA-256 source-generation manifest shared by dashboard / API / owner views / refresh, restart restore |
 | `services/source_validation.py` | M8-ACCURACY-2: formula-aware streaming inspection of the core workbooks (errors, missing caches, blanks vs zeros, invalid dates, external links) and join validation counts |
 | `services/kredi_schedule.py` | M8-ACCURACY-2: Kredi schedule views (year / month / lender / due date, per currency) and categories; not displayed (Kredi withheld) |
@@ -176,10 +176,11 @@ and `Kredi` are stale historical fields that never drive decisions as current va
 upgrades a stale field into a current fact. StockAgent models only legitimate, recorded transactions
 (D-026).
 
-## Access model (D-060)
-Browser-based web application (no native app). Viewing needs no login; the owner logs in (one password, no accounts)
-for every data-changing or administrative operation. The accuracy gate applies to the owner and viewers alike. A
-public URL is not private: public hosting requires the owner's recorded sign-off on `docs/m8_cp1_access.md` §6.
+## Access model (D-060, D-061)
+Browser-based web application (no native app). Three levels, no accounts: public viewer (no password; normal
+dashboard incl. customer names and CRM / fair notes, owner-approved), financial viewer (shared financial password;
+read-only Yönetim financial projection), owner (separate password; everything incl. every change). The accuracy gate
+applies to all three alike. Remaining public-hosting sign-off: `docs/m8_cp1_access.md` §6.
 
 ## Privacy boundary
 GitHub holds code, tests, prompts, schemas, docs, synthetic fixtures, CI and config templates.

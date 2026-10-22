@@ -125,7 +125,7 @@ def test_owner_tab_configured_and_navigation(browser, tmp_path):
         log = open(srv["log"], encoding="utf-8").read()
         assert "kredi" not in log.lower()                                       # nothing read before the tab opens
         open_own(page, srv["base"])
-        assert "erişim kontrollü DEĞİLDİR" in page.inner_text("#own .ow-aud")
+        assert "erişim kontrollüdür" in page.inner_text("#own .ow-aud")                  # M8-CP1 (D-061)
         k = page.inner_text('#own [data-sec="kredi"]')                                                # (3)
         assert OS.KREDI_FILE in k and "Müşteri kredisi" in k
         assert "Kaynağın kesin anlık tarihi bilinmiyor" in k and "Nakit akış tahmini değildir" in k

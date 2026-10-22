@@ -991,6 +991,17 @@ test('viewer mode: everything reads without login; an owner action is refused wi
   assert.deepEqual(ids(t), before, 'nothing changed: the card stays in the queue');
 });
 
+test('financial viewer mode (D-061): header says read-only finance, offers logout and the owner login', async () => {
+  const t = setup({ session: { configured: true, finance_configured: true, authenticated: true, role: 'finance',
+    csrf_token: 'fin-csrf' } });
+  await until(() => visible(t.doc.getElementById('halsa-access')));
+  const bar = t.doc.getElementById('halsa-access');
+  assert.equal(bar.dataset.mode, 'finance');
+  assert.match(bar.textContent, /Finans görüntüleme açık \(salt okunur\)/);
+  assert.ok(bar.querySelector('button'), 'logout button');
+  assert.equal(bar.querySelector('a').getAttribute('href'), '/giris');
+});
+
 test('file:// mode: the access script does nothing and asks nothing', async () => {
   const t = setup({ url: 'file:///Users/someone/dashboard.html' });
   await sleep(30);

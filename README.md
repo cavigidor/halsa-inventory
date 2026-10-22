@@ -74,17 +74,19 @@ python -m services.refresh                # validate + publish dashboard.html an
 uvicorn app:app --host 127.0.0.1          # local only; dashboard at http://127.0.0.1:8000/ (no /docs since M8-CP1)
 ```
 
-## Viewing and owner login (M8-CP1, D-060)
-Halsa Analysis is a browser web app. **Viewing needs no login.** Changing anything (refresh, CRM / follow-ups, fairs,
-actions, AI drafts) and the Yönetim tab need the **owner login**:
+## Access: public viewer, financial viewer, owner (M8-CP1, D-060 / D-061)
+Halsa Analysis is a browser web app. **The normal dashboard needs no password.** The Yönetim financial sections
+(Kredi, Gider/Gelir, Bütçe) need the shared **financial viewing password** (read-only). Changing anything (refresh,
+CRM / follow-ups, fairs, actions, AI drafts) and the full Yönetim need the **owner password**:
 ```bash
-python -m services.owner_auth hash-password   # asks twice, prints HALSA_OWNER_PASSWORD_HASH=… → paste into your PRIVATE .env
-python -m services.owner_auth status          # configured? open sessions
-python -m services.owner_auth revoke-sessions # log out every device
+python -m services.owner_auth hash-password             # owner     → HALSA_OWNER_PASSWORD_HASH=…   (PRIVATE .env)
+python -m services.owner_auth hash-password --finance   # financial → HALSA_FINANCE_PASSWORD_HASH=… (must differ)
+python -m services.owner_auth status                    # both configured? open sessions per role
+python -m services.owner_auth revoke-sessions [--owner|--finance]
 ```
-Restart the server, open `http://127.0.0.1:8000/giris`. Without the hash, administration stays disabled (fail
-closed). The password is accepted only over HTTPS or on this computer (`127.0.0.1`). Never commit the hash.
-**Do not host this publicly** before the owner signs off the disclosure inventory in `docs/m8_cp1_access.md` §6.
+Restart the server. Owner: `http://127.0.0.1:8000/giris`. Financial viewer: `http://127.0.0.1:8000/#yonetim`.
+Passwords are accepted only over HTTPS or on this computer (`127.0.0.1`). Never commit a hash.
+**Do not host this publicly** before the remaining sign-off items in `docs/m8_cp1_access.md` §6.
 
 ## Monthly refresh
 Replace the exports in `./data/` (stock, sales, optional cari/aging), then press **"↻ Verileri yenile"** in the

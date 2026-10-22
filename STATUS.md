@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-22 (M8-CP1 simplified access implemented on `claude/m8-cp1-simplified-access`, PR #30, awaiting independent review: viewing without login, one owner administration login, D-060; local tests 1513 passed / 7 skipped / 2 xfailed. Not deployed. Accuracy unchanged: core owner-local reconciliation FAIL; Kredi NOT RUN; zero production metrics VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False)._
+_Updated 2026-10-22 (M8-CP1 simplified access implemented on `claude/m8-cp1-simplified-access`, PR #30, awaiting independent review: public viewer without login, financial viewer with a shared read-only financial password, owner administration login, D-060 + D-061; local tests 1554 passed / 7 skipped / 2 xfailed. Not deployed. Accuracy unchanged: core owner-local reconciliation FAIL; Kredi NOT RUN; zero production metrics VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False)._
 
 ## Git
 - **`claude/m8-cp1-simplified-access`:** M8-CP1 (D-060), branched from `main` `23b7257`; PR #30 open for independent review; not merged, not deployed.
@@ -36,7 +36,17 @@ _Updated 2026-10-22 (M8-CP1 simplified access implemented on `claude/m8-cp1-simp
 - **Local Git note:** Claude reported a renamed stale lock `.git/stale-maintenance-lock-claude` on the owner's Mac. No evidence of an active canonical Git lock; verify no Git maintenance process is running before removing only that inert renamed file. The Mac working tree and private sources were not inspected by this GitHub review.
 
 
-## M8-CP1 — simplified web access and owner administration (implemented 2026-10-22; PR #30; NOT merged, NOT deployed)
+## M8-CP1 — web access: public viewer, financial viewer, owner (implemented 2026-10-22; PR #30; NOT merged, NOT deployed)
+- **Revision D-061 (owner-approved, same day, pushed to PR #30):** three levels. Public viewer (no password; customer
+  names, CRM / follow-up / fair notes approved). **Financial viewer** — `HALSA_FINANCE_PASSWORD_HASH`, role-bound
+  sessions (separate credential id, cap 10, per-role throttling, revocation by logout / owner "end financial
+  sessions" / `revoke-sessions --finance` / financial-password rotation), read-only `GET /api/finance/overview`
+  (Kredi / Gider-Gelir / Bütçe projection without file names, error internals, operations, system state, known issues
+  or reload; allow-list schema). A financial session gets 403 `owner_required` on every owner read and write. Owner
+  unchanged, and the owner session opens the financial view. Yönetim tab: Turkish password form, `/#yonetim` direct
+  link, finance-only render. The stale "erişim kontrollü DEĞİLDİR" audience note is corrected.
+  Tests: +37 `tests/test_m8_cp1_finance.py`, +2 browser (financial password flow; owner full view), +1 jsdom; total
+  **1554 passed / 7 skipped / 2 xfailed**.
 - **Owner requirement (D-060, supersedes the two-account CP1 plan of D-048):** browser web app; anyone with the link
   views permitted read-only content without login; the owner logs in for every data-changing or administrative
   operation. No father account, no multi-user system.
@@ -58,9 +68,10 @@ _Updated 2026-10-22 (M8-CP1 simplified access implemented on `claude/m8-cp1-simp
   sessions, +3 `tests/test_m8_cp1_browser.py` real login in Chromium, +3 jsdom access-mode tests inside the existing
   JS run). Pre-existing in-process tests run as the owner via the TEST-ONLY `tests/auth_harness.py`; browser tests log
   in for real.
-- **Not done / open:** owner sign-off on the disclosure inventory (`docs/m8_cp1_access.md` §6) — customer names, CRM
-  and fair notes are viewer-visible today; Mac acceptance of the login (owner: `python -m services.owner_auth
-  hash-password`); hosting, TLS, proxy headers, backups (CP2–CP8); upload UX (CP3); Veri Kontrol Merkezi (VKM-1).
+- **Not done / open:** remaining public-hosting sign-off (`docs/m8_cp1_access.md` §6: network gate, hosting region /
+  KVKK — public visibility of customer names and CRM / fair notes is approved, D-061); Mac acceptance of both logins
+  (`python -m services.owner_auth hash-password` and `hash-password --finance`); hosting, TLS, proxy headers, backups
+  (CP2–CP8); upload UX (CP3); Veri Kontrol Merkezi (VKM-1).
 
 ## Milestone
 **Milestone 5 — AI Aksiyon Merkezi: COMPLETE** (M5-1 to M5-6; final acceptance in the M5-6 section below).
