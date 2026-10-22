@@ -42,7 +42,9 @@ services/agent.py     BusinessActionAgent: validate packet → provider → grou
 services/ai/          AIProvider interface (base.py) · factory.py (only selection point)
                       openai_provider.py (Responses API) · mock_provider.py · anthropic_provider.py
    ▼
-app.py                FastAPI (Layer 2 API). Deterministic endpoints never depend on AI.
+app.py                FastAPI (Layer 2 API). Deterministic endpoints never depend on AI. M8-CP1 (D-060): an access
+                      middleware (services/access.py) runs first — viewer routes need no login, owner routes need the
+                      owner session (services/owner_auth.py) + CSRF; then the accuracy gate
 services/store.py     SQLite: action status, history, memory, ai_calls metadata (no content)
 services/customer360.py  M7-1 Customer 360: separate full-customer repository built from the live context's exact
                       sources (sales + liste + aging + M6-2 events + optional explicit Hedef); cached per source
@@ -99,6 +101,8 @@ services/sales_projection.py  M7-6: Customer 360 projection of the sales frame b
 | `services/owner_view.py` | M7-6: owner sources from explicit env paths only (lazy, compact cache, generation-safe reload, per-source isolation); Kredi 30/60/90 scheduled obligations per currency; source-native Gider/Gelir; Bütçe validity / coverage; operational summary; known-issues panel (`docs/m7_owner_integration.md`, D-047) |
 | `services/sales_projection.py` | M7-6: `prepare_sales` (moved from Customer 360, unchanged) and the one-use `SalesFrameHandoff` from the context build to Customer 360 |
 | `services/accuracy.py` | M8-ACCURACY (D-049): VERIFIED / NOT_VERIFIED / INVALID register, runtime source evidence, fail-closed `Gate`, route classification and response-layer redaction; used by the dashboard build, the API middleware and the refresh. Register docs: `docs/accuracy/` |
+| `services/access.py` | M8-CP1 (D-060): one access level per route (`viewer` / `owner_read` / `owner_write` / `auth`), owner-only query parameters; unlisted = refused. Disclosure inventory: `docs/m8_cp1_access.md` |
+| `services/owner_auth.py` | M8-CP1: owner and financial-viewer passwords (scrypt hashes in the private `.env`), role-bound SQLite sessions storing token hashes only, HMAC CSRF token, per-role login throttling, transport / Origin checks, `python -m services.owner_auth hash-password [--finance] / revoke-sessions / status` |
 | `services/generation.py` | M8-ACCURACY-2 (D-051): explicit source selection (`data/sources.json`), frozen source bytes, SHA-256 source-generation manifest shared by dashboard / API / owner views / refresh, restart restore |
 | `services/source_validation.py` | M8-ACCURACY-2: formula-aware streaming inspection of the core workbooks (errors, missing caches, blanks vs zeros, invalid dates, external links) and join validation counts |
 | `services/kredi_schedule.py` | M8-ACCURACY-2: Kredi schedule views (year / month / lender / due date, per currency) and categories; not displayed (Kredi withheld) |
@@ -147,7 +151,7 @@ services/sales_projection.py  M7-6: Customer 360 projection of the sales frame b
 | 5 | "✨ AI Aksiyon Merkezi" tab: deterministic action queue first, AI on demand (design: `docs/m5_action_center.md`) | **complete** (M5-1 to M5-6: backend, read-only tab, action state, drafts + drawer, controlled refresh, browser verification) |
 | 6 | Additional data sources / sales intelligence foundation: validated importers for hedef raporu, detailed collections, Trodat sales, gider/gelir, kredi takip, bütçe (`docs/roadmap_m6_m7.md`) | in progress: M6-0 source inventory done (`docs/m6_source_inventory.md`, D-034); M6-1 importer framework done (`services/importers/`, D-035); M6-2 order-source normalization done (D-036); M6-3 Hedef importer done (D-037); M6-4 blocked (missing export), so the Kredi importer was pulled forward (D-038); M6-5 Trodat importer done (D-039); M6-6 Gider/Gelir done (D-040); M6-6 Bütçe done (D-041) |
 | 7 | Sales operating system: daily sales queue, customer 360, cross-sell, January fair command center, light CRM, new-buyer discovery | in progress: M7-1 Customer 360 (D-042), M7-2 Günlük Satış (D-043), M7-3 cross-sell + opportunity / territory intelligence (D-044) and M7-4 Fuar Merkezi (D-045), M7-5 lightweight CRM / follow-up (D-046) and M7-6 Yönetim + integration / polish (D-047) done — **complete** (M6-4 still blocked externally) |
-| — | Multi-user / remote deployment (auth, admin and salesperson roles, private deployment, backups) | future, out of scope for M5 (D-016) |
+| — | Multi-user / remote deployment (auth, admin and salesperson roles, private deployment, backups) | future, out of scope for M5 (D-016). M8-CP1 (D-060) added only the simplified model: viewing without login, one owner administration login; not deployed |
 
 ## Product principle (D-015)
 The deterministic action queue is the product: Python decides, ranks and explains every action and
@@ -171,6 +175,12 @@ for fair attribution) is the trusted commercial core. CRM is incomplete. `Haftal
 and `Kredi` are stale historical fields that never drive decisions as current values. The AI never
 upgrades a stale field into a current fact. StockAgent models only legitimate, recorded transactions
 (D-026).
+
+## Access model (D-060, D-061)
+Browser-based web application (no native app). Three levels, no accounts: public viewer (no password; normal
+dashboard incl. customer names and CRM / fair notes, owner-approved), financial viewer (shared financial password;
+read-only Yönetim financial projection), owner (separate password; everything incl. every change). The accuracy gate
+applies to all three alike. Remaining public-hosting sign-off: `docs/m8_cp1_access.md` §6.
 
 ## Privacy boundary
 GitHub holds code, tests, prompts, schemas, docs, synthetic fixtures, CI and config templates.

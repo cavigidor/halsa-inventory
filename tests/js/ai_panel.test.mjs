@@ -66,10 +66,16 @@ function setup(opts = {}) {
     },
     '/api/agent/actions/enrich': opts.enrich || okEnrich(actions.actions),
   };
+  // M8-CP1: the shared access script asks the server once who is logged in (owner by default here, like the real
+  // owner session); that request is answered like the real server and not counted among the panel's calls.
+  const session = opts.session || { configured: true, authenticated: true, csrf_token: 'test-csrf-token' };
+  const mkResp = (status, json) => ({ ok: status >= 200 && status < 300, status, json: async () => json,
+    clone() { return mkResp(status, json); } });
   async function fakeFetch(url, init = {}) {
     const method = (init.method || 'GET').toUpperCase();
     const path = new URL(url, 'http://127.0.0.1:8000/').pathname;
     const body = init.body ? JSON.parse(init.body) : null;
+    if (path === '/api/auth/session' && method === 'GET') return mkResp(200, session);
     calls.push({ path, method, headers: { ...(init.headers || {}) }, body });
     if (opts.offline) throw new TypeError('Failed to fetch');
     const cm = /^\/api\/agent\/customer\/([^/]+)$/.exec(path);
@@ -77,32 +83,32 @@ function setup(opts = {}) {
       const r = await customerFn(decodeURIComponent(cm[1]));
       if (r instanceof Error) throw r;
       const status = r.status || 200;
-      return { ok: status >= 200 && status < 300, status, json: async () => r.json };
+      return mkResp(status, r.json);
     }
     if (path === '/api/context/refresh' && method === 'POST') {
       const r = await refreshFn(body);
       if (r instanceof Error) throw r;
       const status = r.status || 200;
-      return { ok: status >= 200 && status < 300, status, json: async () => r.json };
+      return mkResp(status, r.json);
     }
     if (path === '/api/agent/draft-message' && method === 'POST') {
       const r = await draftFn(body);
       if (r instanceof Error) throw r;
       const status = r.status || 200;
-      return { ok: status >= 200 && status < 300, status, json: async () => r.json };
+      return mkResp(status, r.json);
     }
     const m = /^\/api\/actions\/([^/]+)\/(complete|defer|dismiss|reopen)$/.exec(path);
     if (m && method === 'POST') {
       const r = await stateFn(m[2], decodeURIComponent(m[1]), body || {});
       if (r instanceof Error) throw r;
       const status = r.status || 200;
-      return { ok: status >= 200 && status < 300, status, json: async () => r.json };
+      return mkResp(status, r.json);
     }
     const h = routes[path];
-    if (!h) return { ok: false, status: 404, json: async () => ({}) };
+    if (!h) return mkResp(404, {});
     const r = await h(body, calls);
     const status = r.status || 200;
-    return { ok: status >= 200 && status < 300, status, json: async () => r.json };
+    return mkResp(status, r.json);
   }
   const dom = new JSDOM(HTML, {
     url: opts.url || 'http://127.0.0.1:8000/', runScripts: 'dangerously', pretendToBeVisual: true,
@@ -208,6 +214,7 @@ test('top 5, then next 5: one POST each, ≤5 ids in Python order, X-StockAgent 
   const p1 = t.posts()[0];
   assert.equal(p1.path, '/api/agent/actions/enrich');
   assert.equal(p1.headers['X-StockAgent'], '1');
+  assert.equal(p1.headers['X-CSRF-Token'], 'test-csrf-token', 'M8-CP1: the owner session CSRF token is attached');
   assert.equal(p1.headers['Content-Type'], 'application/json');
   assert.deepEqual(p1.body.action_ids, ids.slice(0, 5));
   release();
@@ -944,5 +951,61 @@ test('refresh is available while the server reports a warm-up error', async () =
   t.open();
   await until(() => t.q('.ai-state').textContent.startsWith('Veriler yüklenemedi'));
   assert.ok(visible(t.q('.ai-refresh')));
+});
+
+// M8-CP1 (D-060): viewing needs no login; owner actions need the owner session
+test('owner mode: header says so, GETs carry no CSRF token, state changes carry the session token', async () => {
+  const t = setup();
+  await until(() => visible(t.doc.getElementById('halsa-access')));
+  const bar = t.doc.getElementById('halsa-access');
+  assert.equal(bar.dataset.mode, 'owner');
+  assert.match(bar.textContent, /Yönetici girişi açık/);
+  assert.ok(bar.querySelector('button'), 'logout button');
+  t.open(); await until(cardsReady(t));
+  assert.ok(t.calls.filter((c) => c.method === 'GET').every((c) => !('X-CSRF-Token' in c.headers)));
+  const target = ids(t)[0];
+  card(t, target).querySelector('.aic-done').click();
+  await until(() => t.statePosts().length === 1);
+  assert.equal(t.statePosts()[0].headers['X-CSRF-Token'], 'test-csrf-token');
+  assert.equal(t.statePosts()[0].headers['X-StockAgent'], '1', 'the existing local guard header is kept');
+});
+
+test('viewer mode: everything reads without login; an owner action is refused with a clear message', async () => {
+  const refused = () => ({ status: 401, json: { detail: { error_code: 'auth_required',
+    message: 'Bu işlem yalnızca yönetici girişiyle yapılabilir. Görüntüleme için giriş gerekmez.' } } });
+  const t = setup({ session: { configured: true, authenticated: false, csrf_token: null }, stateFn: refused });
+  await until(() => visible(t.doc.getElementById('halsa-access')));
+  const bar = t.doc.getElementById('halsa-access');
+  assert.equal(bar.dataset.mode, 'viewer');
+  assert.match(bar.textContent, /Görüntüleme modu/);
+  assert.equal(bar.querySelector('a').getAttribute('href'), '/giris');
+  t.open(); await until(cardsReady(t));
+  const before = ids(t), target = before[0];
+  card(t, target).querySelector('.aic-done').click();
+  await until(() => visible(t.doc.getElementById('halsa-access-msg')));
+  assert.ok(!('X-CSRF-Token' in t.statePosts()[0].headers), 'a viewer has no token to send');
+  const msg = t.doc.getElementById('halsa-access-msg');
+  assert.match(msg.textContent, /yalnızca yönetici girişiyle/);
+  assert.equal(msg.querySelector('a').getAttribute('href'), '/giris');
+  await until(() => card(t, target)?.querySelector('.aic-serr'));
+  assert.deepEqual(ids(t), before, 'nothing changed: the card stays in the queue');
+});
+
+test('financial viewer mode (D-061): header says read-only finance, offers logout and the owner login', async () => {
+  const t = setup({ session: { configured: true, finance_configured: true, authenticated: true, role: 'finance',
+    csrf_token: 'fin-csrf' } });
+  await until(() => visible(t.doc.getElementById('halsa-access')));
+  const bar = t.doc.getElementById('halsa-access');
+  assert.equal(bar.dataset.mode, 'finance');
+  assert.match(bar.textContent, /Finans görüntüleme açık \(salt okunur\)/);
+  assert.ok(bar.querySelector('button'), 'logout button');
+  assert.equal(bar.querySelector('a').getAttribute('href'), '/giris');
+});
+
+test('file:// mode: the access script does nothing and asks nothing', async () => {
+  const t = setup({ url: 'file:///Users/someone/dashboard.html' });
+  await sleep(30);
+  assert.ok(!visible(t.doc.getElementById('halsa-access')));
+  assert.equal(t.calls.length, 0);
 });
 }

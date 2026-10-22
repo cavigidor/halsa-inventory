@@ -21,6 +21,7 @@ import urllib.request
 import pytest
 
 from services import refresh as RF
+from tests import browser_auth as BA  # M8-CP1: real owner login for owner actions
 from tests.fixtures import synthetic_erp as SE
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -59,7 +60,8 @@ def _free_port():
 
 
 def _get(url):
-    with urllib.request.urlopen(url, timeout=5) as r:
+    req = urllib.request.Request(url, headers=BA.probe_headers(url))       # M8-CP1: owner probes once registered
+    with urllib.request.urlopen(req, timeout=5) as r:
         return json.loads(r.read().decode())
 
 
@@ -72,7 +74,7 @@ def app_server(tmp_path, provider):
     log = open(tmp_path / "server.log", "w")
     env = {**os.environ, "STOCKAGENT_NO_DOTENV": "1", "AI_PROVIDER": provider, "OPENAI_API_KEY": "",
            "MANUAL_INFLATION_RATE": "0.40", "DATA_FOLDER": data, "DASHBOARD_PATH": dash,
-           "AGENT_DB": str(tmp_path / "state.db")}
+           "AGENT_DB": str(tmp_path / "state.db"), **BA.server_env()}
     proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "tests.accuracy_harness_app:app", "--host", "127.0.0.1", "--port", str(port)],
                             cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
     base = f"http://127.0.0.1:{port}"
@@ -90,6 +92,7 @@ def app_server(tmp_path, provider):
             if time.monotonic() > deadline:
                 pytest.fail("server not ready within 60 s")
             time.sleep(0.2)
+        BA.register(base)
         yield {"base": base, "dir": tmp_path, "dash": dash, "data": data}
     finally:
         proc.terminate()
@@ -107,6 +110,7 @@ def ai_calls(srv):
 
 def open_page(browser, viewport=None, permissions=None):
     ctx = browser.new_context(viewport=viewport or {"width": 1280, "height": 900})
+    BA.authorize(ctx)
     if permissions:
         ctx.grant_permissions(permissions)
     page = ctx.new_page()
@@ -276,7 +280,8 @@ def test_action_state_round_trip_survives_reload(browser, tmp_path):
         page.reload()
         open_ai_tab(page)
         assert a not in card_ids(page), "still hidden after a full reload"
-        r = page.request.post(f"{srv['base']}/api/actions/{a}/reopen", headers=H)   # supported reopen API
+        r = page.request.post(f"{srv['base']}/api/actions/{a}/reopen",                # supported reopen API
+                              headers={**H, "X-CSRF-Token": BA.login(srv["base"])[1]})  # M8-CP1: owner CSRF
         assert r.ok and r.json()["status"] == "open"
         page.reload()
         open_ai_tab(page)

@@ -71,8 +71,22 @@ M6-4 Detailed Collections remain separate open items.
 python -m services.refresh                # validate + publish dashboard.html and its generation manifest
 # (GET / serves only a dashboard published this way and re-validated; a plain `python dashboard_builder.py data`
 #  build has no publication record and is answered with a neutral status page — M8-ACCURACY-2)
-uvicorn app:app --host 127.0.0.1          # local only; dashboard at http://127.0.0.1:8000/ , API docs at /docs
+uvicorn app:app --host 127.0.0.1          # local only; dashboard at http://127.0.0.1:8000/ (no /docs since M8-CP1)
 ```
+
+## Access: public viewer, financial viewer, owner (M8-CP1, D-060 / D-061)
+Halsa Analysis is a browser web app. **The normal dashboard needs no password.** The Yönetim financial sections
+(Kredi, Gider/Gelir, Bütçe) need the shared **financial viewing password** (read-only). Changing anything (refresh,
+CRM / follow-ups, fairs, actions, AI drafts) and the full Yönetim need the **owner password**:
+```bash
+python -m services.owner_auth hash-password             # owner     → HALSA_OWNER_PASSWORD_HASH=…   (PRIVATE .env)
+python -m services.owner_auth hash-password --finance   # financial → HALSA_FINANCE_PASSWORD_HASH=… (must differ)
+python -m services.owner_auth status                    # both configured? open sessions per role
+python -m services.owner_auth revoke-sessions [--owner|--finance]
+```
+Restart the server. Owner: `http://127.0.0.1:8000/giris`. Financial viewer: `http://127.0.0.1:8000/#yonetim`.
+Passwords are accepted only over HTTPS or on this computer (`127.0.0.1`). Never commit a hash.
+**Do not host this publicly** before the remaining sign-off items in `docs/m8_cp1_access.md` §6.
 
 ## Monthly refresh
 Replace the exports in `./data/` (stock, sales, optional cari/aging), then press **"↻ Verileri yenile"** in the

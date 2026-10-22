@@ -416,10 +416,15 @@ REFRESH_COUNT_METRIC = {"low_stock": "stock.reorder", "lapsed": "customers.winba
 # ---------------------------------------------------------------------------------------------
 ROUTES: dict[tuple[str, str], tuple[str, str | tuple[str, ...] | None]] = {
     ("GET", "/"): ("system", None),                         # gated at build time (POLICY_VERSION marker checked)
-    ("GET", "/openapi.json"): ("system", None),
-    ("GET", "/docs"): ("system", None),
-    ("GET", "/docs/oauth2-redirect"): ("system", None),
-    ("GET", "/redoc"): ("system", None),
+    # M8-CP1 (D-060): /docs, /redoc and /openapi.json are no longer served (FastAPI docs disabled).
+    ("GET", "/giris"): ("system", None),                    # fixed owner-login page; no data
+    ("GET", "/api/auth/session"): ("system", None),         # owner session state; no business data
+    ("POST", "/api/auth/login"): ("operational", None),
+    ("POST", "/api/auth/logout"): ("operational", None),
+    ("POST", "/api/auth/logout-all"): ("operational", None),
+    ("POST", "/api/auth/finance-login"): ("operational", None),          # D-061 financial-viewer login
+    ("POST", "/api/auth/finance-sessions/revoke"): ("operational", None),
+    ("GET", "/api/finance/overview"): ("redacted", ("owner.kredi", "owner.gider_gelir", "owner.butce")),
     ("GET", "/api/health"): ("system", None),
     ("GET", "/api/agent/categories"): ("system", None),
     ("GET", "/api/ai/calls"): ("system", None),

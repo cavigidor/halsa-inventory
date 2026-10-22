@@ -1358,6 +1358,82 @@ _SQ_BODY="""
 <div class="sq-undo" role="status" aria-live="polite" hidden></div>
 """
 
+# M8-CP1 (D-060): viewing needs no login; owner actions need the owner session. One shared script, loaded before the
+# panels: it adds the session's CSRF token to same-origin state-changing requests (the panels' own fetch calls are
+# unchanged), shows "Görüntüleme modu" / "Yönetici" in the header, and tells a viewer who tries an owner action that it
+# needs the owner login. It reads no business data, stores nothing in the browser and never sees the session cookie
+# (HttpOnly). Does nothing when the file is opened directly (file://).
+_ACCESS_CSS = """
+.acc-bar{margin:10px 0 0;font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+.acc-bar a{color:#1f5fbf;font-weight:600}
+.acc-bar button{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--card);border-radius:8px;
+ padding:5px 12px;cursor:pointer;min-height:32px}
+.acc-msg{position:sticky;top:0;z-index:50;margin:10px 0;padding:12px 14px;border-radius:10px;background:var(--warn-bg);
+ border:1px solid #f1d39b;color:var(--ink);font-weight:600;font-size:14px}
+.acc-msg a{color:#1f5fbf;margin-left:6px}
+.acc-bar[hidden],.acc-msg[hidden]{display:none}
+"""
+_ACCESS_JS = r"""
+(function(){
+if(location.protocol==='file:'||typeof window.fetch!=='function') return;
+var nativeFetch=window.fetch.bind(window), sess=null, pending=null, msgTimer=null;
+var TXT={viewer:'Görüntüleme modu — değişiklik yapmak için ',login:'Yönetici girişi',owner:'Yönetici girişi açık',
+  finance:'Finans görüntüleme açık (salt okunur)',
+  logout:'Çıkış yap',need:'Bu işlem yalnızca yönetici girişiyle yapılabilir. Görüntüleme için giriş gerekmez.',
+  ownerOnly:'Bu işlem yalnızca yönetici girişiyle yapılabilir. Finans görüntüleme şifresi yalnızca finans bölümlerini salt okunur açar.',
+  off:'Yönetici girişi bu sunucuda yapılandırılmadı; değişiklik yapılamaz.',
+  csrf:'Oturum doğrulanamadı; sayfayı yenileyip tekrar deneyin.',viewonly:'Görüntüleme modu'};
+function $(id){return document.getElementById(id);}
+function el(t,txt){var e=document.createElement(t); if(txt!=null) e.textContent=txt; return e;}
+function session(force){
+  if(force){sess=null; pending=null;}
+  if(sess) return Promise.resolve(sess);
+  if(!pending) pending=nativeFetch('/api/auth/session',{headers:{'Accept':'application/json'},credentials:'same-origin'})
+    .then(function(r){return r&&r.ok?r.json():{authenticated:false};}).catch(function(){return {authenticated:false};})
+    .then(function(s){sess=s||{authenticated:false}; pending=null; paint(); return sess;});
+  return pending;}
+function urlOf(i){return typeof i==='string'?i:(i&&i.url)||String(i);}
+function sameOrigin(u){try{return new URL(u,location.href).origin===location.origin;}catch(e){return false;}}
+function withToken(init,tok){var h=init.headers;
+  if(h&&typeof Headers!=='undefined'&&h instanceof Headers){h=new Headers(h); h.set('X-CSRF-Token',tok);}
+  else{h=Object.assign({},h||{},{'X-CSRF-Token':tok});}
+  return Object.assign({},init,{headers:h,credentials:'same-origin'});}
+function watch(r){
+  if(r&&(r.status===401||r.status===403)&&typeof r.clone==='function'){
+    try{r.clone().json().then(function(b){var c=b&&b.detail&&b.detail.error_code;
+      if(c==='auth_required'||c==='owner_required'||c==='admin_not_configured'||c==='csrf_failed'||c==='origin_rejected'){session(true); notify(c);}
+    }).catch(function(){});}catch(e){}}
+  return r;}
+window.fetch=function(input,init){
+  init=init||{}; var m=String(init.method||(input&&input.method)||'GET').toUpperCase(), u=urlOf(input);
+  if(m==='GET'||m==='HEAD'||!sameOrigin(u)) return nativeFetch(input,init).then(watch);
+  return session().then(function(s){return nativeFetch(input,s&&s.csrf_token?withToken(init,s.csrf_token):init);}).then(watch);
+};
+function notify(code){var box=$('halsa-access-msg'); if(!box) return;
+  box.replaceChildren(el('span',code==='admin_not_configured'?TXT.off:(code==='auth_required'?TXT.need:
+    (code==='owner_required'?TXT.ownerOnly:TXT.csrf))));
+  if(code==='auth_required'||code==='owner_required'){var a=el('a',TXT.login); a.href='/giris'; box.append(a);}
+  box.hidden=false; clearTimeout(msgTimer); msgTimer=setTimeout(function(){box.hidden=true;},12000);}
+function paint(){var bar=$('halsa-access'); if(!bar||!sess) return; bar.replaceChildren(); bar.hidden=false;
+  var role=sess.role||(sess.authenticated?'owner':null);
+  bar.dataset.mode=role||'viewer';
+  if(role){bar.append(el('span',role==='owner'?'🔐 '+TXT.owner:'🔓 '+TXT.finance)); var b=el('button',TXT.logout); b.type='button';
+    b.addEventListener('click',function(){b.disabled=true; window.fetch('/api/auth/logout',{method:'POST',
+      headers:{'Content-Type':'application/json','X-StockAgent':'1'},body:'{}'}).then(function(){location.reload();},
+      function(){b.disabled=false;});}); bar.append(b);
+    if(role==='finance'&&sess.configured){var o=el('a',TXT.login); o.href='/giris'; bar.append(o);}}
+  else if(sess.configured){bar.append(el('span','👁 '+TXT.viewer)); var a=el('a',TXT.login); a.href='/giris'; bar.append(a);}
+  else{bar.append(el('span','👁 '+TXT.viewonly));}}
+window.StockAgentAccess={session:session};
+// D-061 direct link to the financial section: https://<site>/#yonetim opens the Yönetim tab (password form if needed)
+function deepLink(){if(location.hash==='#yonetim'){var t=document.querySelector('.tab[data-t="own"]'); if(t) t.click();}}
+function ready(){session(); deepLink();}
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',ready); else ready();
+window.addEventListener('hashchange',deepLink);
+})();
+"""
+
+
 _SQ_JS=r"""
 (function(){
 'use strict';
@@ -2327,14 +2403,24 @@ _OWN_CSS=r"""
 #own .ow-list li b{display:block}
 #own .ow-issue[data-status="blocked"] b::after{content:" · bloke";color:#b42318;font-weight:700}
 #own [hidden]{display:none!important}
+#own .ow-login{border:1px solid var(--line);background:var(--card);border-radius:12px;padding:16px;max-width:520px;margin:10px 0 16px}
+#own .ow-login label{display:block;font-weight:700;margin:8px 0 6px}
+#own .ow-login-row{display:flex;gap:8px;flex-wrap:wrap}
+#own .ow-pw{flex:1 1 220px;font-size:16px;padding:10px;border:1px solid #b8bfcc;border-radius:8px;min-height:44px}
+#own .ow-unlock{min-height:44px;padding:0 20px;font-size:15px}
+#own .ow-loginmsg{min-height:1.4em;font-weight:600;margin:8px 0 4px}#own .ow-loginmsg.err{color:#b42318}
 @media(max-width:600px){#own .ow-btn{min-height:36px}#own th,#own td{padding:6px 5px}#own th{white-space:normal}}
 """
 
 _OWN_BODY="""
 <h2 class="sec">Yönetim</h2>
-<div class="ow-aud" role="note">Yönetim bilgisidir. Uygulama yerel ve tek kullanıcılıdır: bu sekme erişim kontrollü DEĞİLDİR.</div>
+<div class="ow-aud" role="note">Yönetim bilgisidir ve erişim kontrollüdür: finans bölümleri finans görüntüleme şifresiyle salt okunur, tam görünüm yönetici girişiyle açılır.</div>
 <p class="note">Salt okunur. Sayılar Python ile hesaplanır; yapay zekâ kullanılmaz. Sahip kaynakları (Kredi, Gider/Gelir, Bütçe) yalnızca açıkça yapılandırılan dosyalardan okunur ve hiçbir dosya otomatik seçilmez.</p>
 <div class="ow-state" role="status" hidden></div>
+<form class="ow-login" hidden autocomplete="on" novalidate><p class="ow-login-t">Bu bölüm şirket finanslarını (Kredi, Gider / Gelir, Bütçe) içerir. Görüntülemek için <b>finans görüntüleme şifresini</b> girin. Şifre yalnızca okumaya izin verir; hiçbir değişiklik yapılamaz.</p>
+<label for="ow-pw">Finans görüntüleme şifresi</label><div class="ow-login-row"><input id="ow-pw" class="ow-pw" name="password" type="password" autocomplete="current-password" maxlength="256">
+<button type="submit" class="ow-btn ow-unlock">Aç</button></div><p class="ow-loginmsg" role="status" aria-live="polite"></p>
+<p class="ow-muted">Yönetici misiniz? <a href="/giris">Yönetici girişi</a></p></form>
 <div class="ow-bar" hidden><button type="button" class="ow-btn ow-reload">Yönetim verilerini yeniden oku</button><span class="ow-muted ow-reloadmsg" role="status" aria-live="polite"></span></div>
 <section class="ow-sec" data-sec="ops" hidden><h3>A. Operasyon Özeti</h3><div class="ow-tiles"></div><div class="ow-opsnotes"></div></section>
 <section class="ow-sec" data-sec="kredi" hidden><h3>B. Finansman / Kredi <span class="ow-chip"></span></h3><div class="ow-body"></div></section>
@@ -2353,7 +2439,8 @@ const POLL_MS=window.__OWN_POLL_MS||1500, POLL_MAX=window.__OWN_POLL_MAX||400;
 const H={'Content-Type':'application/json','X-StockAgent':'1'};   // local CSRF guard (D-020)
 const MSG={file:'Yönetim için panoyu http://127.0.0.1:8000/ üzerinden açın.',
   offline:'Sunucu çalışmıyor. Terminalde uvicorn app:app --host 127.0.0.1 çalıştırıp http://127.0.0.1:8000 adresini açın. Diğer sekmeler normal çalışır.',
-  fail:'Yüklenemedi'};
+  fail:'Yüklenemedi',
+  auth:'Yönetim bölümü (şirket finansları ve sistem durumu) yalnızca yönetici girişiyle görüntülenir. Sayfanın üstündeki “Yönetici girişi” bağlantısını kullanın.'};
 const AY=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 const st={started:false,seq:0,shown:0,timer:null,polls:0,reloading:false};
 const $=s=>root.querySelector(s);
@@ -2378,19 +2465,30 @@ async function api(path,opt){
   let r; try{r=await fetch(path,opt||{headers:{'Accept':'application/json'}});}catch(e){const x=new Error('offline'); x.offline=true; throw x;}
   let b=null; try{b=await r.json();}catch(e){b=null;}
   if(!r.ok){const x=new Error('HTTP '+r.status); x.status=r.status; x.body=b; throw x;} return b;}
-function errText(e){if(e.offline) return MSG.offline; return MSG.fail+(e.status?' (HTTP '+e.status+')':'')+'.';}
+function errText(e){if(e.offline) return MSG.offline; if(e.status===401) return MSG.auth;   // M8-CP1: owner-only tab
+  return MSG.fail+(e.status?' (HTTP '+e.status+')':'')+'.';}
 
 function start(){
   if(st.started) return; st.started=true;
   if(location.protocol==='file:'){state(MSG.file,'off'); return;}   // same-origin API only; no request
   load();
 }
-async function load(){
+// M8-CP1 (D-061): the owner gets the full Yönetim; everyone else asks for the financial projection, which the server
+// refuses (401) without a financial-viewer or owner session → the password form. Permissions are enforced by the
+// server; this only chooses which read to ask for.
+async function role(force){try{const a=window.StockAgentAccess; const s=a?await a.session(force):null; return s&&s.role||null;}catch(e){return null;}}
+async function load(force){
   const my=++st.seq; clearTimeout(st.timer);
-  let d; try{d=await api('/api/owner/overview');}catch(e){if(my===st.seq) state(errText(e),e.offline?'off':'err'); return;}
+  const r=await role(force), url=r==='owner'?'/api/owner/overview':'/api/finance/overview';
+  let d; try{d=await api(url);}catch(e){if(my!==st.seq) return;
+    const c=e.body&&e.body.detail&&e.body.detail.error_code;
+    if(c==='finance_auth_required'||c==='finance_not_configured'){hideData(); loginForm(c); return;}
+    if((c==='auth_required'||c==='owner_required')&&!force){load(true); return;}   // the session changed meanwhile
+    state(errText(e),e.offline?'off':'err'); return;}
   if(my!==st.seq) return;                // a newer request was issued: never render an older response
-  st.shown=my; state(''); render(d);
-  const busy=d.reload.inflight||d.operations.state!=='ready'||['kredi','gider_gelir','butce'].some(k=>d[k].state==='loading'||d[k].reloading);
+  st.shown=my; state(''); show($('.ow-login'),false); render(d);
+  const fin=d.audience==='finance';
+  const busy=(!fin&&(d.reload.inflight||d.operations.state!=='ready'))||['kredi','gider_gelir','butce'].some(k=>d[k].state==='loading'||d[k].reloading);
   if(busy&&st.polls<POLL_MAX){st.polls++; st.timer=setTimeout(load,POLL_MS);} else {st.polls=0; setReloading(false);}
 }
 function setReloading(on){st.reloading=on; const b=$('.ow-reload'); b.disabled=on; b.setAttribute('aria-busy',on?'true':'false');
@@ -2401,15 +2499,36 @@ async function reload(){
   catch(e){setReloading(false); $('.ow-reloadmsg').textContent=errText(e); return;}
   st.polls=0; load();
 }
+function hideData(){['.ow-bar','[data-sec="ops"]','[data-sec="kredi"]','[data-sec="gg"]','[data-sec="butce"]','[data-sec="system"]']
+  .forEach(q=>show($(q),false)); state('');}
+const LOGIN_TXT={invalid_credentials:'Şifre hatalı.',login_throttled:'Çok fazla hatalı deneme. Lütfen biraz sonra tekrar deneyin.',
+  https_required:'Şifre yalnızca güvenli (HTTPS) bağlantıyla girilebilir.',
+  finance_not_configured:'Finans görüntüleme şifresi bu sunucuda tanımlanmadı. Bölüm yalnızca yönetici girişiyle açılır.',
+  origin_rejected:'Lütfen sayfayı yenileyin.'};
+function loginForm(code){const f=$('.ow-login'); show(f,true); const m=$('.ow-loginmsg');
+  const off=code==='finance_not_configured'; $('.ow-pw').disabled=off; $('.ow-unlock').disabled=off;
+  m.textContent=off?LOGIN_TXT.finance_not_configured:''; m.className='ow-loginmsg'+(off?' err':'');
+  root.dataset.access='locked'; if(!off) $('.ow-pw').focus();}
+async function unlock(ev){ev.preventDefault(); const pw=$('.ow-pw'), b=$('.ow-unlock'), m=$('.ow-loginmsg');
+  if(!pw.value){m.textContent='Şifreyi girin.'; m.className='ow-loginmsg err'; return;}
+  b.disabled=true; m.textContent='Kontrol ediliyor…'; m.className='ow-loginmsg';
+  try{await api('/api/auth/finance-login',{method:'POST',headers:H,body:JSON.stringify({password:pw.value})});}
+  catch(e){pw.value=''; b.disabled=false; const c=e.body&&e.body.detail&&e.body.detail.error_code;
+    m.textContent=LOGIN_TXT[c]||(e.offline?MSG.offline:'Giriş yapılamadı.'); m.className='ow-loginmsg err'; pw.focus(); return;}
+  pw.value=''; b.disabled=false; m.textContent=''; show($('.ow-login'),false); st.polls=0; load(true);}
 function render(d){
-  root.dataset.today=d.today; show($('.ow-bar'),true);
+  const fin=d.audience==='finance';      // D-061: financial viewer — financial sections only, read-only
+  root.dataset.today=d.today; root.dataset.access=fin?'finance':'owner'; show($('.ow-bar'),!fin);
   $('.ow-aud').textContent=d.audience_note;
-  renderOps(d.operations); renderKredi(d.kredi); renderGG(d.gider_gelir); renderButce(d.butce); renderSystem(d.system,d.known_issues);
-  if(!d.reload.inflight&&!st.reloading) setReloading(false);
+  if(fin){show($('[data-sec="ops"]'),false); show($('[data-sec="system"]'),false);}
+  else renderOps(d.operations);
+  renderKredi(d.kredi); renderGG(d.gider_gelir); renderButce(d.butce);
+  if(!fin){renderSystem(d.system,d.known_issues); if(!d.reload.inflight&&!st.reloading) setReloading(false);}
 }
 function head(sec,src){const chip=$(sec+' .ow-chip'); chip.textContent=src.state_label+(src.reloading?' · yenileniyor':''); chip.className='ow-chip '+src.state;
   const s=$(sec); s.dataset.state=src.state; s.dataset.reloading=src.reloading?'1':'0'; show(s,true);
-  const b=$(sec+' .ow-body'); b.replaceChildren(); b.append(kv([['Kaynak',src.file||'yapılandırılmadı']]));
+  const b=$(sec+' .ow-body'); b.replaceChildren();
+  if('file' in src) b.append(kv([['Kaynak',src.file||'yapılandırılmadı']]));   // the financial projection has no file name
   if(src.state==='not_configured') b.append(el('p','ow-muted','Yapılandırılmadı. Göstermek için ortam değişkeninde dosya yolunu açıkça verin; dosya otomatik seçilmez.'));
   if(src.state==='loading') b.append(el('p','ow-muted','Yükleniyor…'));
   if(src.state==='failed'){const p=el('p','ow-err',(src.message||'Okunamadı.')+(src.failed_step?' (adım: '+src.failed_step+')':'')); p.dataset.code=src.error_code||''; b.append(p);
@@ -2497,6 +2616,7 @@ function renderSystem(s,issues){
     if(i.count!=null) li.append(el('div','ow-muted',num(i.count)+' '+(i.count_label||''))); il.append(li);});
 }
 $('.ow-reload').addEventListener('click',reload);
+$('.ow-login').addEventListener('submit',unlock);
 tabBtn.addEventListener('click',start);   // lazy: nothing is fetched (and no owner file is read) until the tab is opened
 })();
 """
@@ -2598,10 +2718,13 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 .aw-box{{border:1px solid var(--line);background:#f4f5f7;border-radius:10px;padding:14px 16px;margin:8px 0 14px}}
 .aw-msg{{font-weight:700;margin:0 0 6px;font-size:15px}}.aw-why{{margin:0;padding-left:18px;color:var(--muted);font-size:13px}}
 .aw-why li{{margin:3px 0}}
-</style></head><body><div class="wrap">
+{_ACCESS_CSS}</style></head><body><div class="wrap">
 <header><div class="eyebrow">Şirket Panosu</div>
 <h1>Şirket Panosu — {meta['date']}</h1>
-<div class="sub">{src}{f" · {meta['total']:,} ürün" if meta.get('total_shown') else ''}</div></header>
+<div class="sub">{src}{f" · {meta['total']:,} ürün" if meta.get('total_shown') else ''}</div>
+<div class="acc-bar" id="halsa-access" hidden></div></header>
+<div class="acc-msg" id="halsa-access-msg" role="alert" hidden></div>
+<script>{_ACCESS_JS}</script>
 <div class="tabs">{tabbtns}{sq_btn}{c3_btn}{op_btn}{fm_btn}{cr_btn}{ow_btn}{ai_btn}</div>
 <div id="overview" class="panel on">
 <h2 class="sec">Aktif Analizler</h2>

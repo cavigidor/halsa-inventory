@@ -56,7 +56,9 @@ HEDEF_PATH = os.environ.get("HEDEF_PATH") or None
 HEDEF_SNAPSHOT_DATE = os.environ.get("HEDEF_SNAPSHOT_DATE") or None
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
-app = FastAPI(title="AI Aksiyon Merkezi API", version="0.4")
+# M8-CP1 (D-060): no interactive API documentation, schema dump or debug UI is served (/docs, /redoc, /openapi.json
+# answer 404). The schema is still available to code and tests through app.openapi().
+app = FastAPI(title="AI Aksiyon Merkezi API", version="0.4", docs_url=None, redoc_url=None, openapi_url=None)
 
 
 # ---- local CSRF guard (D-020): every mutating request needs X-StockAgent: 1 ----
@@ -165,6 +167,102 @@ async def _accuracy_decide(request: Request, call_next):
     return JSONResponse(status_code=ACC.WITHHELD_HTTP_STATUS, content={"detail": d.notice()})
 
 
+# ---- M8-CP1 (D-060): viewing needs no login; administration needs the owner session ----
+# Registered AFTER the accuracy middleware, so it runs FIRST: an anonymous request for an owner-only route is refused
+# before the accuracy gate, any endpoint, the provider or SQLite is reached. Every matched route must be classified in
+# services/access.ACCESS (unclassified → 403 for everyone). The accuracy gate is unchanged and applies to the owner
+# exactly as to a viewer: logging in never reveals an unverified metric. X-StockAgent stays as an extra local guard on
+# mutations but is NOT authentication.
+from starlette.concurrency import run_in_threadpool
+from services import access as AX
+from services import owner_auth as AUTH
+
+AUTH_REQUIRED_TEXT = "Bu işlem yalnızca yönetici girişiyle yapılabilir. Görüntüleme için giriş gerekmez."
+AUTH_NOT_CONFIGURED_TEXT = "Yönetici girişi bu sunucuda yapılandırılmadı; yönetim işlemleri kapalı."
+# D-061: a financial-viewer session is authenticated but never an owner
+OWNER_REQUIRED_TEXT = ("Bu işlem yalnızca yönetici girişiyle yapılabilir. Finans görüntüleme şifresi yalnızca "
+                       "finans bölümlerini salt okunur açar.")
+FINANCE_REQUIRED_TEXT = "Yönetim (finans) bölümü için finans görüntüleme şifresi gerekir."
+FINANCE_NOT_CONFIGURED_TEXT = "Finans görüntüleme şifresi bu sunucuda tanımlanmadı; bölüm yalnızca yönetici girişiyle açılır."
+
+
+def _deny(status: int, code: str, message: str, headers: dict | None = None) -> JSONResponse:
+    return JSONResponse(status_code=status, content={"detail": {"error_code": code, "message": message}},
+                        headers=headers)
+
+
+def _client_host(request: Request) -> str | None:
+    return request.client.host if request.client else None
+
+
+def _owner(request: Request):
+    """The OWNER session the access middleware resolved for this request (None = viewer or financial viewer)."""
+    return getattr(request.state, "owner", None)
+
+
+def _session(request: Request):
+    """Any session (owner or financial viewer) the access middleware resolved for this request, or None."""
+    return getattr(request.state, "session", None)
+
+
+def _security_headers(request: Request, resp, lv: str | None):
+    h = resp.headers
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("X-Frame-Options", "DENY")                               # no framing → no click-jacking of owner
+    h.setdefault("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'none'; object-src 'none'")
+    h.setdefault("Referrer-Policy", "same-origin")
+    h.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    h.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+    if request.url.scheme == "https":
+        h.setdefault("Strict-Transport-Security", "max-age=31536000")
+    if lv in (AX.FINANCE_READ, AX.OWNER_READ, AX.OWNER_WRITE, AX.AUTH) or _session(request) is not None:
+        h["Cache-Control"] = "no-store"                                   # owner / finance responses never cached
+    return resp
+
+
+@app.middleware("http")
+async def _access_control(request: Request, call_next):
+    method = "GET" if request.method == "HEAD" else request.method
+    tpl = _route_template(request.scope)
+    request.state.owner = request.state.session = None
+    if tpl is None or method == "OPTIONS":
+        return _security_headers(request, await call_next(request), None)     # router answers 404 / 405
+    lv = AX.level(method, tpl)
+    if lv is None:
+        return _security_headers(request, _deny(403, "access_unclassified",
+                                                "Bu uç erişim kaydında sınıflandırılmadı."), None)
+    try:
+        sess = await run_in_threadpool(AUTH.request_session, request)
+    except Exception as e:                                                # state store unreadable → anonymous
+        log.warning("owner session check failed (%s)", type(e).__name__)
+        sess = None
+    request.state.session = sess
+    request.state.owner = sess if (sess is not None and sess.is_owner) else None
+    need_owner = lv in (AX.OWNER_READ, AX.OWNER_WRITE) or (
+        lv == AX.VIEWER and AX.owner_query_used(method, tpl, request.query_params))
+    if lv == AX.FINANCE_READ and (sess is None or not sess.can_view_finance):
+        fin = AUTH.configured_hash(AUTH.ROLE_FINANCE) is not None
+        return _security_headers(request, _deny(
+            401, "finance_auth_required" if fin else "finance_not_configured",
+            FINANCE_REQUIRED_TEXT if fin else FINANCE_NOT_CONFIGURED_TEXT), lv)
+    if need_owner:
+        if sess is None:
+            configured = AUTH.configured_hash() is not None
+            return _security_headers(request, _deny(
+                401, "auth_required" if configured else "admin_not_configured",
+                AUTH_REQUIRED_TEXT if configured else AUTH_NOT_CONFIGURED_TEXT), lv)
+        if not sess.is_owner:                                             # financial viewer: never an owner
+            return _security_headers(request, _deny(403, "owner_required", OWNER_REQUIRED_TEXT), lv)
+        if method in AX.MUTATING:
+            if not AUTH.origin_ok(request.headers.get("origin"), request.url.scheme, request.headers.get("host")):
+                return _security_headers(request, _deny(403, "origin_rejected",
+                                                        "İstek bu sitenin sayfasından gelmedi."), lv)
+            if not sess.csrf_ok(request.headers.get(AUTH.CSRF_HEADER)):
+                return _security_headers(request, _deny(403, "csrf_failed",
+                                                        "Güvenlik doğrulaması başarısız; sayfayı yenileyin."), lv)
+    return _security_headers(request, await call_next(request), lv)
+
+
 # ---- M7-5: CRM validation errors never echo the submitted text (notes, outcomes, owner labels) ----
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
@@ -172,7 +270,8 @@ from fastapi.exception_handlers import request_validation_exception_handler
 
 @app.exception_handler(RequestValidationError)
 async def _validation_error(request: Request, exc: RequestValidationError):
-    if not request.url.path.startswith("/api/crm/"):
+    # M8-CP1: /api/auth/ is included so a rejected login body (e.g. an over-long password) is never echoed back
+    if not request.url.path.startswith(("/api/crm/", "/api/auth/")):
         return await request_validation_exception_handler(request, exc)
     errors = [{"loc": list(e.get("loc", ())), "type": e.get("type"), "msg": e.get("msg")} for e in exc.errors()]
     return JSONResponse(status_code=422, content={"detail": errors})
@@ -412,17 +511,188 @@ def _dashboard_authorized(body: bytes, m) -> tuple[bool, str, str | None]:
     return True, "ok", m.generation_id
 
 
+HEALTH_ERROR_VIEWER_TEXT = "Veriler hazırlanamadı. Ayrıntı yalnızca yöneticiye gösterilir."
+
+
 @app.get("/api/health", response_model=S.Health)
-def health(agent: BusinessActionAgent = Depends(get_agent), repo: ContextRepository = Depends(get_repo)):
+def health(request: Request, agent: BusinessActionAgent = Depends(get_agent),
+           repo: ContextRepository = Depends(get_repo)):
     p = agent.provider
     ready = repo.is_ready()
     asof = (repo.context() or {}).get("as_of_data_date") if ready else None   # no build: already cached
+    err = getattr(repo, "last_error", None)
+    if err and _owner(request) is None:      # M8-CP1: exception text can name local files → owner only
+        err = HEALTH_ERROR_VIEWER_TEXT
     return S.Health(ai_available=agent.available, ai_provider=p.name,
                     ai_model=getattr(p, "model", None),
                     ai_reason=(None if agent.available else getattr(p, "reason", None)),
                     macro_available=False, data_folder=os.path.basename(os.path.normpath(DATA_FOLDER)),   # name only (M5-5: no local paths)
-                    context_ready=ready, context_error=getattr(repo, "last_error", None),
+                    context_ready=ready, context_error=err,
                     as_of_data_date=asof)
+
+
+# ---------------- M8-CP1 password logins (D-060, D-061) ----------------
+# Two roles, two passwords (scrypt hashes in the private .env), no accounts. Viewing the normal dashboard needs neither.
+#   owner   → administration (+ every owner-only read, + financial viewing)
+#   finance → read-only financial viewing (Yönetim financial projection) only
+_LOGIN_LOCK = threading.Lock()      # one verification at a time: throttle check + verify + record are atomic
+_ROLE_LOG = {AUTH.ROLE_OWNER: "owner", AUTH.ROLE_FINANCE: "finance viewer"}
+
+
+def _session_out(s, *, csrf: str | None = None, expires: float | None = None) -> S.OwnerSession:
+    return S.OwnerSession(configured=AUTH.configured_hash() is not None,
+                          finance_configured=AUTH.configured_hash(AUTH.ROLE_FINANCE) is not None,
+                          authenticated=s is not None, role=s.role if s is not None else None,
+                          csrf_token=csrf or (s.csrf_token if s is not None else None),
+                          expires_at=_iso(expires if expires is not None else s.expires_at) if s is not None else None,
+                          idle_expires_at=_iso(s.idle_expires_at) if s is not None else None)
+
+
+@app.get("/api/auth/session", response_model=S.OwnerSession)
+def auth_session(request: Request):
+    """Who is this browser (viewer / financial viewer / owner)? The CSRF token is returned only to the session's own
+    (same-origin) page; other sites cannot read it (no CORS)."""
+    return _session_out(_session(request))
+
+
+def _iso(ts: float) -> str:
+    return dt.datetime.fromtimestamp(ts, dt.timezone.utc).isoformat(timespec="seconds")
+
+
+_NOT_CONFIGURED = {AUTH.ROLE_OWNER: ("admin_not_configured", AUTH_NOT_CONFIGURED_TEXT),
+                   AUTH.ROLE_FINANCE: ("finance_not_configured", FINANCE_NOT_CONFIGURED_TEXT)}
+
+
+def _password_login(body: "S.OwnerLogin", request: Request, role: str):
+    """Shared, role-explicit password login. The role comes from the ENDPOINT, never from the request body, so the
+    financial password can only ever create a financial-viewer session."""
+    enc = AUTH.configured_hash(role)
+    if enc is None:
+        code, text = _NOT_CONFIGURED[role]
+        return _deny(503, code, text)
+    scheme, host = request.url.scheme, request.headers.get("host")
+    if not AUTH.secure_transport(scheme, host, _client_host(request)):
+        return _deny(403, "https_required", "Şifre yalnızca güvenli (HTTPS) bağlantıyla girilebilir.")
+    if not AUTH.origin_ok(request.headers.get("origin"), scheme, host):
+        return _deny(403, "origin_rejected", "İstek bu sitenin sayfasından gelmedi.")
+    current = _session(request)
+    if role == AUTH.ROLE_FINANCE and current is not None and current.is_owner:
+        return JSONResponse(content=_session_out(current).model_dump())   # the owner already sees finance; no downgrade
+    key = AUTH.client_key(_client_host(request))
+    with _LOGIN_LOCK:
+        wait = AUTH.throttle_wait(key, role)
+        if wait:
+            return _deny(429, "login_throttled", "Çok fazla hatalı deneme. Lütfen biraz sonra tekrar deneyin.",
+                         headers={"Retry-After": str(wait)})
+        if not AUTH.verify_password(body.password, enc):
+            AUTH.record_failure(key, role)
+            log.info("%s login rejected", _ROLE_LOG[role])      # no password, client or count in the log
+            return _deny(401, "invalid_credentials", "Şifre hatalı.")
+        AUTH.clear_failures(key, role)
+        if current is not None:                                  # session rotation on every login
+            AUTH.revoke(current.token_hash)
+        token, csrf, exp = AUTH.create_session(enc, role)
+    log.info("%s login accepted", _ROLE_LOG[role])
+    s = AUTH.Session(AUTH._sha(token), csrf, 0.0, exp, exp, role)
+    resp = JSONResponse(content=_session_out(s, csrf=csrf, expires=exp).model_dump(exclude={"idle_expires_at"}))
+    resp.set_cookie(AUTH.COOKIE_NAME, token, max_age=AUTH.session_absolute_seconds(), path="/", httponly=True,
+                    samesite="strict", secure=AUTH.cookie_secure(scheme))
+    return resp
+
+
+@app.post("/api/auth/login", response_model=S.OwnerSession)
+def auth_login(body: S.OwnerLogin, request: Request):
+    """Owner (administration) login."""
+    return _password_login(body, request, AUTH.ROLE_OWNER)
+
+
+@app.post("/api/auth/finance-login", response_model=S.OwnerSession)
+def auth_finance_login(body: S.OwnerLogin, request: Request):
+    """Financial-viewer login: read-only Yönetim financial sections only (D-061)."""
+    return _password_login(body, request, AUTH.ROLE_FINANCE)
+
+
+def _clear_cookie(resp, request: Request):
+    resp.delete_cookie(AUTH.COOKIE_NAME, path="/", httponly=True, samesite="strict",
+                       secure=AUTH.cookie_secure(request.url.scheme))
+    return resp
+
+
+@app.post("/api/auth/logout", response_model=S.OwnerSession)
+def auth_logout(request: Request):
+    """Ends THIS browser's session (owner or financial viewer)."""
+    s = _session(request)
+    if s is not None:
+        if not (AUTH.origin_ok(request.headers.get("origin"), request.url.scheme, request.headers.get("host"))
+                and s.csrf_ok(request.headers.get(AUTH.CSRF_HEADER))):
+            return _deny(403, "csrf_failed", "Güvenlik doğrulaması başarısız; sayfayı yenileyin.")
+        AUTH.revoke(s.token_hash)
+    return _clear_cookie(JSONResponse(content=_session_out(None).model_dump()), request)
+
+
+@app.post("/api/auth/logout-all", response_model=S.OwnerSession)
+def auth_logout_all(request: Request):
+    """Owner only (middleware): end every session — owner and financial viewers — on every device."""
+    AUTH.revoke_all()
+    return _clear_cookie(JSONResponse(content=_session_out(None).model_dump()), request)
+
+
+@app.post("/api/auth/finance-sessions/revoke")
+def auth_finance_sessions_revoke(request: Request):
+    """Owner only (middleware): end every financial-viewer session (e.g. a lost phone); the owner stays logged in."""
+    return {"revoked": AUTH.revoke_all(AUTH.ROLE_FINANCE)}
+
+
+@app.get("/giris", include_in_schema=False)
+def login_page():
+    """Fixed Turkish owner-login page: no data, no file content, no values."""
+    return HTMLResponse(content=LOGIN_PAGE_HTML)
+
+
+LOGIN_PAGE_HTML = """<!doctype html><html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Yönetici girişi</title>
+<style>
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#f4f5f7;color:#1d2433;margin:0;
+ display:flex;min-height:100vh;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
+main{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);padding:28px;max-width:400px;width:100%}
+h1{font-size:1.4rem;margin:0 0 8px}p{line-height:1.5;margin:0 0 14px}label{display:block;font-weight:600;margin:0 0 6px}
+input{width:100%;box-sizing:border-box;font-size:1.1rem;padding:12px;border:1px solid #b8bfcc;border-radius:8px}
+button{margin-top:14px;width:100%;font-size:1.1rem;padding:12px;border:0;border-radius:8px;background:#1f5fbf;
+ color:#fff;font-weight:600;cursor:pointer}button:disabled{opacity:.6}
+.msg{min-height:1.5em;margin-top:12px;font-weight:600}.msg.err{color:#b3261e}.msg.ok{color:#1b7a3a}
+a{color:#1f5fbf}.muted{color:#5b6475;font-size:.95rem}
+</style></head><body><main>
+<h1>Yönetici girişi</h1>
+<p class="muted">Panoyu görüntülemek için giriş gerekmez. Bu giriş yalnızca veri yükleme, CRM / takip
+değişiklikleri ve yönetim işlemleri içindir.</p>
+<form id="f" autocomplete="on"><label for="pw">Yönetici şifresi</label>
+<input id="pw" name="password" type="password" autocomplete="current-password" required maxlength="256">
+<button id="b" type="submit">Giriş yap</button></form>
+<p id="m" class="msg" role="status" aria-live="polite"></p>
+<p><a href="/">← Panoya dön</a></p>
+</main><script>
+(function(){
+var f=document.getElementById('f'),pw=document.getElementById('pw'),b=document.getElementById('b'),
+    m=document.getElementById('m');
+function say(t,k){m.textContent=t;m.className='msg '+(k||'');}
+var T={invalid_credentials:'Şifre hatalı.',login_throttled:'Çok fazla hatalı deneme. Lütfen biraz sonra tekrar deneyin.',
+ https_required:'Yönetici girişi yalnızca güvenli (HTTPS) bağlantıyla yapılabilir.',
+ admin_not_configured:'Yönetici girişi bu sunucuda yapılandırılmadı.',origin_rejected:'Lütfen sayfayı yenileyin.'};
+fetch('/api/auth/session',{headers:{'Accept':'application/json'}}).then(function(r){return r.json();}).then(function(s){
+ if(s.authenticated){say('Yönetici olarak giriş yapılmış durumda.','ok');}
+ else if(!s.configured){say(T.admin_not_configured,'err');b.disabled=true;}
+}).catch(function(){});
+f.addEventListener('submit',function(e){e.preventDefault();b.disabled=true;say('Kontrol ediliyor…');
+ fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json',
+  'X-StockAgent':'1'},body:JSON.stringify({password:pw.value})}).then(function(r){
+  return r.json().catch(function(){return {};}).then(function(d){return {r:r,d:d};});}).then(function(x){
+  pw.value='';
+  if(x.r.ok){say('Giriş yapıldı. Panoya yönlendiriliyorsunuz…','ok');location.replace('/');return;}
+  var c=(x.d&&x.d.detail&&x.d.detail.error_code)||'';say(T[c]||'Giriş yapılamadı.','err');b.disabled=false;pw.focus();
+ }).catch(function(){say('Sunucuya ulaşılamadı.','err');b.disabled=false;});
+});
+})();
+</script></body></html>"""
 
 
 @app.get("/api/agent/categories", response_model=list[S.CategoryOut])
@@ -1080,6 +1350,27 @@ def _owner_system(owner, entries, core, stores, hedef):
             "stores": stores,
             "blocked": [{"key": "detailed_collections", "label": "Detaylı Tahsilat",
                          "status_label": "Sağlanmadı / M6-4 bloke"}]}
+
+
+@app.get("/api/finance/overview", response_model=S.FinanceOverview)
+def finance_overview(owner: OV.OwnerRepository = Depends(get_owner)):
+    """D-061 financial-viewer projection of Yönetim (financial viewer OR owner; read-only). Exactly the Kredi,
+    Gider/Gelir and Bütçe sections, built and gate-redacted exactly like the owner overview, then stripped of source
+    diagnostics (OV.finance_section). No operations, system state, known issues, reload state or file names. The
+    accuracy gate applies unchanged: today every financial section is withheld. The first call may load the
+    configured owner workbooks (the same lazy, read-only load the owner view does); it never reloads them."""
+    owner.ensure_loaded()
+    entries = owner.snapshot()
+    today = dt.date.today()
+    gate = accuracy_gate()
+    return S.FinanceOverview(
+        today=today.isoformat(), audience_note=OV.FINANCE_AUDIENCE_NOTE,
+        kredi=OV.finance_section(ACC.redact_owner_section(OV.kredi_section(owner, entries["kredi"], today),
+                                                          "owner.kredi", gate)),
+        gider_gelir=OV.finance_section(ACC.redact_owner_section(OV.gider_gelir_section(owner, entries["gider_gelir"]),
+                                                                "owner.gider_gelir", gate)),
+        butce=OV.finance_section(ACC.redact_owner_section(OV.butce_section(owner, entries["butce"]), "owner.butce",
+                                                          gate)))
 
 
 @app.get("/api/owner/overview", response_model=S.OwnerOverview)
