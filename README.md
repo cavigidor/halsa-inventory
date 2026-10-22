@@ -71,8 +71,20 @@ M6-4 Detailed Collections remain separate open items.
 python -m services.refresh                # validate + publish dashboard.html and its generation manifest
 # (GET / serves only a dashboard published this way and re-validated; a plain `python dashboard_builder.py data`
 #  build has no publication record and is answered with a neutral status page — M8-ACCURACY-2)
-uvicorn app:app --host 127.0.0.1          # local only; dashboard at http://127.0.0.1:8000/ , API docs at /docs
+uvicorn app:app --host 127.0.0.1          # local only; dashboard at http://127.0.0.1:8000/ (no /docs since M8-CP1)
 ```
+
+## Viewing and owner login (M8-CP1, D-060)
+Halsa Analysis is a browser web app. **Viewing needs no login.** Changing anything (refresh, CRM / follow-ups, fairs,
+actions, AI drafts) and the Yönetim tab need the **owner login**:
+```bash
+python -m services.owner_auth hash-password   # asks twice, prints HALSA_OWNER_PASSWORD_HASH=… → paste into your PRIVATE .env
+python -m services.owner_auth status          # configured? open sessions
+python -m services.owner_auth revoke-sessions # log out every device
+```
+Restart the server, open `http://127.0.0.1:8000/giris`. Without the hash, administration stays disabled (fail
+closed). The password is accepted only over HTTPS or on this computer (`127.0.0.1`). Never commit the hash.
+**Do not host this publicly** before the owner signs off the disclosure inventory in `docs/m8_cp1_access.md` §6.
 
 ## Monthly refresh
 Replace the exports in `./data/` (stock, sales, optional cari/aging), then press **"↻ Verileri yenile"** in the

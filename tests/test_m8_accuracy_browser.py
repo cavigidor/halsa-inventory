@@ -17,6 +17,7 @@ import pytest
 
 from services import accuracy as ACC
 from services import refresh as RF
+from tests import browser_auth as BA  # M8-CP1: real owner login for owner actions
 from tests.fixtures import owner_synth as OS
 from tests.fixtures import synthetic_erp as SE
 from tests.test_m5_browser import ROOT, _free_port, _get, browser, open_page  # noqa: F401  (fixture re-export)
@@ -37,7 +38,7 @@ def production_server(tmp_path):
     log = open(tmp_path / "server.log", "w")
     env = {**os.environ, "STOCKAGENT_NO_DOTENV": "1", "AI_PROVIDER": "mock", "OPENAI_API_KEY": "",
            "MANUAL_INFLATION_RATE": "0.40", "DATA_FOLDER": data, "DASHBOARD_PATH": dash,
-           "AGENT_DB": str(tmp_path / "state.db"), **owner}
+           "AGENT_DB": str(tmp_path / "state.db"), **owner, **BA.server_env()}
     proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(port)],
                             cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
     base = f"http://127.0.0.1:{port}"
@@ -55,6 +56,7 @@ def production_server(tmp_path):
             if time.monotonic() > deadline:
                 pytest.fail("server not ready within 60 s")
             time.sleep(0.2)
+        BA.register(base)
         yield {"base": base}
     finally:
         proc.terminate()

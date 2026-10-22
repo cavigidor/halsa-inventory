@@ -18,6 +18,7 @@ import urllib.request
 import pytest
 
 from services import refresh as RF
+from tests import browser_auth as BA  # M8-CP1: real owner login for owner actions
 from tests.fixtures import fair_synth as FX
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -58,13 +59,16 @@ def _free_port():
 
 
 def _get(url):
-    with urllib.request.urlopen(url, timeout=5) as r:
+    req = urllib.request.Request(url, headers=BA.probe_headers(url))       # M8-CP1: owner probes once registered
+    with urllib.request.urlopen(req, timeout=5) as r:
         return json.loads(r.read().decode())
 
 
 def _post(url, body, method="POST"):
+    base = "/".join(url.split("/")[:3])                     # M8-CP1: seeding goes through the real owner session
     req = urllib.request.Request(url, data=json.dumps(body).encode(), method=method,
-                                 headers={"Content-Type": "application/json", "X-StockAgent": "1"})
+                                 headers={"Content-Type": "application/json", "X-StockAgent": "1",
+                                          **BA.headers(base)})
     with urllib.request.urlopen(req, timeout=5) as r:
         return json.loads(r.read().decode())
 
@@ -76,7 +80,7 @@ def fair_server(tmp_path):
     assert RF.run_refresh(data, dash, inflation_rate=0.40)["ok"]
     env = {**os.environ, "STOCKAGENT_NO_DOTENV": "1", "AI_PROVIDER": "disabled", "OPENAI_API_KEY": "",
            "MANUAL_INFLATION_RATE": "0.40", "DATA_FOLDER": data, "DASHBOARD_PATH": dash,
-           "AGENT_DB": str(tmp_path / "state.db")}
+           "AGENT_DB": str(tmp_path / "state.db"), **BA.server_env()}
     env.pop("HEDEF_PATH", None)
     port = _free_port()
     log = open(tmp_path / "server.log", "w")
@@ -98,6 +102,7 @@ def fair_server(tmp_path):
             if time.monotonic() > deadline:
                 pytest.fail("server not ready within 90 s:\n" + open(tmp_path / "server.log").read()[-3000:])
             time.sleep(0.2)
+        BA.register(base)
         yield {"base": base, "dash": dash, "data": data, "log": tmp_path / "server.log"}
     finally:
         proc.terminate()
@@ -115,6 +120,7 @@ def ai_calls(srv):
 
 def open_page(browser, viewport=None):
     ctx = browser.new_context(viewport=viewport or {"width": 1280, "height": 900})
+    BA.authorize(ctx)
     page = ctx.new_page()
     page.errors, page.requests = [], []
     page.on("pageerror", lambda e: page.errors.append(str(e)))

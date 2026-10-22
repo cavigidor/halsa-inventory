@@ -1358,6 +1358,73 @@ _SQ_BODY="""
 <div class="sq-undo" role="status" aria-live="polite" hidden></div>
 """
 
+# M8-CP1 (D-060): viewing needs no login; owner actions need the owner session. One shared script, loaded before the
+# panels: it adds the session's CSRF token to same-origin state-changing requests (the panels' own fetch calls are
+# unchanged), shows "Görüntüleme modu" / "Yönetici" in the header, and tells a viewer who tries an owner action that it
+# needs the owner login. It reads no business data, stores nothing in the browser and never sees the session cookie
+# (HttpOnly). Does nothing when the file is opened directly (file://).
+_ACCESS_CSS = """
+.acc-bar{margin:10px 0 0;font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
+.acc-bar a{color:#1f5fbf;font-weight:600}
+.acc-bar button{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--card);border-radius:8px;
+ padding:5px 12px;cursor:pointer;min-height:32px}
+.acc-msg{position:sticky;top:0;z-index:50;margin:10px 0;padding:12px 14px;border-radius:10px;background:var(--warn-bg);
+ border:1px solid #f1d39b;color:var(--ink);font-weight:600;font-size:14px}
+.acc-msg a{color:#1f5fbf;margin-left:6px}
+.acc-bar[hidden],.acc-msg[hidden]{display:none}
+"""
+_ACCESS_JS = r"""
+(function(){
+if(location.protocol==='file:'||typeof window.fetch!=='function') return;
+var nativeFetch=window.fetch.bind(window), sess=null, pending=null, msgTimer=null;
+var TXT={viewer:'Görüntüleme modu — değişiklik yapmak için ',login:'Yönetici girişi',owner:'Yönetici girişi açık',
+  logout:'Çıkış yap',need:'Bu işlem yalnızca yönetici girişiyle yapılabilir. Görüntüleme için giriş gerekmez.',
+  off:'Yönetici girişi bu sunucuda yapılandırılmadı; değişiklik yapılamaz.',
+  csrf:'Oturum doğrulanamadı; sayfayı yenileyip tekrar deneyin.',viewonly:'Görüntüleme modu'};
+function $(id){return document.getElementById(id);}
+function el(t,txt){var e=document.createElement(t); if(txt!=null) e.textContent=txt; return e;}
+function session(force){
+  if(force){sess=null; pending=null;}
+  if(sess) return Promise.resolve(sess);
+  if(!pending) pending=nativeFetch('/api/auth/session',{headers:{'Accept':'application/json'},credentials:'same-origin'})
+    .then(function(r){return r&&r.ok?r.json():{authenticated:false};}).catch(function(){return {authenticated:false};})
+    .then(function(s){sess=s||{authenticated:false}; pending=null; paint(); return sess;});
+  return pending;}
+function urlOf(i){return typeof i==='string'?i:(i&&i.url)||String(i);}
+function sameOrigin(u){try{return new URL(u,location.href).origin===location.origin;}catch(e){return false;}}
+function withToken(init,tok){var h=init.headers;
+  if(h&&typeof Headers!=='undefined'&&h instanceof Headers){h=new Headers(h); h.set('X-CSRF-Token',tok);}
+  else{h=Object.assign({},h||{},{'X-CSRF-Token':tok});}
+  return Object.assign({},init,{headers:h,credentials:'same-origin'});}
+function watch(r){
+  if(r&&(r.status===401||r.status===403)&&typeof r.clone==='function'){
+    try{r.clone().json().then(function(b){var c=b&&b.detail&&b.detail.error_code;
+      if(c==='auth_required'||c==='admin_not_configured'||c==='csrf_failed'||c==='origin_rejected'){session(true); notify(c);}
+    }).catch(function(){});}catch(e){}}
+  return r;}
+window.fetch=function(input,init){
+  init=init||{}; var m=String(init.method||(input&&input.method)||'GET').toUpperCase(), u=urlOf(input);
+  if(m==='GET'||m==='HEAD'||!sameOrigin(u)) return nativeFetch(input,init).then(watch);
+  return session().then(function(s){return nativeFetch(input,s&&s.csrf_token?withToken(init,s.csrf_token):init);}).then(watch);
+};
+function notify(code){var box=$('halsa-access-msg'); if(!box) return;
+  box.replaceChildren(el('span',code==='admin_not_configured'?TXT.off:(code==='auth_required'?TXT.need:TXT.csrf)));
+  if(code==='auth_required'){var a=el('a',TXT.login); a.href='/giris'; box.append(a);}
+  box.hidden=false; clearTimeout(msgTimer); msgTimer=setTimeout(function(){box.hidden=true;},12000);}
+function paint(){var bar=$('halsa-access'); if(!bar||!sess) return; bar.replaceChildren(); bar.hidden=false;
+  bar.dataset.mode=sess.authenticated?'owner':'viewer';
+  if(sess.authenticated){bar.append(el('span','🔐 '+TXT.owner)); var b=el('button',TXT.logout); b.type='button';
+    b.addEventListener('click',function(){b.disabled=true; window.fetch('/api/auth/logout',{method:'POST',
+      headers:{'Content-Type':'application/json','X-StockAgent':'1'},body:'{}'}).then(function(){location.reload();},
+      function(){b.disabled=false;});}); bar.append(b);}
+  else if(sess.configured){bar.append(el('span','👁 '+TXT.viewer)); var a=el('a',TXT.login); a.href='/giris'; bar.append(a);}
+  else{bar.append(el('span','👁 '+TXT.viewonly));}}
+window.StockAgentAccess={session:session};
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',function(){session();}); else session();
+})();
+"""
+
+
 _SQ_JS=r"""
 (function(){
 'use strict';
@@ -2353,7 +2420,8 @@ const POLL_MS=window.__OWN_POLL_MS||1500, POLL_MAX=window.__OWN_POLL_MAX||400;
 const H={'Content-Type':'application/json','X-StockAgent':'1'};   // local CSRF guard (D-020)
 const MSG={file:'Yönetim için panoyu http://127.0.0.1:8000/ üzerinden açın.',
   offline:'Sunucu çalışmıyor. Terminalde uvicorn app:app --host 127.0.0.1 çalıştırıp http://127.0.0.1:8000 adresini açın. Diğer sekmeler normal çalışır.',
-  fail:'Yüklenemedi'};
+  fail:'Yüklenemedi',
+  auth:'Yönetim bölümü (şirket finansları ve sistem durumu) yalnızca yönetici girişiyle görüntülenir. Sayfanın üstündeki “Yönetici girişi” bağlantısını kullanın.'};
 const AY=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 const st={started:false,seq:0,shown:0,timer:null,polls:0,reloading:false};
 const $=s=>root.querySelector(s);
@@ -2378,7 +2446,8 @@ async function api(path,opt){
   let r; try{r=await fetch(path,opt||{headers:{'Accept':'application/json'}});}catch(e){const x=new Error('offline'); x.offline=true; throw x;}
   let b=null; try{b=await r.json();}catch(e){b=null;}
   if(!r.ok){const x=new Error('HTTP '+r.status); x.status=r.status; x.body=b; throw x;} return b;}
-function errText(e){if(e.offline) return MSG.offline; return MSG.fail+(e.status?' (HTTP '+e.status+')':'')+'.';}
+function errText(e){if(e.offline) return MSG.offline; if(e.status===401) return MSG.auth;   // M8-CP1: owner-only tab
+  return MSG.fail+(e.status?' (HTTP '+e.status+')':'')+'.';}
 
 function start(){
   if(st.started) return; st.started=true;
@@ -2598,10 +2667,13 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 .aw-box{{border:1px solid var(--line);background:#f4f5f7;border-radius:10px;padding:14px 16px;margin:8px 0 14px}}
 .aw-msg{{font-weight:700;margin:0 0 6px;font-size:15px}}.aw-why{{margin:0;padding-left:18px;color:var(--muted);font-size:13px}}
 .aw-why li{{margin:3px 0}}
-</style></head><body><div class="wrap">
+{_ACCESS_CSS}</style></head><body><div class="wrap">
 <header><div class="eyebrow">Şirket Panosu</div>
 <h1>Şirket Panosu — {meta['date']}</h1>
-<div class="sub">{src}{f" · {meta['total']:,} ürün" if meta.get('total_shown') else ''}</div></header>
+<div class="sub">{src}{f" · {meta['total']:,} ürün" if meta.get('total_shown') else ''}</div>
+<div class="acc-bar" id="halsa-access" hidden></div></header>
+<div class="acc-msg" id="halsa-access-msg" role="alert" hidden></div>
+<script>{_ACCESS_JS}</script>
 <div class="tabs">{tabbtns}{sq_btn}{c3_btn}{op_btn}{fm_btn}{cr_btn}{ow_btn}{ai_btn}</div>
 <div id="overview" class="panel on">
 <h2 class="sec">Aktif Analizler</h2>

@@ -1,5 +1,14 @@
 # M8 — Father-first production launch (plan, no implementation yet)
 
+> **Revision 2026-10-22 (D-060, M8-CP1 implemented locally, not deployed).** Halsa Analysis is a **browser-based web
+> application** — the father opens a link; nothing is installed. **Viewing needs no login.** The **owner** logs in
+> (one password, no accounts) for every administrative or data-changing operation: report upload / refresh, CRM and
+> follow-up edits, fair and action changes, data-review decisions, verification approvals, business rules, system
+> settings, paid AI, and the owner-only Yönetim / diagnostics views. Public-by-link viewing carries real disclosure
+> risk (customer names, CRM and fair notes are viewer-visible today; every future VERIFIED metric becomes viewer-visible
+> too) — see `docs/m8_cp1_access.md` §6. **External deployment still requires the owner's explicit, recorded
+> sign-off.** Points 1–2 and the CP1 paragraph below are kept for the record and marked where superseded.
+
 **Status:** Planning checkpoint, 2026-10-18. The owner lives in the USA and handles technical support, hosting,
 monthly uploads and business maintenance. His father in Türkiye (age 70) should only have to open a bookmarked
 HTTPS link and use a Turkish dashboard. The staff exports monthly ERP workbooks; the owner uploads them.
@@ -17,10 +26,13 @@ and owner-financial reporting.
 
 ## Hard boundaries and operating design
 
-1. **Users at launch:** owner + father only, both owner/admin authorization, each with their own login.
+1. **Users at launch** *(superseded in part by D-060: the father views without a login; only the owner logs in, for
+   administration)*: owner + father only, both owner/admin authorization, each with their own login.
    Salesperson provisioning and per-portfolio authorization are later. DO NOT allow salespeople access to the
    present owner-financial screens. Never expose the current unauthenticated app on the public internet.
-2. **Access:** bookmarked HTTPS URL, accessible from US and Türkiye; father's routine is open page and read/click.
+2. **Access** *(superseded in part by D-060: read-only pages open without login; owner-only routes, mutations and
+   verification remain protected; `/docs` and `/openapi.json` are disabled)*: bookmarked HTTPS URL, accessible from
+   US and Türkiye; father's routine is open page and read/click.
    Login should be low-friction but secure, with persistent bounded session, clear Turkish login/recovery UX.
    Never hardcode shared passwords, bypass authentication in endpoints/static HTML, or treat `X-StockAgent` as
    identity verification. Secure all routes including `/`, `/docs`, `/openapi.json`, state mutations, files
@@ -90,7 +102,10 @@ and owner-financial reporting.
 
 ## Expected Codex checkpoints (8 implementation PRs after this plan; one optional Kredi follow-up)
 
-**CP1 — Security-first access:** create real owner/father auth, secure all HTML/API/mutations and verification,
+**CP1 — Simplified access (as implemented, D-060):** one owner administration login (scrypt hash in the private
+`.env`, server-side revocable sessions, CSRF, throttling, secure cookies, fail-closed register of every route); viewer
+pages without login; owner-only Yönetim and diagnostics; `/docs` disabled; no deployment. Details and the disclosure
+inventory: `docs/m8_cp1_access.md`. *Original CP1 text (superseded):* create real owner/father auth, secure all HTML/API/mutations and verification,
 session management, hardened headers, CSRF, login/recovery path, 2 seeded owner accounts via noncommitted secret flow.
 No public deployment until accepted. CI: unauthenticated read/write uniformly denied, identity not from header.
 
@@ -120,7 +135,9 @@ If too large, split CP6 into multiple bounded PRs and revise estimate openly.
 auto-health/user-friendly errors, accessible login, phone/desktop 390px checks, support/no technical screens for
 father; add end-to-end browser suites for owner upload/refresh/fail-safe/data consistency.
 
-**CP8 — Real hosting and cutover:** provision hosting through user-authorized integrations, private TLS domain,
+**CP8 — Real hosting and cutover:** *(D-060: first obtain the owner's recorded sign-off on the public-by-link
+disclosure inventory, `docs/m8_cp1_access.md` §6; HTTPS with trusted proxy headers is required for owner login)*
+provision hosting through user-authorized integrations, private TLS domain,
 authorized accounts, persistent storage, backups, upload real exports outside GitHub, full integration smoke from
 USA/Türkiye, father-facing bookmark, safe rollback, signoff checklist. Never claim deployed until URL and tests work.
 
@@ -132,6 +149,7 @@ document it rather than forcing a rule change. Reconcile against a dated authori
 Owner must supply hosting/payment access and any custom DNS controls; choose/approve where Halsa's private ERP
 data may be stored (review Turkish KVKK cross-border transfer implications); upload actual exports via encrypted
 private application flow (never GitHub/chat); set up personal/father accounts securely; decide official file-of-record
-for each source and answer unresolved business questions; personally test father login from Türkiye.
+for each source and answer unresolved business questions; personally test father login from Türkiye *(D-060: the
+father no longer logs in — test the father's link without login and the owner's login from the US instead)*.
 
 The father should never be responsible for these tasks. Staff only generate the monthly ERP reports.

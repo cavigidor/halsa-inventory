@@ -110,9 +110,18 @@ On every accepted generation the detector produces the current issue set and rec
 
 ## 5. Security requirements
 
-- **Authorization:** the section, its API and every write (review, acknowledge, note) require the authenticated
-  owner role from **M8-CP1**; until CP1 exists the section is not exposed at all (no read-only bypass). Staff roles,
-  if added, may read but cannot acknowledge without explicit owner grant.
+- **Authorization (revised 2026-10-22, D-060 — CP1 simplified access):**
+  - *Read-only issue visibility* MAY be `viewer` level (no login) for the privacy-safe issue list: type, severity,
+    affected metric names, counts, status and dates — the same kind of information the withheld notices already show.
+    Anything that could carry a private value or the owner's own text — **review notes**, row-level locators that a
+    viewer could map back to a customer, source file names, fingerprints — is `owner_read`.
+  - *Every decision* — review, acknowledge, note, status change, reopen — is `owner_write` in `services/access.py`:
+    owner session + CSRF token + same-origin check. The reviewer is the authenticated owner session, never a
+    request field.
+  - The original rule "until CP1 exists the section is not exposed at all" is satisfied (CP1 exists). VKM-1 must
+    register every new route in `services/access.py` and `services/accuracy.ROUTES` (both tests fail otherwise) and
+    list any new viewer-visible field in the `docs/m8_cp1_access.md` §6 disclosure inventory.
+  - Staff roles do not exist (D-060); there is one owner.
 - CSRF protection and rate limits on writes (CP1 machinery); reviewer is taken from the session, never from the
   request body.
 - No raw ERP values in issue IDs, titles, logs or error messages; notes are owner text, length-limited, HTML-escaped,
@@ -135,8 +144,10 @@ On every accepted generation the detector produces the current issue set and rec
    cozuldu_kaynakta; reappears → reopened.
 7. **Missing Kredi file:** a month without the Kredi upload produces `missing_source`, marks earlier Kredi issues
    `source_missing`, and resolves none of them.
-8. **Authorization:** unauthenticated and non-owner requests to read or write are refused; reviewer identity comes
-   from the session; CSRF-less writes are refused; a review against a stale generation is refused.
+8. **Authorization (D-060):** anonymous review / acknowledge / note / status requests are refused (401) and change
+   nothing; owner-only issue detail (notes, locators) is refused to viewers; reviewer identity comes from the session;
+   CSRF-less or cross-origin writes are refused; a review against a stale generation is refused; any viewer-level
+   issue list contains no canary customer name, code, amount or note.
 9. `dq_issue_event` is append-only (no UPDATE/DELETE), and history survives restart.
 10. Privacy: logs, IDs and API errors contain no synthetic customer names, codes or amounts (canary strings).
 11. Turkish UI strings for every type and status; the section states plainly that review is not approval

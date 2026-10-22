@@ -19,6 +19,7 @@ import urllib.request
 import pytest
 
 from services import refresh as RF
+from tests import browser_auth as BA  # M8-CP1: real owner login for owner actions
 from tests.fixtures import fair_synth as FX
 from tests.fixtures import owner_synth as OS
 from tests.test_m7_fair_browser import _get, _post, ai_calls, browser, no_horizontal_overflow, open_page  # noqa: F401
@@ -47,7 +48,7 @@ def server(tmp_path, owner=None):
     assert RF.run_refresh(data, dash, inflation_rate=0.40)["ok"]
     env = {**os.environ, "STOCKAGENT_NO_DOTENV": "1", "AI_PROVIDER": "disabled", "OPENAI_API_KEY": "",
            "MANUAL_INFLATION_RATE": "0.40", "DATA_FOLDER": data, "DASHBOARD_PATH": dash,
-           "AGENT_DB": str(tmp_path / "state.db")}
+           "AGENT_DB": str(tmp_path / "state.db"), **BA.server_env()}
     for k in ("HEDEF_PATH", "KREDI_PATH", "GIDER_GELIR_PATH", "BUTCE_PATH", "KREDI_SNAPSHOT_DATE",
               "GIDER_GELIR_REPORT_YEAR", "BUTCE_PLANNING_YEAR", "BUTCE_SNAPSHOT_DATE"):
         env.pop(k, None)
@@ -72,6 +73,7 @@ def server(tmp_path, owner=None):
             if time.monotonic() > deadline:
                 pytest.fail("server not ready within 90 s:\n" + open(tmp_path / "server.log").read()[-3000:])
             time.sleep(0.2)
+        BA.register(base)
         yield {"base": base, "dash": dash, "data": data, "log": tmp_path / "server.log"}
     finally:
         proc.terminate()

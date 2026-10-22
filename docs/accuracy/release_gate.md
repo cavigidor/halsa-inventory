@@ -86,7 +86,10 @@ A father-facing release may go live only when **all** hold:
 - [ ] Each analysis the owner wants on day one is promoted to VERIFIED by §2 (none yet).
 - [ ] Owner has reviewed which tabs show only notices and accepts that state for launch, or delays launch.
 - [ ] Declared report dates for every uploaded source (CP3/CP4).
-- [ ] Authentication (CP1) and the rest of the M8 plan.
+- [ ] Authentication (CP1) and the rest of the M8 plan. *(2026-10-22, D-060: CP1 implemented locally as viewing
+  without login + one owner administration login — `docs/m8_cp1_access.md`; still needs PR review and merge.)*
+- [ ] Owner's recorded sign-off on the public-by-link disclosure inventory (`docs/m8_cp1_access.md` §6) — every metric
+  promoted to VERIFIED becomes visible to anyone with the link, not only to the owner (D-060).
 
 ## 5. This checkpoint's acceptance
 | Criterion | Result |

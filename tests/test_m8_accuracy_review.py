@@ -378,7 +378,7 @@ def _permitted_gets(code, cid):
     out = []
     for (method, path), (kind, _) in ACC.ROUTES.items():
         if method != "GET" or kind == "metric" or path in ("/", "/docs", "/redoc", "/openapi.json",
-                                                          "/docs/oauth2-redirect"):
+                                                          "/docs/oauth2-redirect", "/giris"):   # HTML, no data
             continue
         out.append(path.replace("{customer_code}", code).replace("{campaign_id}", str(cid)))
     return out

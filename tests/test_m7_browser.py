@@ -18,6 +18,7 @@ import urllib.request
 import pytest
 
 from services import refresh as RF
+from tests import browser_auth as BA  # M8-CP1: real owner login for owner actions
 from tests.fixtures import c360_synth as F
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -54,7 +55,8 @@ def _free_port():
 
 
 def _get(url):
-    with urllib.request.urlopen(url, timeout=5) as r:
+    req = urllib.request.Request(url, headers=BA.probe_headers(url))       # M8-CP1: owner probes once registered
+    with urllib.request.urlopen(req, timeout=5) as r:
         return json.loads(r.read().decode())
 
 
@@ -65,7 +67,7 @@ def c360_server(tmp_path, hedef=False):
     assert RF.run_refresh(data, dash, inflation_rate=0.40)["ok"]
     env = {**os.environ, "STOCKAGENT_NO_DOTENV": "1", "AI_PROVIDER": "disabled", "OPENAI_API_KEY": "",
            "MANUAL_INFLATION_RATE": "0.40", "DATA_FOLDER": data, "DASHBOARD_PATH": dash,
-           "AGENT_DB": str(tmp_path / "state.db")}
+           "AGENT_DB": str(tmp_path / "state.db"), **BA.server_env()}
     env.pop("HEDEF_PATH", None)
     if hedef:
         env["HEDEF_PATH"] = F.write_hedef(str(tmp_path / F.HEDEF_FILE))
@@ -90,6 +92,7 @@ def c360_server(tmp_path, hedef=False):
             if time.monotonic() > deadline:
                 pytest.fail("server not ready within 90 s:\n" + open(tmp_path / "server.log").read()[-3000:])
             time.sleep(0.2)
+        BA.register(base)
         yield {"base": base, "dash": dash, "data": data, "log": tmp_path / "server.log"}
     finally:
         proc.terminate()
@@ -107,6 +110,7 @@ def ai_calls(srv):
 
 def open_page(browser, viewport=None):
     ctx = browser.new_context(viewport=viewport or {"width": 1280, "height": 900})
+    BA.authorize(ctx)
     page = ctx.new_page()
     page.errors, page.requests = [], []
     page.on("pageerror", lambda e: page.errors.append(str(e)))

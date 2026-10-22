@@ -43,6 +43,31 @@ def _accuracy_algorithm_harness():
     ACC.current_gate = original
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _owner_session_harness():
+    """M8-CP1. Every data-changing route needs the owner session + CSRF token. The pre-existing in-process tests of
+    the preserved features run as an authenticated owner through the TEST-ONLY harness (tests/auth_harness.py);
+    tests marked `production_auth` and every browser test use the real login."""
+    from services import owner_auth as AUTH
+    from tests import auth_harness as AH
+    original = AUTH.request_session
+    AUTH.request_session = AH.harness_request_session
+    yield
+    AUTH.request_session = original
+
+
+@pytest.fixture(autouse=True)
+def _owner_session_mode(request, monkeypatch):
+    """Tests marked `production_auth` resolve the owner session for real (cookie → SQLite) and never read a
+    developer's environment: no owner password hash unless the test sets one."""
+    monkeypatch.delenv("HALSA_OWNER_PASSWORD_HASH", raising=False)
+    if request.node.get_closest_marker("production_auth") is not None:
+        from services import owner_auth as AUTH
+        from tests import auth_harness as AH
+        monkeypatch.setattr(AUTH, "request_session", AH.production_request_session)
+    yield
+
+
 @pytest.fixture(autouse=True)
 def _accuracy_gate_mode(request, monkeypatch):
     """Tests marked `production_gate` run the REAL production gate."""

@@ -1,8 +1,9 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-21 (PR #29 M8-ACCURACY-2B technically reviewed and squash-merged at `4ad8d8a` from `ab841ba`; CI `1411 passed, 7 skipped, 2 xfailed`. Core owner-local reconciliation remains FAIL; Kredi NOT RUN; zero production metrics VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False. Next implementation checkpoint: security-first M8-CP1 before exposing Veri Kontrol Merkezi or hosting)._
+_Updated 2026-10-22 (M8-CP1 simplified access implemented on `claude/m8-cp1-simplified-access`, PR #30, awaiting independent review: viewing without login, one owner administration login, D-060; local tests 1513 passed / 7 skipped / 2 xfailed. Not deployed. Accuracy unchanged: core owner-local reconciliation FAIL; Kredi NOT RUN; zero production metrics VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False)._
 
 ## Git
+- **`claude/m8-cp1-simplified-access`:** M8-CP1 (D-060), branched from `main` `23b7257`; PR #30 open for independent review; not merged, not deployed.
 - **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), M8 source-evidence foundation PR #28 (`5baa92a`), and M8 precise validation PR #29 (`4ad8d8a`) merged.
 - **`claude/m8-accuracy-2-shared-evidence`:** PR #28 merged as technical infrastructure 2026-10-20; all production metrics still withheld and `GENERATION_BOUND_API_EVIDENCE` remains False.
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
@@ -35,9 +36,31 @@ _Updated 2026-10-21 (PR #29 M8-ACCURACY-2B technically reviewed and squash-merge
 - **Local Git note:** Claude reported a renamed stale lock `.git/stale-maintenance-lock-claude` on the owner's Mac. No evidence of an active canonical Git lock; verify no Git maintenance process is running before removing only that inert renamed file. The Mac working tree and private sources were not inspected by this GitHub review.
 
 
-## Current next checkpoint — M8-CP1 security-first owner/father access
-
-Per M8 roadmap and TASKS.md, authentication/authorization is the next isolated Claude Code PR before any external hosting or exposing Veri Kontrol Merkezi. Both owner and father need distinct revocable accounts; local testing only, hardened FastAPI routes and state mutation, CSRF, throttled login, safe session cookies, opt-in secret provisioning, and forced unauthorized-request tests. No public deployment in CP1. Keep all metrics withheld and AI off by default. Later M8-VKM-1 implements owner-only source issue review with append-only history, without certifying any metric.
+## M8-CP1 — simplified web access and owner administration (implemented 2026-10-22; PR #30; NOT merged, NOT deployed)
+- **Owner requirement (D-060, supersedes the two-account CP1 plan of D-048):** browser web app; anyone with the link
+  views permitted read-only content without login; the owner logs in for every data-changing or administrative
+  operation. No father account, no multi-user system.
+- **Built:** `services/access.py` (one level per route: `viewer` / `owner_read` / `owner_write` / `auth`; unlisted →
+  403; mutating never viewer; `?retry` on Customer 360 status owner-only), `services/owner_auth.py` (scrypt hash in the
+  private `.env`, SQLite sessions storing token hashes only, 12 h absolute / 120 min idle, ≤5 sessions, logout /
+  logout-all / CLI revocation / revocation on password change, HMAC CSRF token + Origin check, 5-per-client and
+  20-global failures per 15 min throttle, HTTPS-or-loopback password transport, fail closed), access middleware before
+  the accuracy gate, security headers, `/docs` `/redoc` `/openapi.json` disabled, `/giris` login page, `/api/auth/*`,
+  viewer-safe `/api/health` error text, dashboard access script (CSRF header on owner requests, "Görüntüleme modu" /
+  "Yönetici girişi açık" indicator, clear message when a viewer tries an owner action), Yönetim 401 message.
+- **Route audit (all 51 routes):** `docs/m8_cp1_access.md` §2 — owner-only reads: Yönetim (`/api/owner/*`),
+  `/api/accuracy/status`, `/api/context`, `/api/ai/calls`; every POST/PUT owner-write; GET side effects handled (§2.5).
+- **Preserved:** every M5–M7 feature and action keeps working for the owner (whole pre-existing suite green); the
+  dashboard, tabs, Customer 360 search, CRM, fairs and the action queue are readable without login; accuracy gate and
+  source-generation consistency untouched (owner sees the same withheld notices as viewers).
+- **Tests (cloud, synthetic, `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled`):** baseline on `main`
+  `23b7257` 1411 passed / 7 skipped / 2 xfailed; with CP1 **1513 passed / 7 skipped / 2 xfailed** (+99 `tests/test_m8_cp1_access.py` real
+  sessions, +3 `tests/test_m8_cp1_browser.py` real login in Chromium, +3 jsdom access-mode tests inside the existing
+  JS run). Pre-existing in-process tests run as the owner via the TEST-ONLY `tests/auth_harness.py`; browser tests log
+  in for real.
+- **Not done / open:** owner sign-off on the disclosure inventory (`docs/m8_cp1_access.md` §6) — customer names, CRM
+  and fair notes are viewer-visible today; Mac acceptance of the login (owner: `python -m services.owner_auth
+  hash-password`); hosting, TLS, proxy headers, backups (CP2–CP8); upload UX (CP3); Veri Kontrol Merkezi (VKM-1).
 
 ## Milestone
 **Milestone 5 — AI Aksiyon Merkezi: COMPLETE** (M5-1 to M5-6; final acceptance in the M5-6 section below).

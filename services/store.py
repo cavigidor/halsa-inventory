@@ -50,6 +50,9 @@ def init_db():
         # M7-5 (D-046): structured CRM columns on `memory` (only if missing) + one current follow-up per customer.
         from services import crm_store
         crm_store.init_tables(c)
+        # M8-CP1 (D-060): owner sessions (token hashes only) and login-failure throttle. CREATE IF NOT EXISTS only.
+        from services import owner_auth
+        owner_auth.init_tables(c)
 
 
 def content_key(category, entity_id, content_hash):

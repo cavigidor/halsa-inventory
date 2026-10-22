@@ -19,6 +19,21 @@ class WithheldNotice(BaseModel):
     reasons: List[str] = []
 
 
+# ---------- M8-CP1 owner administration login (D-060) ----------
+class OwnerLogin(BaseModel):
+    """One owner password; no username. Bounded so a huge body cannot make the key derivation expensive."""
+    model_config = ConfigDict(extra="forbid")
+    password: str = Field(min_length=1, max_length=256)
+
+
+class OwnerSession(BaseModel):
+    configured: bool                      # is an owner password hash configured on this server?
+    authenticated: bool
+    csrf_token: Optional[str] = None      # only to the session's own same-origin page
+    expires_at: Optional[str] = None
+    idle_expires_at: Optional[str] = None
+
+
 class Health(BaseModel):
     status: str = "ok"
     ai_available: bool

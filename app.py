@@ -56,7 +56,9 @@ HEDEF_PATH = os.environ.get("HEDEF_PATH") or None
 HEDEF_SNAPSHOT_DATE = os.environ.get("HEDEF_SNAPSHOT_DATE") or None
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
-app = FastAPI(title="AI Aksiyon Merkezi API", version="0.4")
+# M8-CP1 (D-060): no interactive API documentation, schema dump or debug UI is served (/docs, /redoc, /openapi.json
+# answer 404). The schema is still available to code and tests through app.openapi().
+app = FastAPI(title="AI Aksiyon Merkezi API", version="0.4", docs_url=None, redoc_url=None, openapi_url=None)
 
 
 # ---- local CSRF guard (D-020): every mutating request needs X-StockAgent: 1 ----
@@ -165,6 +167,84 @@ async def _accuracy_decide(request: Request, call_next):
     return JSONResponse(status_code=ACC.WITHHELD_HTTP_STATUS, content={"detail": d.notice()})
 
 
+# ---- M8-CP1 (D-060): viewing needs no login; administration needs the owner session ----
+# Registered AFTER the accuracy middleware, so it runs FIRST: an anonymous request for an owner-only route is refused
+# before the accuracy gate, any endpoint, the provider or SQLite is reached. Every matched route must be classified in
+# services/access.ACCESS (unclassified → 403 for everyone). The accuracy gate is unchanged and applies to the owner
+# exactly as to a viewer: logging in never reveals an unverified metric. X-StockAgent stays as an extra local guard on
+# mutations but is NOT authentication.
+from starlette.concurrency import run_in_threadpool
+from services import access as AX
+from services import owner_auth as AUTH
+
+AUTH_REQUIRED_TEXT = "Bu işlem yalnızca yönetici girişiyle yapılabilir. Görüntüleme için giriş gerekmez."
+AUTH_NOT_CONFIGURED_TEXT = "Yönetici girişi bu sunucuda yapılandırılmadı; yönetim işlemleri kapalı."
+
+
+def _deny(status: int, code: str, message: str, headers: dict | None = None) -> JSONResponse:
+    return JSONResponse(status_code=status, content={"detail": {"error_code": code, "message": message}},
+                        headers=headers)
+
+
+def _client_host(request: Request) -> str | None:
+    return request.client.host if request.client else None
+
+
+def _owner(request: Request):
+    """The owner session the access middleware resolved for this request (None = viewer)."""
+    return getattr(request.state, "owner", None)
+
+
+def _security_headers(request: Request, resp, lv: str | None):
+    h = resp.headers
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("X-Frame-Options", "DENY")                               # no framing → no click-jacking of owner
+    h.setdefault("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'none'; object-src 'none'")
+    h.setdefault("Referrer-Policy", "same-origin")
+    h.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    h.setdefault("Cross-Origin-Resource-Policy", "same-origin")
+    if request.url.scheme == "https":
+        h.setdefault("Strict-Transport-Security", "max-age=31536000")
+    if lv in (AX.OWNER_READ, AX.OWNER_WRITE, AX.AUTH) or _owner(request) is not None:
+        h["Cache-Control"] = "no-store"                                   # owner responses never cached
+    return resp
+
+
+@app.middleware("http")
+async def _access_control(request: Request, call_next):
+    method = "GET" if request.method == "HEAD" else request.method
+    tpl = _route_template(request.scope)
+    request.state.owner = None
+    if tpl is None or method == "OPTIONS":
+        return _security_headers(request, await call_next(request), None)     # router answers 404 / 405
+    lv = AX.level(method, tpl)
+    if lv is None:
+        return _security_headers(request, _deny(403, "access_unclassified",
+                                                "Bu uç erişim kaydında sınıflandırılmadı."), None)
+    try:
+        sess = await run_in_threadpool(AUTH.request_session, request)
+    except Exception as e:                                                # state store unreadable → anonymous
+        log.warning("owner session check failed (%s)", type(e).__name__)
+        sess = None
+    request.state.owner = sess
+    need_owner = lv in (AX.OWNER_READ, AX.OWNER_WRITE) or (
+        lv == AX.VIEWER and AX.owner_query_used(method, tpl, request.query_params))
+    if need_owner:
+        if sess is None:
+            configured = AUTH.configured_hash() is not None
+            return _security_headers(request, _deny(
+                401, "auth_required" if configured else "admin_not_configured",
+                AUTH_REQUIRED_TEXT if configured else AUTH_NOT_CONFIGURED_TEXT), lv)
+        if method in AX.MUTATING:
+            if not AUTH.origin_ok(request.headers.get("origin"), request.url.scheme, request.headers.get("host")):
+                return _security_headers(request, _deny(403, "origin_rejected",
+                                                        "İstek bu sitenin sayfasından gelmedi."), lv)
+            if not sess.csrf_ok(request.headers.get(AUTH.CSRF_HEADER)):
+                return _security_headers(request, _deny(403, "csrf_failed",
+                                                        "Güvenlik doğrulaması başarısız; sayfayı yenileyin."), lv)
+    return _security_headers(request, await call_next(request), lv)
+
+
 # ---- M7-5: CRM validation errors never echo the submitted text (notes, outcomes, owner labels) ----
 from fastapi.exceptions import RequestValidationError
 from fastapi.exception_handlers import request_validation_exception_handler
@@ -172,7 +252,8 @@ from fastapi.exception_handlers import request_validation_exception_handler
 
 @app.exception_handler(RequestValidationError)
 async def _validation_error(request: Request, exc: RequestValidationError):
-    if not request.url.path.startswith("/api/crm/"):
+    # M8-CP1: /api/auth/ is included so a rejected login body (e.g. an over-long password) is never echoed back
+    if not request.url.path.startswith(("/api/crm/", "/api/auth/")):
         return await request_validation_exception_handler(request, exc)
     errors = [{"loc": list(e.get("loc", ())), "type": e.get("type"), "msg": e.get("msg")} for e in exc.errors()]
     return JSONResponse(status_code=422, content={"detail": errors})
@@ -412,17 +493,155 @@ def _dashboard_authorized(body: bytes, m) -> tuple[bool, str, str | None]:
     return True, "ok", m.generation_id
 
 
+HEALTH_ERROR_VIEWER_TEXT = "Veriler hazırlanamadı. Ayrıntı yalnızca yöneticiye gösterilir."
+
+
 @app.get("/api/health", response_model=S.Health)
-def health(agent: BusinessActionAgent = Depends(get_agent), repo: ContextRepository = Depends(get_repo)):
+def health(request: Request, agent: BusinessActionAgent = Depends(get_agent),
+           repo: ContextRepository = Depends(get_repo)):
     p = agent.provider
     ready = repo.is_ready()
     asof = (repo.context() or {}).get("as_of_data_date") if ready else None   # no build: already cached
+    err = getattr(repo, "last_error", None)
+    if err and _owner(request) is None:      # M8-CP1: exception text can name local files → owner only
+        err = HEALTH_ERROR_VIEWER_TEXT
     return S.Health(ai_available=agent.available, ai_provider=p.name,
                     ai_model=getattr(p, "model", None),
                     ai_reason=(None if agent.available else getattr(p, "reason", None)),
                     macro_available=False, data_folder=os.path.basename(os.path.normpath(DATA_FOLDER)),   # name only (M5-5: no local paths)
-                    context_ready=ready, context_error=getattr(repo, "last_error", None),
+                    context_ready=ready, context_error=err,
                     as_of_data_date=asof)
+
+
+# ---------------- M8-CP1 owner administration login (D-060) ----------------
+# One owner, one password (scrypt hash in the private .env), no accounts. Viewing never needs this.
+_LOGIN_LOCK = threading.Lock()      # one verification at a time: throttle check + verify + record are atomic
+
+
+@app.get("/api/auth/session", response_model=S.OwnerSession)
+def auth_session(request: Request):
+    """Is this browser logged in as the owner? The CSRF token is returned only to the session's own (same-origin)
+    page; other sites cannot read it (no CORS)."""
+    s = _owner(request)
+    return S.OwnerSession(configured=AUTH.configured_hash() is not None, authenticated=s is not None,
+                          csrf_token=s.csrf_token if s is not None else None,
+                          expires_at=_iso(s.expires_at) if s is not None else None,
+                          idle_expires_at=_iso(s.idle_expires_at) if s is not None else None)
+
+
+def _iso(ts: float) -> str:
+    return dt.datetime.fromtimestamp(ts, dt.timezone.utc).isoformat(timespec="seconds")
+
+
+@app.post("/api/auth/login", response_model=S.OwnerSession)
+def auth_login(body: S.OwnerLogin, request: Request):
+    enc = AUTH.configured_hash()
+    if enc is None:
+        return _deny(503, "admin_not_configured", AUTH_NOT_CONFIGURED_TEXT)
+    scheme, host = request.url.scheme, request.headers.get("host")
+    if not AUTH.secure_transport(scheme, host, _client_host(request)):
+        return _deny(403, "https_required", "Yönetici girişi yalnızca güvenli (HTTPS) bağlantıyla yapılabilir.")
+    if not AUTH.origin_ok(request.headers.get("origin"), scheme, host):
+        return _deny(403, "origin_rejected", "İstek bu sitenin sayfasından gelmedi.")
+    key = AUTH.client_key(_client_host(request))
+    with _LOGIN_LOCK:
+        wait = AUTH.throttle_wait(key)
+        if wait:
+            return _deny(429, "login_throttled", "Çok fazla hatalı deneme. Lütfen biraz sonra tekrar deneyin.",
+                         headers={"Retry-After": str(wait)})
+        if not AUTH.verify_password(body.password, enc):
+            AUTH.record_failure(key)
+            log.info("owner login rejected")                     # no password, client or count in the log
+            return _deny(401, "invalid_credentials", "Şifre hatalı.")
+        AUTH.clear_failures(key)
+        old = _owner(request)
+        if old is not None:                                      # session rotation on every login
+            AUTH.revoke(old.token_hash)
+        token, csrf, exp = AUTH.create_session(enc)
+    log.info("owner login accepted")
+    resp = JSONResponse(content=S.OwnerSession(configured=True, authenticated=True, csrf_token=csrf,
+                                               expires_at=_iso(exp)).model_dump())
+    resp.set_cookie(AUTH.COOKIE_NAME, token, max_age=AUTH.session_absolute_seconds(), path="/", httponly=True,
+                    samesite="strict", secure=AUTH.cookie_secure(scheme))
+    return resp
+
+
+def _clear_cookie(resp, request: Request):
+    resp.delete_cookie(AUTH.COOKIE_NAME, path="/", httponly=True, samesite="strict",
+                       secure=AUTH.cookie_secure(request.url.scheme))
+    return resp
+
+
+@app.post("/api/auth/logout", response_model=S.OwnerSession)
+def auth_logout(request: Request):
+    s = _owner(request)
+    if s is not None:
+        if not (AUTH.origin_ok(request.headers.get("origin"), request.url.scheme, request.headers.get("host"))
+                and s.csrf_ok(request.headers.get(AUTH.CSRF_HEADER))):
+            return _deny(403, "csrf_failed", "Güvenlik doğrulaması başarısız; sayfayı yenileyin.")
+        AUTH.revoke(s.token_hash)
+    return _clear_cookie(JSONResponse(content=S.OwnerSession(
+        configured=AUTH.configured_hash() is not None, authenticated=False).model_dump()), request)
+
+
+@app.post("/api/auth/logout-all", response_model=S.OwnerSession)
+def auth_logout_all(request: Request):
+    """Owner only (middleware): end every owner session on every device."""
+    AUTH.revoke_all()
+    return _clear_cookie(JSONResponse(content=S.OwnerSession(
+        configured=AUTH.configured_hash() is not None, authenticated=False).model_dump()), request)
+
+
+@app.get("/giris", include_in_schema=False)
+def login_page():
+    """Fixed Turkish owner-login page: no data, no file content, no values."""
+    return HTMLResponse(content=LOGIN_PAGE_HTML)
+
+
+LOGIN_PAGE_HTML = """<!doctype html><html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Yönetici girişi</title>
+<style>
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#f4f5f7;color:#1d2433;margin:0;
+ display:flex;min-height:100vh;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
+main{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);padding:28px;max-width:400px;width:100%}
+h1{font-size:1.4rem;margin:0 0 8px}p{line-height:1.5;margin:0 0 14px}label{display:block;font-weight:600;margin:0 0 6px}
+input{width:100%;box-sizing:border-box;font-size:1.1rem;padding:12px;border:1px solid #b8bfcc;border-radius:8px}
+button{margin-top:14px;width:100%;font-size:1.1rem;padding:12px;border:0;border-radius:8px;background:#1f5fbf;
+ color:#fff;font-weight:600;cursor:pointer}button:disabled{opacity:.6}
+.msg{min-height:1.5em;margin-top:12px;font-weight:600}.msg.err{color:#b3261e}.msg.ok{color:#1b7a3a}
+a{color:#1f5fbf}.muted{color:#5b6475;font-size:.95rem}
+</style></head><body><main>
+<h1>Yönetici girişi</h1>
+<p class="muted">Panoyu görüntülemek için giriş gerekmez. Bu giriş yalnızca veri yükleme, CRM / takip
+değişiklikleri ve yönetim işlemleri içindir.</p>
+<form id="f" autocomplete="on"><label for="pw">Yönetici şifresi</label>
+<input id="pw" name="password" type="password" autocomplete="current-password" required maxlength="256">
+<button id="b" type="submit">Giriş yap</button></form>
+<p id="m" class="msg" role="status" aria-live="polite"></p>
+<p><a href="/">← Panoya dön</a></p>
+</main><script>
+(function(){
+var f=document.getElementById('f'),pw=document.getElementById('pw'),b=document.getElementById('b'),
+    m=document.getElementById('m');
+function say(t,k){m.textContent=t;m.className='msg '+(k||'');}
+var T={invalid_credentials:'Şifre hatalı.',login_throttled:'Çok fazla hatalı deneme. Lütfen biraz sonra tekrar deneyin.',
+ https_required:'Yönetici girişi yalnızca güvenli (HTTPS) bağlantıyla yapılabilir.',
+ admin_not_configured:'Yönetici girişi bu sunucuda yapılandırılmadı.',origin_rejected:'Lütfen sayfayı yenileyin.'};
+fetch('/api/auth/session',{headers:{'Accept':'application/json'}}).then(function(r){return r.json();}).then(function(s){
+ if(s.authenticated){say('Yönetici olarak giriş yapılmış durumda.','ok');}
+ else if(!s.configured){say(T.admin_not_configured,'err');b.disabled=true;}
+}).catch(function(){});
+f.addEventListener('submit',function(e){e.preventDefault();b.disabled=true;say('Kontrol ediliyor…');
+ fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json',
+  'X-StockAgent':'1'},body:JSON.stringify({password:pw.value})}).then(function(r){
+  return r.json().catch(function(){return {};}).then(function(d){return {r:r,d:d};});}).then(function(x){
+  pw.value='';
+  if(x.r.ok){say('Giriş yapıldı. Panoya yönlendiriliyorsunuz…','ok');location.replace('/');return;}
+  var c=(x.d&&x.d.detail&&x.d.detail.error_code)||'';say(T[c]||'Giriş yapılamadı.','err');b.disabled=false;pw.focus();
+ }).catch(function(){say('Sunucuya ulaşılamadı.','err');b.disabled=false;});
+});
+})();
+</script></body></html>"""
 
 
 @app.get("/api/agent/categories", response_model=list[S.CategoryOut])

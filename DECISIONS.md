@@ -920,3 +920,49 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   check and every used join still applies; unscoped metrics keep the strict judgement; a record whose totals verdict
   is more optimistic than its own footer reconciliation is INVALID. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE`
   False. D-056–D-058, Kredi, revenue, DQ-1–DQ-6, duplicate-record and supplier-account rules unchanged.
+
+### D-060 · 2026-10-22 · Simplified access: viewing without login, one owner administration login (M8-CP1)
+- **Owner direction (2026-10-22):** Halsa Analysis is a browser-based web application, not a native app. Anyone with
+  the dashboard link views the permitted read-only content without logging in; the owner authenticates before any
+  administrative or data-changing operation (report upload / refresh, CRM and follow-up edits, fair and action
+  changes, data-review decisions, verification approvals, business rules, system settings, paid AI). No separate
+  father and owner accounts, no multi-user system.
+- **Supersedes:** D-048's "owner + father, each with their own login" and the M8-CP1 scope in
+  `docs/m8_father_first_launch.md` (two seeded owner/father accounts, "unauthenticated read/write uniformly denied",
+  login/recovery path). D-016 (multi-user later) is unchanged. D-048's other points (father-first, owner-maintained
+  monthly upload, no deployment before acceptance) stand.
+- **Decision:**
+  - one register, `services/access.py`, gives every route one level — `viewer`, `owner_read`, `owner_write` or
+    `auth`; one middleware enforces it before the accuracy gate; unlisted routes are refused for everyone; a
+    state-changing route can never be viewer level; owner-only query parameters (`/api/customer360/status?retry`);
+  - one owner password, stored only as an scrypt hash in the private `.env` (`HALSA_OWNER_PASSWORD_HASH`), provisioned
+    with `python -m services.owner_auth hash-password`; no hash → administration disabled (fail closed);
+  - server-side sessions (SQLite keeps only the token's SHA-256), HttpOnly / SameSite=Strict / Secure-over-HTTPS
+    cookie, absolute 12 h and idle 120 min limits (bounded env), logout, log-out-everywhere, CLI revocation, revocation
+    on password change, rotation on login;
+  - CSRF token = HMAC of the session token (same-origin page reads it from `/api/auth/session`) + Origin check on
+    every owner write; `X-StockAgent` stays as a legacy local guard and is **not** authentication;
+  - login throttling per client and global (SQLite, pseudonymous client keys); password accepted only over HTTPS or
+    on the loopback interface; standard security headers; `/docs`, `/redoc`, `/openapi.json` disabled;
+  - owner-only reads: Yönetim (`/api/owner/*`, owner finances and system state), `/api/accuracy/status`,
+    `/api/context` (bulk export), `/api/ai/calls`. Viewer-visible operational records: CRM, follow-ups, fair
+    campaigns, customer directory (code + recorded name);
+  - GETs audited for side effects (`docs/m8_cp1_access.md` §2.5): the action-queue / sales-queue reads keep their
+    insert-only materialization of the published queue (never a human decision); everything else that starts work is
+    owner-only.
+- **Accuracy unchanged:** authentication never changes a gate decision; the owner sees exactly the same withheld
+  notices as a viewer. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False; no financial calculation, revenue
+  definition, Kredi `DURUM`, DQ-1–DQ-6, DinamikCRM mapping, source date or completeness rule changed.
+- **Disclosure:** an unauthenticated internet URL is not private because it is hard to guess. Today a viewer can read
+  customer codes and names, CRM outcomes / notes / owner labels and fair-member notes; every metric that is later
+  VERIFIED becomes viewer-visible too. The full inventory is `docs/m8_cp1_access.md` §6. **No public hosting without
+  the owner's explicit, recorded sign-off on that inventory** (and the CP8 hosting / KVKK review).
+- **Alternatives rejected:** separate father login (owner does not want it); a shared "viewer password" (a link plus
+  a shared secret is still effectively public and adds friction); OAuth / e-mail login (external services, recovery
+  complexity); treating `X-StockAgent` as identity (any client can send it).
+- **Veri Kontrol Merkezi (D-058, M8-VKM-1):** issue visibility may be viewer-level where it carries no private value;
+  review decisions, notes and status changes are owner-write with the session's identity as reviewer. Review never
+  certifies a metric.
+- **Tests:** `tests/test_m8_cp1_access.py` (real sessions, `production_auth`), `tests/test_m8_cp1_browser.py` (real
+  login in Chromium), jsdom access-mode tests. Pre-existing in-process feature tests run as the owner through the
+  TEST-ONLY `tests/auth_harness.py` (same pattern as D-049's accuracy harness); production code has no bypass.
