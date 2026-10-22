@@ -1,9 +1,9 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-22 (M8-CP1 simplified access implemented on `claude/m8-cp1-simplified-access`, PR #30, awaiting independent review: public viewer without login, financial viewer with a shared read-only financial password, owner administration login, D-060 + D-061; local tests 1554 passed / 7 skipped / 2 xfailed. Not deployed. Accuracy unchanged: core owner-local reconciliation FAIL; Kredi NOT RUN; zero production metrics VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False)._
+_Updated 2026-10-22 (M8-CP1 three-level access independently reviewed and squash-merged as PR #30 at `a03efbf` from `318491d`; GitHub Actions `39808020049` verified **1554 passed / 7 skipped / 2 xfailed** with JS/browser tests required. Not deployed. Next checkpoint M8-VKM-1; core owner-local reconciliation still FAIL, Kredi NOT RUN, no metrics VERIFIED, `GENERATION_BOUND_API_EVIDENCE` False)._
 
 ## Git
-- **`claude/m8-cp1-simplified-access`:** M8-CP1 (D-060), branched from `main` `23b7257`; PR #30 open for independent review; not merged, not deployed.
+- **`claude/m8-cp1-simplified-access`:** PR #30 reviewed at `318491d` and squash-merged to `main` (`a03efbf`, 2026-10-22). Three access levels are implemented and locally tested; **not deployed**.
 - **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), M8 source-evidence foundation PR #28 (`5baa92a`), and M8 precise validation PR #29 (`4ad8d8a`) merged.
 - **`claude/m8-accuracy-2-shared-evidence`:** PR #28 merged as technical infrastructure 2026-10-20; all production metrics still withheld and `GENERATION_BOUND_API_EVIDENCE` remains False.
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
@@ -36,7 +36,9 @@ _Updated 2026-10-22 (M8-CP1 simplified access implemented on `claude/m8-cp1-simp
 - **Local Git note:** Claude reported a renamed stale lock `.git/stale-maintenance-lock-claude` on the owner's Mac. No evidence of an active canonical Git lock; verify no Git maintenance process is running before removing only that inert renamed file. The Mac working tree and private sources were not inspected by this GitHub review.
 
 
-## M8-CP1 — web access: public viewer, financial viewer, owner (implemented 2026-10-22; PR #30; NOT merged, NOT deployed)
+## M8-CP1 — web access: public viewer, financial viewer, owner (PR #30 MERGED; NOT deployed)
+- **Independent review and merge (2026-10-22):** Full route register and financial read-only API inspected. `FinanceOverview` uses a strict allow-list response schema, the existing accuracy gate and separates Kredi/Gider-Gelir/Bütçe from owner diagnostics; finance sessions never grant owner writes or reads. GitHub Actions run `39808020049` confirms **1554 passed, 7 skipped, 2 xfailed**, JS/browser tests required. Squash merge `a03efbf`. Public CRM/fair/customer notes approved by owner; financial viewer requires shared password; owner editing uses separate password. No deployment or real-data financial approval. Anonymous queue reads can materialize deterministic system rows (not human decisions); document/bound ahead of hosting. Open hosting decisions: network gate and KVKK region.
+- **Next:** M8-VKM-1 owner-only mutations / privacy-safe data review; current historical issue/design source `docs/m8_veri_kontrol_merkezi.md`. Future CP2–CP8 are still required before a publicly reachable dashboard.
 - **Revision D-061 (owner-approved, same day, pushed to PR #30):** three levels. Public viewer (no password; customer
   names, CRM / follow-up / fair notes approved). **Financial viewer** — `HALSA_FINANCE_PASSWORD_HASH`, role-bound
   sessions (separate credential id, cap 10, per-role throttling, revocation by logout / owner "end financial
