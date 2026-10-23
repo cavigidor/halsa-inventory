@@ -1,6 +1,6 @@
 # AGENTS.md — read this first (every session)
 
-Instructions for any AI coding agent (Claude, Codex, …) working on StockAgent.
+Instructions for any AI coding agent working on StockAgent.
 GitHub (`cavigidor/halsa-inventory`) is the source of truth. Do not rely on chat history.
 
 ## Session start
