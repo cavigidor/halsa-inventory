@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-24 (M8-VKM-1 Veri Kontrol Merkezi implemented on `claude/m8-vkm-1-veri-kontrol-merkezi`, PR #31 open for independent review, NOT merged, NOT deployed. Local suite **1648 passed / 7 skipped / 2 xfailed** with JS/browser tests required. Core owner-local reconciliation still FAIL, Kredi NOT RUN, no metrics VERIFIED, `GENERATION_BOUND_API_EVIDENCE` False)._
+_Updated 2026-10-24 (M8-VKM-1 review corrections D-063 pushed to PR #31; awaiting independent re-review; NOT merged, NOT deployed. Local suite **1667 passed / 7 skipped / 2 xfailed** with JS/browser tests required. Core owner-local reconciliation still FAIL, Kredi NOT RUN, no metrics VERIFIED, `GENERATION_BOUND_API_EVIDENCE` False)._
 
 ## Git
 - **`claude/m8-vkm-1-veri-kontrol-merkezi`:** M8-VKM-1 (D-062), PR #31 open for independent review; not merged, not deployed.
@@ -27,6 +27,16 @@ _Updated 2026-10-24 (M8-VKM-1 Veri Kontrol Merkezi implemented on `claude/m8-vkm
 - **Tests (cloud, synthetic, `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled`):** **1648 passed,
   7 skipped, 2 xfailed** (new: `tests/test_m8_vkm.py` 81, `tests/test_m8_vkm_browser.py` 4; `tests/test_m5_browser.py`
   tab sweep and `tests/test_m8_accuracy_review.py` privacy sweep extended to the new tab / route).
+- **Review corrections (2026-10-24, D-063, after the independent review of `b699e89`):**
+  1. *Unknown ≠ resolved:* detector scopes; an issue absent from a present upload is resolved only if its check ran;
+     otherwise presence `not_checked`, status kept (refused stock layout, failed inspection, failed / partial joins).
+  2. *Generation-bound observations:* digest includes provenance (`core_id` / owner record content), declared period
+     and evaluated scopes; same bytes + changed declarations → new observation and new stale-review token; exact
+     refresh / restart → nothing written.
+  3. *Visible out-of-sync:* reads compare the store with the served generation; `out_of_sync` / `no_generation` shown
+     to every audience, decisions refused (409), owner-only idempotent `POST /api/vkm/sync`; publication independent.
+  Tests: +15 `tests/test_m8_vkm_integrity.py` (with negative controls replaying the old behaviour), +1 browser
+  scenario; suite **1667 passed / 7 skipped / 2 xfailed**.
 - **Open questions for review:** DQ-1, DQ-2 and the 120/320 split are not detectable from the current pipeline; owner
   workbooks have no mapping-approval path (not flagged); on real data every core export will show "Kaynak eşlemesi
   onaylanmadı", "Rapor tarihi beyan edilmedi" and "Dosya açıkça seçilmedi" until `data/sources.json` declarations
