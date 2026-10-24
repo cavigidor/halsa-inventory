@@ -1,8 +1,8 @@
 # Veri Kontrol Merkezi — permanent data-review section (design, M8-VKM)
 
-Status: **design only** (PR #29 correction pass, 2026-10-21; D-058). Nothing in this document is implemented yet;
-implementation is the separate checkpoint **M8-VKM-1** in `TASKS.md`. The accuracy gate, the generation manifest and
-every rule in `docs/accuracy/release_gate.md` stay in force unchanged.
+Status: designed in PR #29 (2026-10-21; D-058); **implemented in M8-VKM-1 (2026-10-24; D-062)** — see §8 for what
+was built and where it deviates from or refines this design. The accuracy gate, the generation manifest and every rule
+in `docs/accuracy/release_gate.md` stay in force unchanged.
 
 ## 1. Purpose
 
@@ -157,3 +157,29 @@ On every accepted generation the detector produces the current issue set and rec
 
 The full UI build in this PR; automated fixing; deletion or merging of any record; AI explanations of issues;
 notifications; any change to Kredi `DURUM`, revenue definitions, DQ-1–DQ-6, the 120/320 rules or D-003.
+
+## 8. Implementation notes (M8-VKM-1, D-062)
+
+- **Code:** `services/vkm.py` (pure detection, check catalogue with fixed Turkish title / explanation / action),
+  `services/vkm_store.py` (SQLite, carry-over, review), routes in `app.py` (`/api/vkm/*`), tab "Veri Kontrol" in
+  `dashboard_builder.py`, hook `GenerationStore.add_observer` in `services/generation.py`.
+- **Check → type:** every check in `vkm.CHECKS` names its §2 type and default severity; one recorded fact yields
+  exactly one issue. Several checks may share a type (e.g. `footer_mismatch` and `field_excel_errors` are both
+  `confirmed_error`). Joins are attributed to the source the unmatched record lives in (sales, aging, liste).
+- **Schema refinements:** `dq_issue` also stores `check_code`, `field_name`, `column_letter`, `join_id`,
+  `presence` (`present` / `absent` / `source_missing`), `detail_labels` (schema labels only) and first / last seen
+  timestamps; `dq_issue_event` stores `status_after`, `detail_counts` and a `reason` code. Two further tables:
+  `dq_observation` (append-only log of every observed upload per source) and `dq_source_state` (latest observation per
+  source). Append-only and no-delete rules are SQLite triggers, so they hold for any code path.
+- **Locator:** a schema label, a physical column letter (only where the owner-approved stock template fixes it, D-056)
+  or a named check. No salted row-key hashes were needed: no issue is row-level, issues carry counts.
+- **Reviewer:** the authenticated session's role (`owner`); there is one owner (D-060). Financial and public viewers
+  cannot make any decision.
+- **Stale check:** the token `vkm_generation` is a digest of the per-source observation state; any newly observed
+  upload changes it, and a review or note presenting an older token is refused (409 `stale_generation`).
+- **Owner review actions:** `incelendi`, `kabul_edildi`, back to `acik`, and notes. `cozuldu_kaynakta` and
+  `yeniden_acildi` are set only by observation, never by a person.
+- **Expected sources:** stock, sales, aging and Kredi always; Gider/Gelir and Bütçe once configured or observed before
+  (they stay optional, D-047). The `liste` master is expected whenever the sales file is present.
+- **Not detected (no deterministic signal in the current pipeline):** DQ-1 (cost columns are not inspected), DQ-2 (a
+  list rule), the 120/320 supplier-account split. They stay in `docs/accuracy/open_verification_items.md`.

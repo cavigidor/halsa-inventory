@@ -1517,3 +1517,61 @@ class OwnerReloadResponse(_OwnerOut):
     reload: OwnerReloadState
     sources: List[OwnerSourceHead]
     ai_used: Literal[False] = False
+
+
+# ---------- M8-VKM-1 Veri Kontrol Merkezi (D-062) ----------
+VkmSeverity = Literal["kritik", "yuksek", "orta", "dusuk"]
+
+
+class VkmSeverityCounts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kritik: int
+    yuksek: int
+    orta: int
+    dusuk: int
+
+
+class VkmStatusCounts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    acik: int
+    incelendi: int
+    kabul_edildi: int
+    cozuldu_kaynakta: int
+    yeniden_acildi: int
+
+
+class VkmTypeCount(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str
+    label: str
+    open: int
+
+
+class VkmPublicSummary(BaseModel):
+    """The ONLY Veri Kontrol Merkezi payload a public or financial viewer receives (allow-list, `extra="forbid"`):
+    issue counts by severity / status / type and the date of the last observation. No issue ID, source, locator,
+    affected-record count, file name, fingerprint, note or reviewer (docs/m8_cp1_access.md §6)."""
+    model_config = ConfigDict(extra="forbid")
+    observed: bool
+    last_observed_on: Optional[str] = None
+    open_total: int
+    by_severity: VkmSeverityCounts
+    by_status: VkmStatusCounts
+    by_type: List[VkmTypeCount]
+    notice: str
+    detail_requires_owner: Literal[True] = True
+    ai_used: Literal[False] = False
+
+
+class VkmReviewRequest(BaseModel):
+    """Owner review decision. The reviewer is the authenticated session, never a field of this body."""
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["incelendi", "kabul_edildi", "acik"]
+    note: Optional[str] = Field(default=None, max_length=2000)    # cleaned and bounded to 500 chars by the server
+    vkm_generation: str = Field(min_length=1, max_length=64)
+
+
+class VkmNoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    note: str = Field(min_length=1, max_length=2000)               # cleaned and bounded to 500 chars by the server
+    vkm_generation: str = Field(min_length=1, max_length=64)

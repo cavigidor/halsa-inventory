@@ -635,6 +635,21 @@ class GenerationStore:
         self._pending: Manifest | None = None
         self._dash_pending: str | None = None        # core_id whose dashboard re-publication is expected (2B)
         self.restore_reason: str | None = None
+        self._observers: list = []                   # M8-VKM-1: notified after a generation is ACCEPTED
+
+    # -- M8-VKM-1: observers of accepted generations (Veri Kontrol Merkezi) ---------------------------------------
+    def add_observer(self, fn) -> None:
+        """`fn(kind, manifest, key, store)` is called after a core generation is installed or re-derived and accepted
+        (kind "core") and after an owner source's record is replaced (kind "owner", key). Called outside this store's
+        lock; an observer's failure never affects publication. Observers only READ the manifest."""
+        self._observers.append(fn)
+
+    def _notify(self, kind: str, manifest: "Manifest | None", key: str | None = None) -> None:
+        for fn in list(self._observers):
+            try:
+                fn(kind, manifest, key, self)
+            except Exception:
+                pass
 
     # -- dashboard re-publication after a restart (M8-ACCURACY-2B) ---------------------------------------------
     @property
@@ -697,7 +712,8 @@ class GenerationStore:
             self._m, self._pending = rederived, None
             self._dash_pending = rederived.core_id
             self.restore_reason = None
-            return rederived
+        self._notify("core", rederived)
+        return rederived
 
     def set_dashboard(self, core_id: str, dashboard_sha256: str) -> Manifest | None:
         """Record the dashboard bytes this process published for the current generation `core_id` (owner records
@@ -735,7 +751,9 @@ class GenerationStore:
             self._pending = None                                  # a published generation supersedes a candidate
             self._dash_pending = None                             # … and any expected re-publication (2B)
             self._cond.notify_all()
-            return manifest
+        if manifest is not None:
+            self._notify("core", manifest)
+        return manifest
 
     def replace_owner(self, key: str, record: SourceRecord | None) -> Manifest:
         """An owner source was (re)loaded: its record (or None) replaces the previous one. Without a published core
@@ -743,7 +761,9 @@ class GenerationStore:
         with self._lock:
             base = self._m or Manifest(dt.datetime.now().isoformat(timespec="seconds"), ())
             self._m = base.with_owner(key, record)
-            return self._m
+            m = self._m
+        self._notify("owner", m, key)
+        return m
 
     def restore(self, path: str, dashboard_path: str, data_folder: str) -> Manifest | None:
         """Restart: a manifest becomes a PENDING candidate only if it is intact, the served dashboard was built from

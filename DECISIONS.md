@@ -1012,3 +1012,40 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   §6 questions (network gate / hosting region / KVKK).
 - **Tests:** `tests/test_m8_cp1_finance.py` (37, real sessions), 2 new browser tests (financial password flow incl.
   `/#yonetim`; owner full view), 1 jsdom header test; the D-060 tests updated for the new session fields.
+
+### D-062 · 2026-10-24 · Veri Kontrol Merkezi implemented: deterministic issues, append-only history, owner review (M8-VKM-1)
+- **Scope:** implements the D-058 design (`docs/m8_veri_kontrol_merkezi.md`) under the D-060 / D-061 access model. No
+  change to the access architecture, the accuracy gate, a metric definition, Kredi `DURUM`, revenue definitions,
+  DQ-1–DQ-6, source dates or DinamikCRM mappings.
+- **Detection (`services/vkm.py`, pure):** runs only on an ACCEPTED generation, from what that generation already
+  recorded (formula-aware validation counts, `SourceEvidence`, join report). A fixed catalogue of named checks maps each
+  recorded fact to exactly one issue type of design §2 (incl. stock duplicate codes, identical sales lines, undefined
+  stock coverage / DQ-4, Excel errors, uncached formulas, footer mismatch / partial reconciliation, refused layouts and
+  duplicate headers, unmatched products / customers / invoice / Cari accounts, DQ-5 and DQ-6 counts, undeclared report
+  dates and periods, mtime-fallback selection, unknown or refused mapping approval, Kredi negative remaining /
+  "Kapalı" with remaining / filter-hidden rows, missing exports). No AI, no inference, no new business relationship.
+- **Stable, privacy-safe IDs:** `VKM-` + first 16 hex of SHA-256(`issue_type|source_key|locator`); the locator is a
+  schema label, column letter or check name — never a value, file name, fingerprint or generation.
+- **Persistence (`services/vkm_store.py`):** the existing private SQLite. `dq_issue` (current state, a trigger refuses
+  DELETE), `dq_issue_event` and `dq_observation` (append-only, triggers refuse UPDATE / DELETE), `dq_source_state`.
+  Carry-over per design §3.2: detected → `acik`; still present → decision kept, grown counts reopen a reviewed /
+  acknowledged issue; absent from an uploaded source → `cozuldu_kaynakta`; returns → `yeniden_acildi`; source not
+  uploaded → `source_missing` event, status unchanged, plus one `missing_source` issue (never resolves anything). The
+  three core exports and Kredi are always expected; Gider/Gelir and Bütçe once configured or previously seen. The same
+  observation again (repeated refresh, restart re-derivation) writes nothing. Source records are never deleted,
+  deduplicated or modified.
+- **Hook:** `GenerationStore.add_observer`; notified after install / re-derivation / owner-record replacement, outside
+  the store lock; an observer failure never affects publication; a superseded generation is not written.
+- **Access:** `GET /api/vkm/summary` viewer (allow-list `VkmPublicSummary`: counts by severity / status / type, last
+  observation date, fixed notice); `GET /api/vkm/issues[/{id}]` owner_read; `POST …/review` and `…/notes` owner_write
+  (session + CSRF + Origin). The reviewer is the session's role, never a request field. A review or note against an
+  older observation token (`vkm_generation`) is refused (409). Notes ≤ 500 characters, control characters removed,
+  rendered as text, never logged, never sent to an AI provider. Disclosure inventory updated (`docs/m8_cp1_access.md`
+  §6).
+- **Review is not certification:** reviewing / acknowledging / annotating changes only the issue's review status and
+  appends history. No evidence field, gate decision, manifest, approval reference or `GENERATION_BOUND_API_EVIDENCE`
+  changes (property test over every register metric under the production gate). No metric VERIFIED.
+- **Not detectable from the current pipeline (left to owner decisions, unchanged):** DQ-1 (cost columns are not
+  inspected by the core validator), DQ-2 (a list rule, not a data fact), the 120/320 supplier-account split.
+- **Tests:** `tests/test_m8_vkm.py` (unit, workbook-level, store, HTTP with real sessions, publication hooks) and
+  `tests/test_m8_vkm_browser.py` (real Chromium).

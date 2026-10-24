@@ -38,6 +38,8 @@ method can never be a read level.
 | `GET /api/fairs/history`, `/history/{id}`, `/candidates`, `/campaigns`, `/campaigns/{id}`, `/campaigns/{id}/customers` | ✔ | ✔ | ✔ |
 | `GET /api/crm/summary`, `/followups`, `/recent`, `/customers/{code}` | ✔ | ✔ | ✔ |
 | **`GET /api/finance/overview`** (Kredi / Gider-Gelir / Bütçe projection) | ✗ 401 | ✔ | ✔ |
+| `GET /api/vkm/summary` (Veri Kontrol Merkezi counts only, allow-list `VkmPublicSummary`) | ✔ | ✔ | ✔ |
+| `GET /api/vkm/issues`, `GET /api/vkm/issues/{issue_id}` (issue list, locators, history, notes) | ✗ 401 | ✗ 403 | ✔ |
 | `GET /api/owner/overview`, `GET /api/owner/status` (full Yönetim, system) | ✗ 401 | ✗ 403 | ✔ |
 | `GET /api/accuracy/status`, `GET /api/context`, `GET /api/ai/calls` | ✗ 401 | ✗ 403 | ✔ |
 | every POST / PUT below | ✗ 401 | ✗ 403 | ✔ (+ CSRF) |
@@ -49,8 +51,9 @@ Owner-write routes: `POST /api/context/refresh` (report refresh; future upload),
 `POST /api/agent/draft-message` (paid AI), `POST /api/scenario`, `POST /api/actions/{id}/complete|defer|dismiss|reopen`,
 `POST /api/fairs/campaigns`, `PUT /api/fairs/campaigns/{id}`, `POST /api/fairs/campaigns/{id}/archive`,
 `POST|PUT /api/fairs/campaigns/{id}/customers`, `POST /api/crm/customers/{code}/interactions`,
-`PUT /api/crm/customers/{code}/followup`, `POST /api/auth/logout-all`, `POST /api/auth/finance-sessions/revoke`.
-Future upload (CP3), publication (CP4) and Veri Kontrol Merkezi decisions (VKM-1) must be registered as owner-write.
+`PUT /api/crm/customers/{code}/followup`, `POST /api/auth/logout-all`, `POST /api/auth/finance-sessions/revoke`,
+`POST /api/vkm/issues/{issue_id}/review`, `POST /api/vkm/issues/{issue_id}/notes` (Veri Kontrol Merkezi decisions,
+M8-VKM-1, D-062). Future upload (CP3) and publication (CP4) must be registered as owner-write.
 
 ### 2.1 What a financial viewer receives (`GET /api/finance/overview`)
 Built from the same gate-redacted sections as the owner view, then projected (`OV.finance_section`) and validated
@@ -131,6 +134,8 @@ python -m services.owner_auth status                    # both roles configured?
 | Customer directory (code + recorded name) — **approved** | ✔ | ✔ | ✔ |
 | CRM follow-ups, contacts, **notes, owner labels, legacy memory text** — **approved** | ✔ | ✔ | ✔ |
 | Fair campaigns and members incl. **notes** — **approved** | ✔ | ✔ | ✔ |
+| Veri Kontrol Merkezi summary: number of open issues by severity / review status / issue type (fixed Turkish type labels), date of the last observation, the fixed "review is not approval" notice — **new in VKM-1 (D-062)** | ✔ | ✔ | ✔ |
+| Veri Kontrol Merkezi details: issue IDs, titles, source and column / field locators, affected-record **counts**, affected analyses, first / last seen, presence, per-source observation state, short fingerprints and generation IDs, review history, **owner notes** | | | ✔ |
 | Health: AI provider / model, data folder name, data date | ✔ | ✔ | ✔ |
 | Kredi / Gider-Gelir / Bütçe sections (withheld today) | | ✔ | ✔ |
 | Owner workbook file names, error details, operations summary, system state, known issues, reload | | | ✔ |
