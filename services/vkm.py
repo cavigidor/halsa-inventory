@@ -166,6 +166,12 @@ CHECKS: dict[str, Check] = {
         "unresolved_mapping", "yuksek", "Kaynak eşlemesi onaylanmadı (beyan)",
         "Bu dosya revizyonu için kaynak eşlemesi açıkça onaylanmadı olarak beyan edildi.",
         "Eşleme sorusunu karara bağlayıp onayı bu dosya revizyonu için kaydedin."),
+    "mapping_unknown": Check(
+        "unresolved_mapping", "yuksek", "Kaynak eşlemesi onaylanmadı",
+        "Bu dosya revizyonu için DinamikCRM sütunlarının hangi iş tanımına karşılık geldiğine dair kayıtlı bir onay "
+        "yok. Sistem eşlemeyi tahmin etmez; onaysız eşlemeye dayanan analizler doğrulanmış sayılmaz.",
+        "Sütun eşlemesini (ör. hangi sütunun net satış, hangisinin müşteri kodu olduğu) sahip olarak karara bağlayın; "
+        "onay, bu dosya revizyonu için data/sources.json içinde bir karar numarasıyla kaydedilir."),
     "declared_totals_inconsistent": Check(
         "confirmed_error", "kritik", "Toplamların tutarsız olduğu beyan edildi",
         "Bu dosya revizyonu için kontrol toplamlarının tutmadığı açıkça beyan edildi.",
@@ -487,8 +493,14 @@ def _integrity(key: str, ev: ACC.SourceEvidence, validation: Mapping[str, Any], 
         out.append(Issue("date_contradiction", key, "dates:contradiction", {"contradictions": _n(ev.date_contradictions)}))
     if _n(ev.external_references):
         out.append(Issue("external_links", key, "integrity:external_links", {"links": _n(ev.external_references)}))
+    # D-062: an unresolved DinamikCRM source mapping is an issue whether it was declared NOT approved or simply has no
+    # recorded approval for this exact source revision (the gate's "Kaynak eşlemesinin onayı bilinmiyor"). Both are
+    # the same problem in two states, so they share one locator (one stable ID). Owner workbooks have no mapping
+    # approval path (their records always carry None), so only the core exports are judged here.
     if ev.mapping_approved is False:
-        out.append(Issue("mapping_not_approved", key, "mapping:declared"))
+        out.append(Issue("mapping_not_approved", key, "mapping:approval"))
+    elif ev.mapping_approved is None and role == "core" and key != "liste":
+        out.append(Issue("mapping_unknown", key, "mapping:approval"))
     if role == "core" and ev.declared_totals_consistent is False:
         out.append(Issue("declared_totals_inconsistent", key, "totals:declared"))
     return out

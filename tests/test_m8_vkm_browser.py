@@ -59,7 +59,7 @@ def test_viewer_sees_only_the_turkish_counts_summary(browser, tmp_path):
         page.click('.tab[data-t="vkm"]')
         page.wait_for_selector('#vkm[data-access="viewer"] .vk-sum:not([hidden]) .vk-tile')
         text = page.inner_text("#vkm")
-        assert "Veri Kontrol Merkezi" in text and NOT_APPROVAL in text
+        assert page.text_content("#vkm h2") == "Veri Kontrol Merkezi" and NOT_APPROVAL in text
         assert "Açık konu" in text and "Son gözlem:" in text
         assert page.is_visible("#vkm .vk-viewer") and page.get_attribute("#vkm .vk-viewer a", "href") == "/giris"
         assert page.is_hidden("#vkm .vk-owner")
@@ -102,7 +102,7 @@ def test_owner_filters_reviews_annotates_and_the_decision_persists(browser, tmp_
         target = ids[0]
         page.click(f'#vkm .vk-item[data-id="{target}"]')
         page.wait_for_selector(f'#vkm .vk-detail[data-id="{target}"] .vk-hist li')
-        detail = page.inner_text("#vkm .vk-detail")
+        detail = page.text_content("#vkm .vk-detail")         # h4 labels are CSS-uppercased; check the DOM text
         for h in ("Ne anlama geliyor?", "Ne yapmalı?", "Nerede?", "Ne zaman?", "Etkilenen analizler", "Geçmiş",
                   "İlk görülme", "Bu yüklemede", NOT_APPROVAL):
             assert h in detail, h

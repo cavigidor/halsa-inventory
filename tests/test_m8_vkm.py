@@ -146,7 +146,7 @@ def clean(rec):
                              report_date_origin="declared", selection_explicit=True, period_complete=True,
                              date_contradictions=0, external_references=0, error_cells=0, missing_cached_formulas=0,
                              missing_required_values=0, duplicate_records=0, blank_amount_cells=0, invalid_dates=0,
-                             ambiguous_headers=0, inspection_failures=(), mapping_approved=None,
+                             ambiguous_headers=0, inspection_failures=(), mapping_approved=True,
                              declared_totals_consistent=None, fields=fields or None)
     val = dict(rec.validation)
     val["missing_headers"] = []
@@ -205,6 +205,7 @@ CORE_CASES = [
     ("sales", lambda r: ev_set(r, date_contradictions=2), "date_contradiction"),
     ("aging", lambda r: ev_set(r, external_references=3), "external_links"),
     ("stock", lambda r: ev_set(r, mapping_approved=False), "mapping_not_approved"),
+    ("sales", lambda r: ev_set(r, mapping_approved=None), "mapping_unknown"),
     ("stock", lambda r: ev_set(r, declared_totals_consistent=False), "declared_totals_inconsistent"),
     ("sales", lambda r: field_set(r, "Nettutar", error_cells=2), "field_excel_errors"),
     ("stock", lambda r: field_set(r, "Envanter değeri", missing_cached_formulas=4), "field_missing_cache"),
@@ -878,3 +879,17 @@ def test_digest_is_stable_and_bound_to_the_issue_set(base_manifest):
     assert {k: o.digest(k) for k, o in obs.items()} == {k: o.digest(k) for k, o in again.items()}
     assert obs["kredi"].digest("kredi") != VS.Observation("present", "x", "a" * 64).digest("kredi")
     assert hashlib.sha256(b"").hexdigest() not in json.dumps({k: o.digest(k) for k, o in obs.items()})
+
+
+def test_unknown_and_refused_mapping_are_one_stable_issue_and_owner_sources_are_not_judged(base_manifest):
+    """D-062: 'no recorded approval' and 'declared not approved' are two states of the same unresolved mapping (one ID,
+    so a later declaration does not orphan the history); owner workbooks have no approval path and are not flagged."""
+    stock = clean(next(r for r in base_manifest.core if r.key == "stock"))
+    unknown = [i for i in V.detect_core(ev_set(stock, mapping_approved=None)) if i.issue_type == "unresolved_mapping"]
+    refused = [i for i in V.detect_core(ev_set(stock, mapping_approved=False)) if i.issue_type == "unresolved_mapping"]
+    assert [i.check for i in unknown] == ["mapping_unknown"] and [i.check for i in refused] == ["mapping_not_approved"]
+    assert unknown[0].issue_id == refused[0].issue_id
+    assert not [i for i in V.detect_core(ev_set(stock, mapping_approved=True)) if i.issue_type == "unresolved_mapping"]
+    liste = next((r for r in base_manifest.core if r.key == "liste"), None)
+    if liste is not None and liste.evidence is not None:
+        assert not [i for i in V.detect_core(ev_set(clean(liste), mapping_approved=None)) if i.check == "mapping_unknown"]
