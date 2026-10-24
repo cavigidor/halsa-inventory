@@ -301,7 +301,8 @@ def _startup():
     # Veri Kontrol Merkezi issue store; the observer only reads the manifest and never affects publication.
     _owner_cfg = OV.config_from_env()
     from services import vkm_store as _VKMS
-    app.state.generations.add_observer(_VKMS.make_observer(lambda: {k: c.path for k, c in _owner_cfg.items()}))
+    app.state.vkm_owner_paths = lambda: {k: c.path for k, c in _owner_cfg.items()}
+    app.state.generations.add_observer(_VKMS.make_observer(app.state.vkm_owner_paths))
     app.state.repo = ContextRepository(data_folder=DATA_FOLDER, inflation_rate=INFLATION,
                                        generation_store=app.state.generations,
                                        on_generation_accepted=_republish_dashboard)
@@ -1454,10 +1455,24 @@ def _vkm_actor(request: Request) -> str:
     return getattr(sess, "role", None) or "owner"
 
 
+def _vkm_served():
+    """(served manifest, owner paths): the generation the dashboard and API serve right now."""
+    store = getattr(app.state, "generations", None)
+    paths = getattr(app.state, "vkm_owner_paths", None)
+    return (store.current() if store is not None else None), (paths() if paths else {})
+
+
+def _vkm_expected():
+    """What the issue store must hold for the served generation (None = no generation served). Read only."""
+    m, paths = _vkm_served()
+    return VKMS.expected_digests(m, paths)
+
+
 @app.get("/api/vkm/summary", response_model=S.VkmPublicSummary)
 def vkm_summary():
-    """Viewer-level summary (no login): counts by severity / status / type and the last observation date only."""
-    return S.VkmPublicSummary(**VKMS.public_summary())
+    """Viewer-level summary (no login): counts by severity / status / type, the last observation date and whether the
+    counts describe the served upload (sync) only."""
+    return S.VkmPublicSummary(**VKMS.public_summary(_vkm_expected()))
 
 
 @app.get("/api/vkm/issues")
@@ -1469,7 +1484,8 @@ def vkm_issues(status: str = "open", severity: str | None = None, type: str | No
     for k, v in picked.items():
         if v is not None and v not in _VKM_FILTERS[k]:
             return _deny(422, "bad_filter", "Geçersiz filtre.")
-    return VKMS.list_issues(status=status, severity=severity, issue_type=type, source=source, presence=presence)
+    return VKMS.list_issues(status=status, severity=severity, issue_type=type, source=source, presence=presence,
+                            expected=_vkm_expected())
 
 
 @app.get("/api/vkm/issues/{issue_id}")
@@ -1479,7 +1495,7 @@ def vkm_issue(issue_id: str):
     if bad is not None:
         return bad
     try:
-        return VKMS.issue_detail(issue_id)
+        return VKMS.issue_detail(issue_id, _vkm_expected())
     except VKMS.VKMError as e:
         return _vkm_error(e)
 
@@ -1493,7 +1509,7 @@ def vkm_review(issue_id: str, body: S.VkmReviewRequest, request: Request):
         return bad
     try:
         return VKMS.review(issue_id, body.action, vkm_generation_presented=body.vkm_generation,
-                           actor=_vkm_actor(request), note=body.note)
+                           actor=_vkm_actor(request), expected=_vkm_expected(), note=body.note)
     except VKMS.VKMError as e:
         return _vkm_error(e)
 
@@ -1506,9 +1522,27 @@ def vkm_note(issue_id: str, body: S.VkmNoteRequest, request: Request):
         return bad
     try:
         return VKMS.add_note(issue_id, body.note, vkm_generation_presented=body.vkm_generation,
-                             actor=_vkm_actor(request))
+                             actor=_vkm_actor(request), expected=_vkm_expected())
     except VKMS.VKMError as e:
         return _vkm_error(e)
+
+
+@app.post("/api/vkm/sync")
+def vkm_sync():
+    """Owner recovery after a failed observation: re-observe the SERVED generation (idempotent; nothing is written if
+    the store already holds it; refused if no generation is served or another one was published meanwhile). Reads only
+    the published manifest; never touches source files, evidence, the gate or the dashboard."""
+    m, paths = _vkm_served()
+    store = app.state.generations
+    try:
+        res = VKMS.resync(m, paths, store.current)
+    except VKMS.VKMError as e:
+        return _vkm_error(e)
+    except Exception as e:                       # the store itself is failing: report, never echo internals
+        log.warning("veri kontrol yeniden eşitlenemedi (%s)", type(e).__name__)
+        return _deny(503, "vkm_unavailable", "Denetim kaydı şu anda yazılamıyor; daha sonra tekrar deneyin.")
+    return {"changed": res.get("changed", []), "sync": VKMS.sync_state(_vkm_expected()),
+            "vkm_generation": VKMS.vkm_generation()}
 
 
 # ---------------- draft message (copy-only; nothing is ever sent) ----------------

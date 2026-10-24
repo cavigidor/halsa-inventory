@@ -98,6 +98,7 @@ ACCESS: dict[tuple[str, str], str] = {
     ("GET", "/api/vkm/issues/{issue_id}"): OWNER_READ,           # + history and owner notes
     ("POST", "/api/vkm/issues/{issue_id}/review"): OWNER_WRITE,  # review decision (never certifies a metric)
     ("POST", "/api/vkm/issues/{issue_id}/notes"): OWNER_WRITE,   # append-only owner note
+    ("POST", "/api/vkm/sync"): OWNER_WRITE,                      # re-observe the served generation (recovery)
 }
 
 # Query parameters that make a viewer GET an owner action (value considered set unless false-like).

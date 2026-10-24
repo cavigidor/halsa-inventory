@@ -183,3 +183,34 @@ notifications; any change to Kredi `DURUM`, revenue definitions, DQ-1–DQ-6, th
   (they stay optional, D-047). The `liste` master is expected whenever the sales file is present.
 - **Not detected (no deterministic signal in the current pipeline):** DQ-1 (cost columns are not inspected), DQ-2 (a
   list rule), the 120/320 supplier-account split. They stay in `docs/accuracy/open_verification_items.md`.
+
+## 9. Corrections after the independent review of PR #31 (D-063)
+
+1. **Unknown evidence is never a resolution.** Every check belongs to a *detector scope* (`vkm.scope_of`: e.g.
+   `rows:counts`, `rows:footer`, `rows:coverage`, `field:<header>`, `join:<check>`, `duplicates`, `layout`,
+   `evidence`). Each observation of a present source records the scopes whose evidence was actually present
+   (`vkm.inspect_core` / `inspect_owner` → `Detection.checked`); a missing count — `None` or an absent key in the join
+   report — is "not checked", never zero. A previously stored issue that is not in a present upload is
+   `cozuldu_kaynakta` only if its scope was evaluated; otherwise its presence becomes **`not_checked`** ("Bilinmiyor —
+   bu yüklemede denetlenemedi"), an append-only `not_checked` event is written once and the review status is kept.
+   This covers a refused stock layout (rows never analysed), a failed or partial source inspection, a failed
+   relationship check (`joins.failure`) and a relationship whose input was missing. When the check runs again and
+   still finds the problem the event is `still_present` with reason `check_restored`. A missing FILE keeps the
+   `source_missing` rule unchanged.
+2. **Observation identity = material accepted generation.** The observation digest now includes its provenance
+   (core exports: the generation's `core_id`, a pure content digest of every core record incl. declarations,
+   evidence and the join report; owner workbooks: the digest of the record's content), the declared period and the
+   evaluated scopes. Same bytes with a changed declared period or approval is a new observation (`dq_source_state`,
+   issue provenance and the stale-review token move to it; `still_present` events record it). An exact repeat
+   refresh or a restart re-derivation reproduces `core_id`, so it is the same observation and writes nothing.
+   `DETECTOR_VERSION` is `vkm-1.1`.
+3. **Out-of-sync is visible and blocks decisions.** Publication still never depends on the recorder (observer
+   failures are caught and logged by error class only). Every read compares the stored observations with what the
+   SERVED generation implies (`vkm_store.expected_digests`, pure, never writes): `in_sync`, `out_of_sync` (lists the
+   sources) or `no_generation`. The public summary carries the state and a fixed Turkish sentence; the owner page
+   shows a warning with **"Denetimi yeniden çalıştır"**, hides the decision controls, and the server refuses every
+   review or note with 409 `out_of_sync` (checked under the store lock). Recovery: `POST /api/vkm/sync`
+   (owner_write + CSRF) re-observes the served generation — idempotent, refused while nothing is served or when
+   another generation was published meanwhile; the next accepted publication also re-synchronizes. Owner workbooks
+   configured but not yet loaded carry no expectation; a core observation never overwrites an owner workbook record
+   the served generation carries.

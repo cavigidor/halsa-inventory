@@ -1049,3 +1049,23 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   inspected by the core validator), DQ-2 (a list rule, not a data fact), the 120/320 supplier-account split.
 - **Tests:** `tests/test_m8_vkm.py` (unit, workbook-level, store, HTTP with real sessions, publication hooks) and
   `tests/test_m8_vkm_browser.py` (real Chromium).
+
+### D-063 · 2026-10-24 · Veri Kontrol Merkezi state integrity: unknown ≠ resolved, generation-bound observations, visible out-of-sync (M8-VKM-1 review)
+- **Context:** the independent review of PR #31 at `b699e89` found three state-integrity gaps (not in the metric gate):
+  an uninspectable present source resolved earlier issues; observation identity ignored accepted-generation and
+  declared-period changes; a failed observation after publication was invisible and still allowed reviews.
+- **Decision:**
+  1. Detector scopes (`services/vkm.py`): each check has a scope; each observation records the scopes actually
+     evaluated (a missing count is "not checked", never zero). An issue absent from a present upload is resolved only
+     when its scope was evaluated; otherwise presence `not_checked`, status kept, one append-only `not_checked` event.
+  2. Observation digest = detector version + state + fingerprint + provenance (core: `core_id`; owner: record content
+     digest) + declared period + evaluated scopes + issues/counts. Exact repeat refreshes and restarts are idempotent.
+  3. Sync: reads compare the store with the served generation's expected observations; `out_of_sync` /
+     `no_generation` is shown to every audience and every decision is refused (409 `out_of_sync`). New owner_write
+     route `POST /api/vkm/sync` (CSRF; idempotent; superseded-generation guard). Publication stays independent of the
+     recorder. A core observation never overwrites an owner record carried by the served generation.
+- **Unchanged:** append-only history and no-delete triggers; the `source_missing` carry-over rule; access model;
+  `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; no financial calculation, mapping, DQ rule, Kredi
+  `DURUM`, source date, authentication or source byte changed.
+- **Tests:** `tests/test_m8_vkm_integrity.py` (regressions with negative controls replaying the old rule, the old
+  digest and the store-only review check), +1 browser scenario (out-of-sync banner, blocked decisions, owner resync).

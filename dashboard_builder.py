@@ -2663,7 +2663,9 @@ _VKM_CSS=r"""
 #vkm .vk-chip.sev-kritik{color:#b42318;border-color:#f3c4c4}#vkm .vk-chip.sev-yuksek{color:#c2410c;border-color:#fed7aa}
 #vkm .vk-chip.sev-orta{color:#b45309;border-color:#f5d9a8}#vkm .vk-chip.sev-dusuk{color:#475569}
 #vkm .vk-chip.st-cozuldu_kaynakta{color:#1a7f4b;border-color:#bfe3cf}#vkm .vk-chip.st-yeniden_acildi{color:#b42318;border-color:#f3c4c4}
-#vkm .vk-chip.pr-source_missing{color:#b45309;border-color:#f5d9a8}
+#vkm .vk-chip.pr-source_missing,#vkm .vk-chip.pr-not_checked{color:#b45309;border-color:#f5d9a8}
+#vkm .vk-sync{background:#fdf3f3;border:1px solid #f3c4c4;color:#b42318;border-radius:10px;padding:10px 13px;margin:6px 0 12px;font-weight:600;font-size:13px;overflow-wrap:anywhere}
+#vkm .vk-sync p{margin:3px 0}#vkm .vk-sync .vk-btn{margin-top:6px}
 #vkm .vk-detail{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0 0 14px}
 #vkm .vk-detail h3{font-size:16px;margin:6px 0;overflow-wrap:anywhere}
 #vkm .vk-detail h4{font-size:12px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;margin:12px 0 4px;color:var(--muted)}
@@ -2684,6 +2686,7 @@ _VKM_BODY="""
 <div class="vk-intro" role="note"><p>Bu bölüm, aylık DinamikCRM Excel raporlarında sistemin kural tabanlı (yapay zekâ kullanmayan) denetimlerle bulduğu veri sorunlarını listeler. Her sorun her yeni yüklemede yeniden denetlenir: devam ediyorsa açık kalır, kaynakta düzelirse “kaynakta çözüldü” olur, geri gelirse yeniden açılır. Kaynak dosyalarda hiçbir satır değiştirilmez veya silinmez.</p>
 <p class="vk-notapproval">İnceleme bir onay değildir; metrikler yalnızca doğrulanmış kanıtla gösterilir.</p></div>
 <div class="vk-state" role="status" hidden></div>
+<div class="vk-sync" role="alert" hidden><p class="vk-sync-msg"></p><p class="vk-sync-src"></p><button type="button" class="vk-btn pri vk-resync" hidden>Denetimi yeniden çalıştır</button></div>
 <section class="vk-sum" hidden><div class="vk-tiles"></div><p class="vk-muted vk-last"></p><ul class="vk-types"></ul></section>
 <p class="vk-viewer" hidden>Sorunların yeri, ayrıntıları, geçmişi ve notlar yalnızca yönetici girişiyle görüntülenir; inceleme kararlarını yalnızca yönetici verebilir. <a href="/giris">Yönetici girişi</a></p>
 <section class="vk-owner" hidden>
@@ -2707,7 +2710,8 @@ const MSG={file:'Veri Kontrol Merkezi için panoyu http://127.0.0.1:8000/ üzeri
   fail:'Veri Kontrol Merkezi yüklenemedi', none:'Henüz gözlenmiş bir veri yüklemesi yok. Veriler yenilendiğinde denetim sonuçları burada görünür.',
   empty:'Bu filtrelerle eşleşen konu yok.', noOpen:'Açık veri sorunu yok.', auth:'Oturum sona erdi; yeniden yönetici girişi yapın.',
   stale:'Veriler bu sayfa açıldıktan sonra yeniden gözlendi; liste yenilendi. Lütfen konuyu kontrol edip tekrar deneyin.',
-  saved:'Kaydedildi.', noteNeeded:'Not boş olamaz.'};
+  saved:'Kaydedildi.', noteNeeded:'Not boş olamaz.', synced:'Denetim sonuçları güncellendi.',
+  blocked:'Denetim sonuçları yayımlanan verilerle güncel olmadığı için şu anda inceleme kararı verilemez.'};
 const SEV=[['kritik','Kritik'],['yuksek','Yüksek'],['orta','Orta'],['dusuk','Düşük']];
 const AY=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 const st={started:false,seq:0,role:null,gen:null,cat:null,filters:{status:'open'},open:null,busy:false};
@@ -2743,7 +2747,14 @@ function tiles(c,last){const box=$('.vk-tiles'); box.replaceChildren();
   t('open',c.open_total,'Açık konu'); SEV.forEach(([k,l])=>t(k,(c.by_severity||{})[k],l+' (açık)'));
   t('resolved',(c.by_status||{}).cozuldu_kaynakta,'Kaynakta çözüldü');
   $('.vk-last').textContent=last?('Son gözlem: '+last):''; show($('.vk-sum'),true);}
+function renderSync(sy,owner){const box=$('.vk-sync'); const st0=sy&&(sy.state||sy);
+  root.dataset.sync=st0||'';
+  if(!st0||st0==='in_sync'){show(box,false); return;}
+  $('.vk-sync-msg').textContent=(sy&&sy.message)||'';
+  const src=(sy&&sy.sources||[]).map(x=>x.label); $('.vk-sync-src').textContent=src.length?('Güncel olmayan kaynaklar: '+src.join(', ')):'';
+  show($('.vk-resync'),!!owner&&st0==='out_of_sync'); show(box,true);}
 function renderSummary(s){
+  renderSync({state:s.sync,message:s.sync_message},false);
   if(!s.observed){state(MSG.none); show($('.vk-sum'),false); return;}
   tiles(s,fmtDay(s.last_observed_on));
   const ul=$('.vk-types'); ul.replaceChildren(); (s.by_type||[]).forEach(x=>{const li=el('li',null,x.label+': '+num(x.open)); li.dataset.type=x.key; ul.append(li);});
@@ -2759,7 +2770,7 @@ function renderFilters(cat){
   options(get('presence'),cat.presence.map(x=>[x.key,x.label]),f.presence,'Hepsi');}
 function renderOwner(d){
   root.dataset.access='owner'; st.gen=d.vkm_generation; root.dataset.gen=d.vkm_generation; st.cat=d.catalogue;
-  show($('.vk-viewer'),false); show($('.vk-owner'),true); state('');
+  show($('.vk-viewer'),false); show($('.vk-owner'),true); state(''); renderSync(d.sync,true);
   if(!(d.sources||[]).length){state(MSG.none);}
   tiles(d.counts,(d.sources||[]).length?fmtWhen((d.sources||[]).map(s=>s.observed_at).sort().pop()):'');
   const ty=$('.vk-types'); ty.replaceChildren(); (d.counts.by_type||[]).filter(x=>x.open).forEach(x=>{const li=el('li',null,x.label+': '+num(x.open)); li.dataset.type=x.key; ty.append(li);});
@@ -2810,7 +2821,8 @@ function renderDetail(d){
   (i.allowed_actions||[]).forEach(a=>{const b=el('button','vk-btn pri vk-act',a.label); b.type='button'; b.dataset.action=a.key; b.addEventListener('click',()=>decide(i.issue_id,a.key,ta,msg)); acts.append(b);});
   const nb=el('button','vk-btn vk-addnote','Yalnızca not ekle'); nb.type='button'; nb.addEventListener('click',()=>addNote(i.issue_id,ta,msg)); acts.append(nb);
   box.append(acts,msg);
-  if(!(i.allowed_actions||[]).length) box.append(el('p','vk-muted','Bu konu kaynakta çözüldü; yalnızca not eklenebilir. Sorun yeniden görülürse otomatik olarak yeniden açılır.'));
+  if(i.decisions_blocked){ta.disabled=true; nb.disabled=true; nb.hidden=true; msg.textContent=MSG.blocked; msg.className='vk-msg err vk-blocked';}
+  else if(!(i.allowed_actions||[]).length) box.append(el('p','vk-muted','Bu konu kaynakta çözüldü; yalnızca not eklenebilir. Sorun yeniden görülürse otomatik olarak yeniden açılır.'));
   box.append(el('h4',null,'Geçmiş'));
   const ul=el('ul','vk-hist'); (d.history||[]).forEach(e=>{const li=el('li'); li.dataset.event=e.event;
     li.append(el('b',null,fmtWhen(e.at)+' · '+e.event_label));
@@ -2822,7 +2834,7 @@ function renderDetail(d){
 async function post(path,body,msg){
   if(st.busy) return null; st.busy=true; root.querySelectorAll('.vk-detail .vk-btn').forEach(b=>b.disabled=true); msg.textContent='Kaydediliyor…'; msg.className='vk-msg';
   try{return await api(path,{method:'POST',headers:H,body:JSON.stringify(body)});}
-  catch(e){if(e.code==='stale_generation'){const id=st.open; await load(); if(id) await openIssue(id); const m=root.querySelector('.vk-detail .vk-msg'); if(m){m.textContent=MSG.stale; m.className='vk-msg err';} return null;}
+  catch(e){if(e.code==='stale_generation'||e.code==='out_of_sync'){const id=st.open; await load(); if(id) await openIssue(id); const m=root.querySelector('.vk-detail .vk-msg'); if(m){m.textContent=e.code==='out_of_sync'?MSG.blocked:MSG.stale; m.className='vk-msg err';} return null;}
     msg.textContent=errText(e); msg.className='vk-msg err'; return null;}
   finally{st.busy=false; root.querySelectorAll('.vk-detail .vk-btn').forEach(b=>b.disabled=false);}}
 async function decide(id,action,ta,msg){const body={action:action,vkm_generation:st.gen}; if(ta.value.trim()) body.note=ta.value;
@@ -2833,6 +2845,10 @@ async function after(d){st.gen=d.vkm_generation; renderDetail(d); const m=root.q
   try{const l=await api(listUrl()); renderOwner(l);}catch(e){}}
 root.querySelectorAll('.vk-f').forEach(s=>s.addEventListener('change',()=>{st.filters[s.dataset.f]=s.value||undefined; if(!st.filters.status) st.filters.status='open'; load();}));
 $('.vk-clear').addEventListener('click',()=>{st.filters={status:'open'}; load();});
+$('.vk-resync').addEventListener('click',async()=>{const b=$('.vk-resync'); if(b.disabled) return; b.disabled=true; const m=$('.vk-sync-src');
+  try{const r=await api('/api/vkm/sync',{method:'POST',headers:H,body:'{}'}); const id=st.open; await load(); if(id) await openIssue(id);
+    if(r&&r.sync&&r.sync.state==='in_sync') state(MSG.synced);}
+  catch(e){m.textContent=errText(e);} finally{b.disabled=false;}});
 tabBtn.addEventListener('click',start);   // lazy: nothing is fetched until the tab is opened
 })();
 """

@@ -482,6 +482,7 @@ ROUTES: dict[tuple[str, str], tuple[str, str | tuple[str, ...] | None]] = {
     ("GET", "/api/vkm/issues/{issue_id}"): ("system", None),
     ("POST", "/api/vkm/issues/{issue_id}/review"): ("operational", None),
     ("POST", "/api/vkm/issues/{issue_id}/notes"): ("operational", None),
+    ("POST", "/api/vkm/sync"): ("operational", None),
 }
 
 

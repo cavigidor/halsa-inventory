@@ -178,3 +178,34 @@ def test_phone_layout_has_no_horizontal_scroll(browser, tmp_path):
         vp.wait_for_selector('#vkm[data-access="viewer"] .vk-tile')
         assert no_horizontal_overflow(vp)
         assert page.errors == [] and vp.errors == []
+
+
+def test_out_of_sync_store_is_shown_blocks_decisions_and_owner_resync_recovers(browser, tmp_path):
+    """Review of PR #31 §3 in the page: the store no longer holds what the served upload implies (as after a failed
+    observation) → a visible warning for everyone, no decision controls for the owner, and the owner's
+    'Denetimi yeniden çalıştır' re-observes the served upload."""
+    import sqlite3
+    with fair_server(tmp_path) as srv:
+        _observed(srv["base"])
+        con = sqlite3.connect(str(tmp_path / "state.db"))             # simulate the lost observation of one source
+        con.execute("UPDATE dq_source_state SET digest='kayip-gozlem' WHERE source_key='sales'")
+        con.commit()
+        con.close()
+        vp = viewer_page(browser)
+        open_vkm(vp, srv["base"])
+        vp.wait_for_selector("#vkm .vk-sync:not([hidden])")
+        assert "güncel DEĞİL" in vp.inner_text("#vkm .vk-sync") and vp.is_hidden("#vkm .vk-resync")
+        page = open_page(browser)
+        open_vkm(page, srv["base"])
+        page.wait_for_selector('#vkm[data-sync="out_of_sync"] .vk-sync:not([hidden]) .vk-resync:not([hidden])')
+        assert "Satış raporu" in page.inner_text("#vkm .vk-sync")
+        page.click("#vkm .vk-item")
+        page.wait_for_selector("#vkm .vk-detail .vk-blocked")
+        assert page.query_selector("#vkm .vk-detail .vk-act") is None              # no decision controls
+        assert page.is_disabled("#vkm .vk-detail .vk-notein")
+        page.click("#vkm .vk-resync")
+        page.wait_for_selector('#vkm[data-sync="in_sync"]')
+        assert page.is_hidden("#vkm .vk-sync")
+        page.wait_for_selector("#vkm .vk-detail .vk-act")                          # decisions available again
+        assert _get(srv["base"] + "/api/vkm/issues")["sync"]["state"] == "in_sync"
+        assert page.errors == [] and vp.errors == []

@@ -110,19 +110,32 @@ def _iso(d) -> str | None:
 # ---------------------------------------------------------------------------------------------
 @dataclass(frozen=True)
 class Observation:
-    """What one accepted upload says about one source: present with its issues, or missing."""
+    """What one accepted upload says about one source: present with its issues and the detector scopes that could be
+    evaluated on it, or missing.
+
+    `provenance` binds the observation to the material accepted generation (review of PR #31, §2): for the core
+    exports the generation's `core_id` (a pure content digest of every core record incl. declarations, evidence and
+    the join report — reproduced exactly by a restart re-derivation), for an owner workbook the digest of its record's
+    content. A new accepted generation with the same bytes and issues but e.g. a changed declared period is therefore
+    a NEW observation, while an exact repeat refresh or restart stays the same observation (idempotent)."""
     state: str                                    # "present" | "missing"
     generation_id: str
     source_sha256: str = ""
     issues: tuple[V.Issue, ...] = ()
     period_start: str | None = None
     period_end: str | None = None
+    checked: frozenset[str] = frozenset()         # detector scopes evaluated on this upload (present only)
+    provenance: str = ""
 
     def all_issues(self, key: str) -> tuple[V.Issue, ...]:
         return (V.missing_issue(key),) if self.state == "missing" else self.issues
 
+    def scopes(self) -> frozenset[str]:
+        return frozenset({"source"}) if self.state == "missing" else self.checked | {"source"}
+
     def digest(self, key: str) -> str:
-        body = [V.DETECTOR_VERSION, self.state, self.source_sha256,
+        body = [V.DETECTOR_VERSION, self.state, self.source_sha256, self.provenance or self.generation_id,
+                self.period_start, self.period_end, sorted(self.scopes()),
                 sorted((i.issue_id, sorted(i.counts.items()), list(i.labels)) for i in self.all_issues(key))]
         return hashlib.sha256(json.dumps(body, ensure_ascii=False).encode("utf-8")).hexdigest()
 
@@ -155,20 +168,28 @@ def _observe_source(c, key: str, obs: Observation, now: str) -> bool:
     existing = {r["issue_id"]: r for r in c.execute("SELECT * FROM dq_issue WHERE source_key=?", (key,))}
     for iid, issue in current.items():
         _upsert(c, issue, existing.get(iid), obs, now)
+    scopes = obs.scopes()
     for iid, r in existing.items():
-        if iid in current:
-            continue
+        if iid in current or r["presence"] == "absent":
+            continue                                   # seen now, or already resolved by an earlier inspected upload
         if obs.state == "missing":
             # absence of the FILE is never evidence that its problems disappeared (design §3.2, acceptance 7)
-            if r["presence"] == "present" and r["status"] != "cozuldu_kaynakta":
+            if r["presence"] != "source_missing":
                 c.execute("UPDATE dq_issue SET presence='source_missing', updated_at=? WHERE issue_id=?", (now, iid))
                 _event(c, iid, obs.generation_id, obs.source_sha256, "source_missing", r["status"], None, None,
                        "system", None, now)
-        elif r["presence"] != "absent":
-            # the source WAS uploaded and the problem is not in it: resolved in the source (not by review)
+        elif V.scope_of(r["check_code"], r["field_name"]) in scopes:
+            # the source WAS uploaded, the check that found the problem WAS evaluated and found nothing:
+            # resolved in the source (not by review)
             c.execute("""UPDATE dq_issue SET presence='absent', status='cozuldu_kaynakta', updated_at=?
                          WHERE issue_id=?""", (now, iid))
             _event(c, iid, obs.generation_id, obs.source_sha256, "not_present", "cozuldu_kaynakta", None, None,
+                   "system", None, now)
+        elif r["presence"] != "not_checked":
+            # the file is there but this check could not be evaluated (refused layout, failed inspection, failed or
+            # incomplete relationship check, …): UNKNOWN — never a resolution; the review status is kept
+            c.execute("UPDATE dq_issue SET presence='not_checked', updated_at=? WHERE issue_id=?", (now, iid))
+            _event(c, iid, obs.generation_id, obs.source_sha256, "not_checked", r["status"], None, None,
                    "system", None, now)
     c.execute("""INSERT INTO dq_source_state(source_key,state,generation_id,source_sha256,digest,period_start,
                  period_end,observed_at) VALUES(?,?,?,?,?,?,?,?)
@@ -209,6 +230,8 @@ def _upsert(c, issue: V.Issue, row, obs: Observation, now: str) -> None:
         status, event, reason = "yeniden_acildi", "reopened", "counts_increased"
     elif row["presence"] == "source_missing":
         reason = "source_returned"
+    elif row["presence"] == "not_checked":
+        reason = "check_restored"
     c.execute("""UPDATE dq_issue SET severity=?, check_code=?, field_name=?, column_letter=?, join_id=?,
                  affected_metrics=?, last_seen_generation=?, last_seen_source_sha=?, last_seen_at=?, period_start=?,
                  period_end=?, detail_counts=?, detail_labels=?, status=?, presence='present', updated_at=?
@@ -249,31 +272,56 @@ def core_observations(manifest, owner_paths: Mapping[str, str | None] | None = N
         if r is None:
             out[key] = Observation("missing", gen)
             continue
-        ps, pe = _period(r)
-        out[key] = Observation("present", gen, r.sha256, tuple(V.detect_core(r, joins)), ps, pe)
+        out[key] = _present(gen, r, V.inspect_core(r, joins), gen)
     if "sales" in recs:
         r = recs.get("liste")
         if r is None or r.evidence is None or r.evidence.available is False:
-            out["liste"] = Observation("missing", gen, recs["sales"].sha256)
+            out["liste"] = Observation("missing", gen, recs["sales"].sha256, provenance=gen)
         else:
-            ps, pe = _period(r)
-            out["liste"] = Observation("present", gen, r.sha256, tuple(V.detect_core(r, joins)), ps, pe)
+            out["liste"] = _present(gen, r, V.inspect_core(r, joins), gen)
     seen = set(previously_seen)
     for key in V.OWNER_SOURCES:
         path = (owner_paths or {}).get(key)
-        if path and os.path.isfile(path):
+        if manifest.record(key) is not None:
+            continue                                   # the served generation carries its record: observed by its own
+        if path and os.path.isfile(path):              # loader, never overwritten by a core observation
             continue                                   # its own loader observes it (lazy, on first Yönetim open)
         if path or key in V.EXPECTED_ALWAYS or key in seen:
-            out[key] = Observation("missing", gen)
+            out[key] = Observation("missing", gen, provenance=gen)
     return out
 
 
-def owner_observation(manifest, key: str, record) -> Observation:
-    gen = manifest.generation_id if manifest is not None else "none"
-    if record is None:
-        return Observation("missing", gen)
+def _present(gen: str, record, det: "V.Detection", provenance: str) -> Observation:
     ps, pe = _period(record)
-    return Observation("present", gen, record.sha256, tuple(V.detect_owner(record)), ps, pe)
+    return Observation("present", gen, record.sha256, det.issues, ps, pe, det.checked, provenance)
+
+
+def record_provenance(record) -> str:
+    """Content digest of one source record (fingerprint, declarations, validation, evidence; no file time)."""
+    body = json.dumps(record.content(), sort_keys=True, ensure_ascii=False, default=str)
+    return "rec-" + hashlib.sha256(body.encode("utf-8")).hexdigest()[:32]
+
+
+def owner_observation(manifest, key: str, record) -> Observation:
+    if record is None:
+        gen = manifest.core_id if manifest is not None and manifest.core else "none"
+        return Observation("missing", gen, provenance=gen)
+    prov = record_provenance(record)
+    return _present(prov, record, V.inspect_owner(record), prov)
+
+
+def expected_observations(manifest, owner_paths: Mapping[str, str | None] | None,
+                          previously_seen: Iterable[str] = ()) -> dict[str, Observation]:
+    """What the issue store SHOULD hold for the generation being served: the core observation, plus the observation
+    of every owner workbook record the served generation carries. Owner workbooks that are configured but not yet
+    loaded (lazy) carry no expectation. Pure; reads nothing but the manifest and the file system existence check."""
+    if manifest is None:
+        return {}
+    out = core_observations(manifest, owner_paths, previously_seen) if manifest.core else {}
+    for r in manifest.owner:
+        if r.key in V.OWNER_SOURCES:
+            out[r.key] = owner_observation(manifest, r.key, r)
+    return out
 
 
 def previously_seen_sources() -> set[str]:
@@ -306,8 +354,84 @@ def make_observer(owner_paths: Callable[[], Mapping[str, str | None]]):
                     return (rec.sha256 if rec else None) == (cur_rec.sha256 if cur_rec else None)
                 observe({key: owner_observation(manifest, key, rec)}, guard=same_record)
         except Exception as e:                             # publication must never fail because of the review log
+            _record_failure(e)
             log.warning("veri kontrol gözlemi yapılamadı (%s)", type(e).__name__)
     return _observer
+
+
+# ---------------------------------------------------------------------------------------------
+# synchronization with the served generation (review of PR #31, §3)
+# ---------------------------------------------------------------------------------------------
+# Publication never depends on the issue recorder. Instead every read compares what the store holds with what the
+# generation being SERVED implies; a difference (a failed or not-yet-run observation) is shown as "out of sync" and
+# every review / note is refused until the owner re-runs the observation (`resync`, owner_write) or the next accepted
+# generation is observed. The comparison is the source of truth; the in-memory failure note is only an explanation.
+_FAILURE: dict[str, str] = {}
+SYNC_STATES = ("in_sync", "out_of_sync", "no_generation")
+SYNC_TR = {"in_sync": "Denetim sonuçları yayımlanan verilerle güncel.",
+           "out_of_sync": ("Denetim sonuçları yayımlanan verilerle güncel DEĞİL: son yükleme bu listeye işlenemedi. "
+                           "Gösterilen durumlar önceki bir yüklemeye ait olabilir; inceleme kararı verilemez."),
+           "no_generation": ("Şu anda yayımlanmış bir veri yüklemesi yok; gösterilen durumlar önceki bir yüklemeye "
+                             "aittir ve inceleme kararı verilemez.")}
+OUT_OF_SYNC_TR = ("Denetim sonuçları yayımlanan verilerle güncel değil; inceleme kararı kaydedilmedi. Önce "
+                  "'Denetimi yeniden çalıştır' ile listeyi güncelleyin.")
+
+
+def _record_failure(e: Exception) -> None:
+    _FAILURE.clear()
+    _FAILURE.update({"at": _now(), "error": type(e).__name__})
+
+
+def stored_digests(c=None) -> dict[str, str]:
+    def run(conn):
+        return {r[0]: r[1] for r in conn.execute("SELECT source_key, digest FROM dq_source_state")}
+    if c is not None:
+        return run(c)
+    with ST._conn() as conn:
+        return run(conn)
+
+
+def expected_digests(manifest, owner_paths: Mapping[str, str | None] | None) -> dict[str, str] | None:
+    """{source: digest} the served generation implies, or None when no generation is served."""
+    if manifest is None or not manifest.core:
+        return None
+    obs = expected_observations(manifest, owner_paths, previously_seen_sources())
+    return {k: o.digest(k) for k, o in obs.items()}
+
+
+def _sync(expected: Mapping[str, str] | None, stored: Mapping[str, str]) -> dict:
+    if expected is None:
+        state, stale = "no_generation", []
+    else:
+        stale = sorted(k for k, d in expected.items() if stored.get(k) != d)
+        state = "out_of_sync" if stale else "in_sync"
+    out = {"state": state, "message": SYNC_TR[state],
+           "sources": [{"key": k, "label": V.SOURCE_TR.get(k, k)} for k in stale]}
+    if state != "in_sync" and _FAILURE:
+        out["last_failure_at"] = _FAILURE.get("at")
+    return out
+
+
+def sync_state(expected: Mapping[str, str] | None) -> dict:
+    return _sync(expected, stored_digests())
+
+
+def _check_sync(c, expected: Mapping[str, str] | None) -> None:
+    if _sync(expected, stored_digests(c))["state"] != "in_sync":
+        raise VKMError(409, "out_of_sync", OUT_OF_SYNC_TR)
+
+
+def resync(manifest, owner_paths: Mapping[str, str | None] | None, current: Callable[[], Any]) -> dict:
+    """Owner recovery: observe the SERVED generation again. Idempotent (an observation equal to the stored one writes
+    nothing); refused while no generation is served; not written if another generation was published meanwhile."""
+    if manifest is None or not manifest.core:
+        raise VKMError(409, "no_generation", SYNC_TR["no_generation"])
+    obs = expected_observations(manifest, owner_paths, previously_seen_sources())
+    res = observe(obs, guard=lambda: (current() is not None and current().core_id == manifest.core_id))
+    if res.get("superseded"):
+        raise VKMError(409, "stale_generation", STALE_TR)
+    _FAILURE.clear()
+    return res
 
 
 # ---------------------------------------------------------------------------------------------
@@ -361,13 +485,15 @@ def _check_generation(c, presented: str) -> None:
 
 
 def review(issue_id: str, action: str, *, vkm_generation_presented: str, actor: str,
-           note: str | None = None) -> dict:
-    """An owner decision. Changes ONLY the issue's review status and appends one history event."""
+           expected: Mapping[str, str] | None, note: str | None = None) -> dict:
+    """An owner decision. Changes ONLY the issue's review status and appends one history event. `expected` is what the
+    SERVED generation implies (`expected_digests`); a store that does not hold exactly that refuses the decision."""
     if action not in REVIEW_EVENTS:
         raise VKMError(422, "bad_action", TRANSITION_TR)
     text = clean_note(note)
     now = _now()
     with _LOCK, ST._conn() as c:
+        _check_sync(c, expected)
         _check_generation(c, vkm_generation_presented)
         r = c.execute("SELECT * FROM dq_issue WHERE issue_id=?", (issue_id,)).fetchone()
         if r is None:
@@ -378,20 +504,22 @@ def review(issue_id: str, action: str, *, vkm_generation_presented: str, actor: 
                   (action, actor, now, issue_id))
         _event(c, issue_id, r["last_seen_generation"], r["last_seen_source_sha"], REVIEW_EVENTS[action], action,
                None, "owner" if action == "acik" else None, actor, text, now)
-    return issue_detail(issue_id)
+    return issue_detail(issue_id, expected)
 
 
-def add_note(issue_id: str, note: str, *, vkm_generation_presented: str, actor: str) -> dict:
+def add_note(issue_id: str, note: str, *, vkm_generation_presented: str, actor: str,
+             expected: Mapping[str, str] | None) -> dict:
     text = clean_note(note, required=True)
     now = _now()
     with _LOCK, ST._conn() as c:
+        _check_sync(c, expected)
         _check_generation(c, vkm_generation_presented)
         r = c.execute("SELECT * FROM dq_issue WHERE issue_id=?", (issue_id,)).fetchone()
         if r is None:
             raise VKMError(404, "not_found", NOT_FOUND_TR)
         _event(c, issue_id, r["last_seen_generation"], r["last_seen_source_sha"], "note_added", r["status"], None,
                None, actor, text, now)
-    return issue_detail(issue_id)
+    return issue_detail(issue_id, expected)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -441,7 +569,7 @@ def _row_view(r, extra: Mapping[str, Any] | None = None) -> dict:
 
 def _sort_key(r):
     resolved = r["status"] == "cozuldu_kaynakta"
-    return (resolved, SEVERITY_ORDER.get(r["severity"], 9), {"present": 0, "source_missing": 1}.get(r["presence"], 2),
+    return (resolved, SEVERITY_ORDER.get(r["severity"], 9), {"present": 0, "not_checked": 1, "source_missing": 1}.get(r["presence"], 2),
             r["source_key"], r["issue_id"])
 
 
@@ -481,10 +609,11 @@ def _tally(rows) -> dict:
             "by_type": [{"key": k, "label": v["label"], "open": sum(1 for r in open_rows if r["issue_type"] == k)}
                         for k, v in V.TYPES.items()],
             "present_in_current_upload": sum(1 for r in open_rows if r["presence"] == "present"),
-            "unknown_source_missing": sum(1 for r in open_rows if r["presence"] == "source_missing")}
+            "unknown_source_missing": sum(1 for r in open_rows if r["presence"] == "source_missing"),
+            "unknown_not_checked": sum(1 for r in open_rows if r["presence"] == "not_checked")}
 
 
-def public_summary() -> dict:
+def public_summary(expected: Mapping[str, str] | None = None) -> dict:
     """D-062 viewer-level summary (public viewer and financial viewer): counts of issues by severity / status / type,
     whether anything was observed and the date of the last observation. No issue ID, title detail, source, locator,
     count of affected records, file name, fingerprint, note or reviewer."""
@@ -492,14 +621,17 @@ def public_summary() -> dict:
         rows = c.execute("SELECT issue_type, severity, status, presence FROM dq_issue").fetchall()
         last = c.execute("SELECT MAX(observed_at) FROM dq_source_state").fetchone()[0]
     t = _tally(rows)
-    return {"observed": last is not None, "last_observed_on": last[:10] if last else None,
+    sync = sync_state(expected)["state"]
+    return {"observed": last is not None, "last_observed_on": last[:10] if last else None, "sync": sync,
+            "sync_message": SYNC_TR[sync],
             "open_total": t["open_total"], "by_severity": t["by_severity"], "by_status": t["by_status"],
             "by_type": [x for x in t["by_type"] if x["open"]],
             "notice": V.NOT_APPROVAL_TR, "detail_requires_owner": True}
 
 
 def list_issues(*, status: str = "open", severity: str | None = None, issue_type: str | None = None,
-                source: str | None = None, presence: str | None = None) -> dict:
+                source: str | None = None, presence: str | None = None,
+                expected: Mapping[str, str] | None = None) -> dict:
     with ST._conn() as c:
         rows = c.execute("SELECT * FROM dq_issue").fetchall()
         notes = {r[0]: r[1] for r in c.execute(
@@ -511,9 +643,10 @@ def list_issues(*, status: str = "open", severity: str | None = None, issue_type
             last_review[r[0]] = {"event": r[1], "event_label": V.EVENT_TR.get(r[1], r[1]), "at": r[2]}
         states = c.execute("SELECT * FROM dq_source_state ORDER BY source_key").fetchall()
         gen = vkm_generation(c)
+        sync = _sync(expected, stored_digests(c))
     picked = _filter_rows(rows, status=status, severity=severity, issue_type=issue_type, source=source,
                           presence=presence)
-    return {"vkm_generation": gen, "notice": V.NOT_APPROVAL_TR, "counts": _tally(rows),
+    return {"vkm_generation": gen, "notice": V.NOT_APPROVAL_TR, "sync": sync, "counts": _tally(rows),
             "sources": [{"key": s["source_key"], "label": V.SOURCE_TR.get(s["source_key"], s["source_key"]),
                          "state": s["state"], "state_label": "Yüklendi" if s["state"] == "present" else "Yüklenmedi",
                          "observed_at": s["observed_at"], "generation": _short(s["generation_id"]),
@@ -526,7 +659,7 @@ def list_issues(*, status: str = "open", severity: str | None = None, issue_type
             "catalogue": catalogue()}
 
 
-def issue_detail(issue_id: str) -> dict:
+def issue_detail(issue_id: str, expected: Mapping[str, str] | None = None) -> dict:
     with ST._conn() as c:
         r = c.execute("SELECT * FROM dq_issue WHERE issue_id=?", (issue_id,)).fetchone()
         if r is None:
@@ -534,6 +667,7 @@ def issue_detail(issue_id: str) -> dict:
         events = c.execute("SELECT * FROM dq_issue_event WHERE issue_id=? ORDER BY event_id DESC",
                            (issue_id,)).fetchall()
         gen = vkm_generation(c)
+        sync = _sync(expected, stored_digests(c))
     t = V.texts(r["check_code"], r["source_key"], r["field_name"], r["column_letter"])
     hist = [{"event_id": e["event_id"], "at": e["at"], "event": e["event"], "event_label": V.EVENT_TR.get(e["event"], e["event"]),
              "actor": e["actor"], "actor_label": ACTOR_TR.get(e["actor"] or "", e["actor"] or "—"),
@@ -541,17 +675,20 @@ def issue_detail(issue_id: str) -> dict:
              "reason": e["reason"], "reason_label": V.REASON_TR.get(e["reason"] or "", None),
              "counts": _counts_view(e["detail_counts"]) if e["detail_counts"] else [],
              "generation": _short(e["generation_id"]), "note": e["note"]} for e in events]
-    return {"vkm_generation": gen, "notice": V.NOT_APPROVAL_TR,
+    in_sync = sync["state"] == "in_sync"
+    return {"vkm_generation": gen, "notice": V.NOT_APPROVAL_TR, "sync": sync,
             "issue": _row_view(r, {"explanation": t["explain"], "action": t["action"],
                                    "labels": json.loads(r["detail_labels"] or "[]"),
                                    "fingerprint_first": _short(r["first_seen_source_sha"]),
                                    "fingerprint_last": _short(r["last_seen_source_sha"]),
                                    "allowed_actions": [{"key": a, "label": ACTION_TR[a]}
-                                                       for a in allowed_actions(r["status"])],
+                                                       for a in allowed_actions(r["status"])] if in_sync else [],
+                                   "decisions_blocked": not in_sync,
                                    "notes": sum(1 for e in events if e["note"] is not None)}),
             "history": hist}
 
 
 __all__ = ["init_tables", "observe", "Observation", "core_observations", "owner_observation", "make_observer",
            "vkm_generation", "review", "add_note", "public_summary", "list_issues", "issue_detail", "VKMError",
-           "clean_note", "allowed_actions", "NOTE_MAX", "previously_seen_sources"]
+           "clean_note", "allowed_actions", "NOTE_MAX", "previously_seen_sources", "expected_observations",
+           "expected_digests", "stored_digests", "sync_state", "resync", "record_provenance", "SYNC_STATES", "SYNC_TR"]

@@ -21,6 +21,7 @@ import hashlib
 import json
 import logging
 import os
+import tempfile
 import re
 import sqlite3
 from pathlib import Path
@@ -124,6 +125,11 @@ def by_check(source_key, check):
     r = con.execute("SELECT * FROM dq_issue WHERE source_key=? AND check_code=?", (source_key, check)).fetchone()
     con.close()
     return dict(r) if r else None
+
+
+def insync():
+    """Store-level unit tests: the served generation is exactly what the store holds (sync is tested separately)."""
+    return VS.stored_digests()
 
 
 def observe_core(m, owner_paths=None):
@@ -367,7 +373,7 @@ def test_carryover_still_present_grown_absent_and_returned(tmp_path):
     observe_core(m1)
     dup = by_check("stock", "stock_duplicate_code")
     gen = VS.vkm_generation()
-    VS.review(dup["issue_id"], "kabul_edildi", vkm_generation_presented=gen, actor="owner", note="bilinen")
+    VS.review(dup["issue_id"], "kabul_edildi", vkm_generation_presented=gen, actor="owner", expected=insync(), note="bilinen")
     # same problem in next month's (different) bytes → still_present, decision kept
     rows2 = [[*r[:3], (r[3] or 0) + 5, *r[4:]] for r in products(dup=True)]
     m2 = manifest_of(write_folder(f, stock=rows2))
@@ -400,7 +406,7 @@ def test_missing_kredi_month_never_resolves_earlier_kredi_issues(tmp_path):
                                                           "negative_remaining_rows": 1})
     VS.observe({"kredi": VS.owner_observation(m.with_owner("kredi", rec), "kredi", rec)})
     kr = [by_check("kredi", c)["issue_id"] for c in ("kredi_closed_with_remaining", "kredi_negative_remaining")]
-    VS.review(kr[0], "incelendi", vkm_generation_presented=VS.vkm_generation(), actor="owner")
+    VS.review(kr[0], "incelendi", vkm_generation_presented=VS.vkm_generation(), actor="owner", expected=insync())
     # next month: no Kredi file (not configured) → missing_source; earlier issues source_missing, none resolved
     observe_core(m)
     miss = by_check("kredi", "missing_source")
@@ -458,7 +464,7 @@ def test_history_is_append_only_and_issues_are_never_deleted(base_manifest):
 def test_history_and_decisions_survive_a_restart(base_manifest):
     observe_core(base_manifest)
     iid = VS.list_issues()["issues"][0]["issue_id"]
-    VS.review(iid, "incelendi", vkm_generation_presented=VS.vkm_generation(), actor="owner", note="kalıcı not")
+    VS.review(iid, "incelendi", vkm_generation_presented=VS.vkm_generation(), actor="owner", expected=insync(), note="kalıcı not")
     before = (issue(iid), events(iid))
     ST.init_db()                                             # what the next process start does (CREATE IF NOT EXISTS)
     VS.init_tables(sqlite3.connect(ST.DB_PATH))
@@ -476,8 +482,8 @@ def test_a_suspected_duplicate_is_never_deleted_or_merged(tmp_path):
         iid = by_check("stock" if check.startswith("stock") else "sales", check)["issue_id"]
         before_counts = issue(iid)["detail_counts"]
         g = VS.vkm_generation()
-        VS.review(iid, "incelendi", vkm_generation_presented=g, actor="owner")
-        VS.review(iid, "kabul_edildi", vkm_generation_presented=g, actor="owner")
+        VS.review(iid, "incelendi", vkm_generation_presented=g, actor="owner", expected=insync())
+        VS.review(iid, "kabul_edildi", vkm_generation_presented=g, actor="owner", expected=insync())
         observe_core(manifest_of(f))                        # carry-over of the same bytes
         d = issue(iid)
         assert d is not None and d["detail_counts"] == before_counts and d["presence"] == "present"
@@ -503,9 +509,9 @@ def test_review_and_acknowledgement_never_change_gate_evidence_or_manifest(base_
     observe_core(base_manifest)
     for i in VS.list_issues()["issues"]:
         g = VS.vkm_generation()
-        VS.review(i["issue_id"], "incelendi", vkm_generation_presented=g, actor="owner", note="incelendi")
-        VS.review(i["issue_id"], "kabul_edildi", vkm_generation_presented=g, actor="owner")
-        VS.add_note(i["issue_id"], "onay değildir", vkm_generation_presented=g, actor="owner")
+        VS.review(i["issue_id"], "incelendi", vkm_generation_presented=g, actor="owner", expected=insync(), note="incelendi")
+        VS.review(i["issue_id"], "kabul_edildi", vkm_generation_presented=g, actor="owner", expected=insync())
+        VS.add_note(i["issue_id"], "onay değildir", vkm_generation_presented=g, actor="owner", expected=insync())
     assert decisions() == d0
     assert json.dumps(base_manifest.to_dict(), sort_keys=True, default=str) == manifest_before
     assert all(s != ACC.State.VERIFIED for s, _, _ in d0.values())
@@ -531,21 +537,21 @@ def test_review_transitions_notes_and_stale_generation(base_manifest):
     iid = VS.list_issues()["issues"][0]["issue_id"]
     g = VS.vkm_generation()
     with pytest.raises(VS.VKMError) as e:
-        VS.review(iid, "incelendi", vkm_generation_presented="vkm-eski", actor="owner")
+        VS.review(iid, "incelendi", vkm_generation_presented="vkm-eski", actor="owner", expected=insync())
     assert e.value.status == 409 and e.value.code == "stale_generation"
     with pytest.raises(VS.VKMError) as e:
-        VS.review(iid, "acik", vkm_generation_presented=g, actor="owner")          # already open
+        VS.review(iid, "acik", vkm_generation_presented=g, actor="owner", expected=insync())          # already open
     assert e.value.code == "transition_not_allowed"
     with pytest.raises(VS.VKMError) as e:
-        VS.add_note(iid, "  \x00 ", vkm_generation_presented=g, actor="owner")
+        VS.add_note(iid, "  \x00 ", vkm_generation_presented=g, actor="owner", expected=insync())
     assert e.value.code == "note_empty"
     with pytest.raises(VS.VKMError) as e:
-        VS.add_note(iid, "x" * 501, vkm_generation_presented=g, actor="owner")
+        VS.add_note(iid, "x" * 501, vkm_generation_presented=g, actor="owner", expected=insync())
     assert e.value.code == "note_too_long"
-    d = VS.review(iid, "incelendi", vkm_generation_presented=g, actor="owner", note="a\x07b")
+    d = VS.review(iid, "incelendi", vkm_generation_presented=g, actor="owner", expected=insync(), note="a\x07b")
     assert d["issue"]["status"] == "incelendi" and d["history"][0]["note"] == "ab"
     assert [a["key"] for a in d["issue"]["allowed_actions"]] == ["kabul_edildi", "acik"]
-    d = VS.review(iid, "acik", vkm_generation_presented=g, actor="owner")
+    d = VS.review(iid, "acik", vkm_generation_presented=g, actor="owner", expected=insync())
     assert d["issue"]["status"] == "acik" and d["history"][0]["reason"] == "owner"
     # a resolved issue cannot be reviewed (only noted)
     con = sqlite3.connect(ST.DB_PATH)
@@ -553,13 +559,13 @@ def test_review_transitions_notes_and_stale_generation(base_manifest):
     con.commit()
     con.close()
     with pytest.raises(VS.VKMError) as e:
-        VS.review(iid, "incelendi", vkm_generation_presented=g, actor="owner")
+        VS.review(iid, "incelendi", vkm_generation_presented=g, actor="owner", expected=insync())
     assert e.value.code == "transition_not_allowed"
-    assert VS.add_note(iid, "kaynakta düzeldi", vkm_generation_presented=g, actor="owner")["issue"]["notes"] == 2
+    assert VS.add_note(iid, "kaynakta düzeldi", vkm_generation_presented=g, actor="owner", expected=insync())["issue"]["notes"] == 2
     # a new observation makes the old token stale
     VS.observe({"stock": VS.Observation("missing", "g2")})
     with pytest.raises(VS.VKMError) as e:
-        VS.add_note(iid, "x", vkm_generation_presented=g, actor="owner")
+        VS.add_note(iid, "x", vkm_generation_presented=g, actor="owner", expected=insync())
     assert e.value.code == "stale_generation"
 
 
@@ -605,7 +611,8 @@ def http(tmp_path, monkeypatch, caplog):
     f = write_folder(str(tmp_path / "d"), stock=products(dup=True), dup_sales=2)
     observe_core(manifest_of(f))
     rec = dataclasses.replace(kredi_record(), validation={**kredi_record().validation, "closed_with_positive_remaining": 2})
-    VS.observe({"kredi": VS.owner_observation(manifest_of(f).with_owner("kredi", rec), "kredi", rec)})
+    served = manifest_of(f).with_owner("kredi", rec)
+    VS.observe({"kredi": VS.owner_observation(served, "kredi", rec)})
     APP.app.dependency_overrides[APP.get_repo] = lambda: ContextRepository(context={"actions": []})
     clients = []
     caplog.set_level(logging.DEBUG)
@@ -614,8 +621,10 @@ def http(tmp_path, monkeypatch, caplog):
         kw.setdefault("headers", {"X-StockAgent": "1"})
         c = TestClient(APP.app, base_url=base_url, **kw)
         c.__enter__()
+        APP.app.state.generations.install(served)          # the generation the app SERVES (observed above)
         clients.append(c)
         return c
+    make.served = served
     yield make
     for c in clients:
         c.__exit__(None, None, None)
@@ -652,6 +661,7 @@ def test_vkm_routes_are_registered_at_the_agreed_levels():
     assert AX.ACCESS[("GET", "/api/vkm/issues/{issue_id}")] == AX.OWNER_READ
     assert AX.ACCESS[("POST", "/api/vkm/issues/{issue_id}/review")] == AX.OWNER_WRITE
     assert AX.ACCESS[("POST", "/api/vkm/issues/{issue_id}/notes")] == AX.OWNER_WRITE
+    assert AX.ACCESS[("POST", "/api/vkm/sync")] == AX.OWNER_WRITE              # recovery (review of PR #31 §3)
     for k in [k for k in AX.ACCESS if "/api/vkm/" in k[1]]:
         assert ACC.ROUTES[k][0] in ("system", "operational")
 
@@ -666,8 +676,9 @@ def test_viewer_summary_is_allow_listed_and_free_of_private_detail(http):
         r = c.get("/api/vkm/summary")
         assert r.status_code == 200
         j = r.json()
-        assert set(j) == {"observed", "last_observed_on", "open_total", "by_severity", "by_status", "by_type", "notice",
-                          "detail_requires_owner", "ai_used"}
+        assert set(j) == {"observed", "last_observed_on", "sync", "sync_message", "open_total", "by_severity",
+                          "by_status", "by_type", "notice", "detail_requires_owner", "ai_used"}
+        assert j["sync"] == "in_sync"
         assert j["observed"] is True and j["open_total"] > 0 and j["notice"] == V.NOT_APPROVAL_TR
         assert all(set(t) == {"key", "label", "open"} for t in j["by_type"])
         text = r.text
@@ -732,7 +743,9 @@ def test_stale_generation_and_bad_input_are_refused_without_echo(http):
     c = owner(http)
     lst = c.get("/api/vkm/issues").json()
     iid, g = lst["issues"][0]["issue_id"], lst["vkm_generation"]
-    VS.observe({"stock": VS.Observation("missing", "yeni-yukleme")})        # a new upload is observed meanwhile
+    # a new upload is PUBLISHED and observed meanwhile (same files, but the stock export now lists one more duplicate)
+    newer = manifest_of(write_folder(os.path.join(tempfile.mkdtemp(), "d"), stock=products(dup=True), dup_sales=3))
+    APP.app.state.generations.install(newer)
     before = dump()
     r = c.post(f"/api/vkm/issues/{iid}/review", json={"action": "incelendi", "vkm_generation": g})
     assert r.status_code == 409 and r.json()["detail"]["error_code"] == "stale_generation"

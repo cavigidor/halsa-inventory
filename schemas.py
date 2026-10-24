@@ -1554,6 +1554,8 @@ class VkmPublicSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
     observed: bool
     last_observed_on: Optional[str] = None
+    sync: Literal["in_sync", "out_of_sync", "no_generation"]   # do the counts describe the served upload?
+    sync_message: str                                          # fixed Turkish text for that state
     open_total: int
     by_severity: VkmSeverityCounts
     by_status: VkmStatusCounts

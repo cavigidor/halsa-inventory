@@ -25,7 +25,7 @@ from typing import Any, Iterable, Mapping
 from services import accuracy as ACC
 from services import source_validation as SV
 
-DETECTOR_VERSION = "vkm-1"
+DETECTOR_VERSION = "vkm-1.1"   # 1.1: detector scopes (unknown ≠ resolved), provenance-bound observations
 NOT_APPROVAL_TR = "İnceleme bir onay değildir; metrikler yalnızca doğrulanmış kanıtla gösterilir."
 
 # ---------------------------------------------------------------------------------------------
@@ -53,19 +53,22 @@ STATUS_TR = {"acik": "Açık", "incelendi": "İncelendi", "kabul_edildi": "Kabul
              "cozuldu_kaynakta": "Kaynakta çözüldü", "yeniden_acildi": "Yeniden açıldı"}
 OPEN_STATUSES = ("acik", "yeniden_acildi", "incelendi", "kabul_edildi")   # still present or unknown: not resolved
 
-PRESENCE = ("present", "absent", "source_missing")
+PRESENCE = ("present", "absent", "not_checked", "source_missing")
 PRESENCE_TR = {"present": "Bu yüklemede var", "absent": "Bu yüklemede yok (kaynakta çözüldü)",
+               "not_checked": "Bilinmiyor — bu yüklemede denetlenemedi",
                "source_missing": "Bilinmiyor — kaynak dosya yüklenmedi"}
 
 EVENTS = ("detected", "still_present", "not_present", "reviewed", "acknowledged", "note_added", "reopened",
-          "source_missing")
+          "source_missing", "not_checked")
 EVENT_TR = {"detected": "İlk kez görüldü", "still_present": "Yeni yüklemede yine görüldü",
             "not_present": "Yeni yüklemede görülmedi — kaynakta çözüldü",
             "reviewed": "İncelendi olarak işaretlendi", "acknowledged": "Kabul edildi (bilinen durum)",
             "note_added": "Not eklendi", "reopened": "Yeniden açıldı",
-            "source_missing": "Kaynak dosya yüklenmedi — durum bilinmiyor, çözülmüş sayılmadı"}
+            "source_missing": "Kaynak dosya yüklenmedi — durum bilinmiyor, çözülmüş sayılmadı",
+            "not_checked": "Dosya yüklendi ama bu denetim yapılamadı — durum bilinmiyor, çözülmüş sayılmadı"}
 REASON_TR = {"returned": "Sorun yeni yüklemede yeniden görüldü", "counts_increased": "Etkilenen sayı arttı",
-             "owner": "Yönetici yeniden açtı", "source_returned": "Kaynak dosya yeniden yüklendi"}
+             "owner": "Yönetici yeniden açtı", "source_returned": "Kaynak dosya yeniden yüklendi",
+             "check_restored": "Denetim yeniden yapılabildi"}
 
 SOURCE_TR = {"stock": "Stok raporu", "sales": "Satış raporu", "aging": "Cari yaşlandırma raporu",
              "liste": "Müşteri ana listesi (satış dosyasındaki 'liste' sayfası)", "kredi": "Kredi takip dosyası",
@@ -378,6 +381,10 @@ class Issue:
     def issue_id(self) -> str:
         return issue_id(self.issue_type, self.source_key, self.locator)
 
+    @property
+    def scope(self) -> str:
+        return scope_of(self.check, self.field_name)
+
     def affected_metrics(self) -> tuple[str, ...]:
         return affected_metrics(self.source_key, field_name=self.field_name, join=self.join,
                                 column_only=self.column is not None and self.field_name is None)
@@ -619,6 +626,16 @@ def _joins(joins: Mapping[str, Any]) -> list[Issue]:
 def detect_core(record, joins: Mapping[str, Any] | None = None) -> list[Issue]:
     """Issues of one core source record (stock / sales / aging / liste); joins are attributed to the source where the
     unmatched record lives (sales, aging, liste)."""
+    return list(inspect_core(record, joins).issues)
+
+
+def inspect_core(record, joins: Mapping[str, Any] | None = None) -> "Detection":
+    """The issues of one core record AND the detector scopes that could actually be evaluated on it (review §1)."""
+    key, ev, v = record.key, record.evidence, dict(record.validation or {})
+    return _detection(_detect_core(record, joins), _checked_core(key, ev, v, joins))
+
+
+def _detect_core(record, joins: Mapping[str, Any] | None = None) -> list[Issue]:
     key, ev, v = record.key, record.evidence, dict(record.validation or {})
     if ev is None:
         return [Issue("inspection_failed", key, "integrity:inspection", {"checks": 1})]
@@ -638,6 +655,15 @@ def detect_core(record, joins: Mapping[str, Any] | None = None) -> list[Issue]:
 
 def detect_owner(record) -> list[Issue]:
     """Issues of one owner source record (Kredi / Gider-Gelir / Bütçe) from its importer counts."""
+    return list(inspect_owner(record).issues)
+
+
+def inspect_owner(record) -> "Detection":
+    key, ev, v = record.key, record.evidence, dict(record.validation or {})
+    return _detection(_detect_owner(record), _checked_owner(key, ev, v))
+
+
+def _detect_owner(record) -> list[Issue]:
     key, ev, v = record.key, record.evidence, dict(record.validation or {})
     if ev is None:
         return [Issue("inspection_failed", key, "integrity:inspection", {"checks": 1})]
@@ -669,6 +695,136 @@ def detect_owner(record) -> list[Issue]:
     return _dedupe(out)
 
 
+# ---------------------------------------------------------------------------------------------
+# detector scopes (review of PR #31, §1): UNKNOWN evidence is never a resolution
+# ---------------------------------------------------------------------------------------------
+# Every check belongs to one scope: the piece of recorded evidence it is evaluated on. An observation lists the scopes
+# whose evidence was actually present and valid for that upload. A previously seen issue that is not in a PRESENT
+# upload is "resolved in the source" only if its scope was evaluated; otherwise its presence is UNKNOWN
+# (`not_checked`) and its status is kept. A missing count (None / absent key) is "not checked", never zero.
+FIELD_CHECKS = frozenset({"field_excel_errors", "field_missing_cache", "field_invalid_dates", "required_blank",
+                          "amount_blank", "duplicate_header"})
+JOIN_SCOPE_KEYS: dict[str, tuple[str, ...]] = {
+    "join_sales_product_not_in_stock": ("sold_products_not_in_stock",),
+    "products_multiple_names": ("products_with_multiple_names",),
+    "join_order_customer_not_in_master": ("order_customers_unmatched_in_master",),
+    "join_invoice_account_not_in_master": ("invoice_accounts_unmatched_in_master",),
+    "code_whitespace": ("order_codes_with_whitespace", "invoice_codes_with_whitespace",
+                        "product_codes_with_whitespace", "matches_only_after_trim",
+                        "order_codes_colliding_after_trim"),
+    "dq5_multiple_invoice_accounts": ("order_customers_with_multiple_invoice_accounts",
+                                      "invoice_accounts_with_multiple_order_customers"),
+    "master_duplicate_codes": ("master_duplicate_codes",),
+    "join_aging_account_not_in_sales": ("aging_accounts_not_in_sales_invoice_accounts",),
+    "dq6_aging_order_code_only": ("aging_accounts_matching_order_code_only",),
+}
+_SCOPE = {
+    "inspection_failed": "evidence", "import_failed": "evidence", "layout_unsupported": "layout",
+    "selection_not_explicit": "selection", "report_date_missing": "report_date", "period_unknown": "period",
+    "period_incomplete": "period", "date_contradiction": "dates", "external_links": "external",
+    "mapping_not_approved": "mapping", "mapping_unknown": "mapping", "declared_totals_inconsistent": "declared_totals",
+    "joins_not_checked": "joins",
+    "stock_duplicate_code": "rows:counts", "stock_missing_identity": "rows:counts",
+    "footer_mismatch": "rows:footer", "footer_partial": "rows:footer", "footer_missing_cache": "rows:footer",
+    "footer_ambiguous": "rows:footer", "stock_coverage_undefined": "rows:coverage",
+    "stock_coverage_error": "rows:coverage",
+    "sales_duplicate_rows": "duplicates", "aging_duplicate_accounts": "duplicates", "owner_duplicates": "duplicates",
+    "excel_errors": "cells:errors", "missing_cache": "cells:missing_cache", "owner_required_blank": "cells:required",
+    "totals_contradiction": "totals", "kredi_negative_remaining": "kredi:negative_remaining_rows",
+    "kredi_closed_with_remaining": "kredi:closed_with_positive_remaining",
+    "kredi_hidden_rows": "kredi:hidden_installment_rows", "missing_source": "source",
+}
+
+
+def scope_of(check: str, field_name: str | None = None) -> str:
+    """The detector scope of a check (stored issues are judged by this, so it must stay stable)."""
+    if check in FIELD_CHECKS:
+        return f"field:{field_name}"
+    if check in JOIN_SCOPE_KEYS:
+        return f"join:{check}"
+    return _SCOPE.get(check, f"check:{check}")
+
+
+@dataclass(frozen=True)
+class Detection:
+    issues: tuple[Issue, ...]
+    checked: frozenset[str]
+
+
+def _detection(issues: list[Issue], checked: set[str]) -> Detection:
+    # an observed issue proves its own scope was evaluated
+    return Detection(tuple(issues), frozenset(checked | {i.scope for i in issues}))
+
+
+def _known(*values) -> bool:
+    return all(v is not None for v in values)
+
+
+def _checked_common(key: str, ev, role: str) -> set[str]:
+    out = {"source", "evidence"}
+    if ev is None:
+        return out
+    out |= {"report_date", "mapping"}
+    if role == "core":
+        out |= {"selection", "declared_totals"}
+    if key == "sales":
+        out.add("period")
+    if _known(ev.layout_supported):
+        out.add("layout")
+    if _known(ev.date_contradictions):
+        out.add("dates")
+    if _known(ev.external_references):
+        out.add("external")
+    if _known(ev.duplicate_records):
+        out.add("duplicates")
+    return out
+
+
+def _checked_joins(joins: Mapping[str, Any] | None) -> set[str]:
+    if not joins:
+        return set()
+    out = {"joins"}                                     # whether the relationship check ran at all is itself known
+    if "failure" in joins:
+        return out                                      # every relationship count is UNKNOWN
+    for check, keys in JOIN_SCOPE_KEYS.items():
+        if all(joins.get(k) is not None for k in keys):
+            out.add(f"join:{check}")
+    return out
+
+
+def _checked_core(key: str, ev, v: Mapping[str, Any], joins: Mapping[str, Any] | None) -> set[str]:
+    out = _checked_common(key, ev, "core")
+    if ev is None:
+        return out
+    for fname, d in (ev.fields or {}).items():
+        if isinstance(d, Mapping):
+            out.add(f"field:{fname}")
+    rows = v.get("rows") or {}
+    if key == "stock" and rows.get("ok"):
+        if isinstance(rows.get("counts"), Mapping):
+            out.add("rows:counts")
+        if isinstance(rows.get("footer_by_column"), Mapping):
+            out.add("rows:footer")
+        if isinstance(rows.get("coverage"), Mapping):
+            out.add("rows:coverage")
+    return out | _checked_joins(joins)
+
+
+def _checked_owner(key: str, ev, v: Mapping[str, Any]) -> set[str]:
+    out = _checked_common(key, ev, "owner")
+    if ev is None:
+        return out
+    for scope, value in (("cells:errors", ev.error_cells), ("cells:missing_cache", ev.missing_cached_formulas),
+                         ("cells:required", ev.missing_required_values), ("totals", ev.totals_consistent)):
+        if _known(value):
+            out.add(scope)
+    if key == "kredi":
+        for k in ("negative_remaining_rows", "closed_with_positive_remaining", "hidden_installment_rows"):
+            if _known(v.get(k)):
+                out.add(f"kredi:{k}")
+    return out
+
+
 def missing_issue(key: str) -> Issue:
     return Issue("missing_source", key, "source:file")
 
@@ -683,4 +839,5 @@ def _dedupe(issues: list[Issue]) -> list[Issue]:
 __all__ = ["Issue", "Check", "CHECKS", "TYPES", "SEVERITIES", "SEVERITY_TR", "STATUSES", "STATUS_TR", "PRESENCE",
            "PRESENCE_TR", "EVENTS", "EVENT_TR", "REASON_TR", "SOURCE_TR", "COUNT_TR", "CORE_SOURCES", "OWNER_SOURCES",
            "EXPECTED_ALWAYS", "DETECTOR_VERSION", "NOT_APPROVAL_TR", "issue_id", "detect_core", "detect_owner",
+           "inspect_core", "inspect_owner", "Detection", "scope_of", "FIELD_CHECKS", "JOIN_SCOPE_KEYS",
            "missing_issue", "affected_metrics", "metric_titles", "texts", "OPEN_STATUSES"]
