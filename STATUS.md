@@ -1,13 +1,37 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-22 (M8-CP1 three-level access independently reviewed and squash-merged as PR #30 at `a03efbf` from `318491d`; GitHub Actions `39808020049` verified **1554 passed / 7 skipped / 2 xfailed** with JS/browser tests required. Not deployed. Next checkpoint M8-VKM-1; core owner-local reconciliation still FAIL, Kredi NOT RUN, no metrics VERIFIED, `GENERATION_BOUND_API_EVIDENCE` False)._
+_Updated 2026-10-24 (M8-VKM-1 Veri Kontrol Merkezi implemented on `claude/m8-vkm-1-veri-kontrol-merkezi`, PR open for independent review, NOT merged, NOT deployed. Local suite **1648 passed / 7 skipped / 2 xfailed** with JS/browser tests required. Core owner-local reconciliation still FAIL, Kredi NOT RUN, no metrics VERIFIED, `GENERATION_BOUND_API_EVIDENCE` False)._
 
 ## Git
+- **`claude/m8-vkm-1-veri-kontrol-merkezi`:** M8-VKM-1 (D-062), one PR open for independent review; not merged, not deployed.
 - **`claude/m8-cp1-simplified-access`:** PR #30 reviewed at `318491d` and squash-merged to `main` (`a03efbf`, 2026-10-22). Three access levels are implemented and locally tested; **not deployed**.
 - **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), M8 source-evidence PR #28 (`5baa92a`), M8 precise validation PR #29 (`4ad8d8a`) and M8-CP1 access PR #30 (`a03efbf`) merged.
 - **`claude/m8-accuracy-2-shared-evidence`:** PR #28 merged as technical infrastructure 2026-10-20; all production metrics still withheld and `GENERATION_BOUND_API_EVIDENCE` remains False.
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
 - **Owner's Mac folder:** current checkout state was not inspected in this checkpoint. Previous notes reported an older checkout; verify `git status` before pulling, protect private `.env`, data and SQLite, and follow `docs/owner_launch_checklist.md`. Browser/real-data acceptance remains owner-local.
+
+## M8-VKM-1 — Veri Kontrol Merkezi (PR open; awaiting independent review; NOT merged, NOT deployed)
+- **Built (D-062):** `services/vkm.py` (pure deterministic detection from each accepted generation's validation
+  counts, `SourceEvidence` and join report; fixed Turkish title / explanation / action per check; stable IDs
+  `VKM-` + SHA-256(type | source | schema locator), no values), `services/vkm_store.py` (private SQLite: `dq_issue`
+  never deleted, append-only `dq_issue_event` / `dq_observation` enforced by triggers, `dq_source_state`; carry-over,
+  missing-source handling, idempotent re-observation, owner review / notes with stale-observation 409),
+  `GenerationStore.add_observer` (install / restart re-derivation / owner-source load; failure never affects
+  publication), routes `/api/vkm/*`, tab "Veri Kontrol" in the dashboard.
+- **Access:** summary counts viewer-level (allow-list `VkmPublicSummary`); issue list / detail / history / notes
+  owner_read; review and notes owner_write (session + CSRF + Origin; reviewer = session role). Disclosure inventory
+  `docs/m8_cp1_access.md` §6 updated.
+- **Accuracy unchanged:** review never changes evidence, a gate decision, a manifest or
+  `GENERATION_BOUND_API_EVIDENCE`; no metric VERIFIED; no Kredi `DURUM`, revenue, DQ-1–DQ-6, source-date or mapping
+  rule changed. Source rows are never deleted, merged or modified.
+- **Tests (cloud, synthetic, `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled`):** **1648 passed,
+  7 skipped, 2 xfailed** (new: `tests/test_m8_vkm.py` 81, `tests/test_m8_vkm_browser.py` 4; `tests/test_m5_browser.py`
+  tab sweep and `tests/test_m8_accuracy_review.py` privacy sweep extended to the new tab / route).
+- **Open questions for review:** DQ-1, DQ-2 and the 120/320 split are not detectable from the current pipeline; owner
+  workbooks have no mapping-approval path (not flagged); on real data every core export will show "Kaynak eşlemesi
+  onaylanmadı", "Rapor tarihi beyan edilmedi" and "Dosya açıkça seçilmedi" until `data/sources.json` declarations
+  exist — intended, but the owner should expect it.
+- **Next:** independent review of the VKM-1 PR; then owner-local run on the real exports (counts only leave the Mac).
 
 ## M8-ACCURACY-2A / 2B — real-data diagnosis and precise validation (2B merged; acceptance still OPEN)
 - **2A (owner's Mac, 2026-10-20/21, read-only, AI disabled; counts only left the Mac):**
