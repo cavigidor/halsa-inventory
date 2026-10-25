@@ -55,7 +55,7 @@ AGING_REQUIRED = ["Hesap kodu", "Hesap adı", "Temsilci kodu"]
 _MONTHS = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
 
 STEP_TR = {"busy": "kilit", "validate": "doğrulama", "build": "oluşturma", "verify": "kontrol",
-           "swap": "değiştirme", "done": "tamam"}
+           "swap": "değiştirme", "done": "tamam", "staged": "önizleme"}
 PREVIOUS_KEPT = "Önceki veriler kullanılmaya devam ediyor."
 
 
@@ -118,13 +118,27 @@ def _check(checks, name, ok, detail=""):
 def _read(checks, errors, label, path, reader, frozen=None):
     try:
         df = reader(frozen.stream() if frozen is not None else path)   # M8-ACCURACY-2: the frozen bytes
-    except Exception as e:                 # not an Excel workbook, corrupt, locked …
+    except Exception as e:                 # not an Excel workbook, corrupt, locked … or another report's layout
         log.warning("refresh: cannot read %s (%s)", os.path.basename(path), type(e).__name__)
         _check(checks, f"{label}: okunabilir Excel", False, os.path.basename(path))
-        errors.append(f"{label} dosyası okunamadı ({os.path.basename(path)}): geçerli bir Excel çalışma kitabı değil.")
+        if _is_container_error(e):
+            errors.append(f"{label} dosyası okunamadı ({os.path.basename(path)}): geçerli bir Excel çalışma kitabı "
+                          "değil.")
+        else:                              # M8-CP3: a valid workbook whose rows / header do not fit this report type
+            errors.append(f"{label} dosyası okunamadı ({os.path.basename(path)}): dosya {label.lower()} raporunun "
+                          "beklenen düzeninde değil (başlık satırı veya sayfa yapısı farklı; yanlış rapor türü "
+                          "seçilmiş olabilir).")
         return None
     _check(checks, f"{label}: okunabilir Excel", True, os.path.basename(path))
     return df
+
+
+def _is_container_error(e: Exception) -> bool:
+    """True when the bytes are not a readable .xlsx package at all (vs. a workbook with another layout)."""
+    import zipfile
+    from openpyxl.utils.exceptions import InvalidFileException
+    return isinstance(e, (zipfile.BadZipFile, InvalidFileException, OSError, EOFError)) or \
+        type(e).__name__ in ("XLRDError", "ParseError")
 
 
 def _columns(checks, errors, label, df, required, hint=""):
@@ -330,6 +344,16 @@ def _after_manifest_swap():
     """Test seam between the two file replacements (a crash here leaves a new manifest beside the old dashboard)."""
 
 
+def _undo(fn):
+    """Run an Upload Center undo callable (restores the previous selection files). Never raises."""
+    if fn is None:
+        return
+    try:
+        fn()
+    except Exception:
+        log.exception("refresh: could not undo the selection change")
+
+
 def _remove(path):
     try:
         os.remove(path)
@@ -339,10 +363,48 @@ def _remove(path):
         log.warning("refresh: could not remove a staging file (%s)", type(e).__name__)
 
 
+@dataclasses.dataclass
+class PublishHooks:
+    """M8-CP3 (Excel Upload Center): how a publication of an explicitly uploaded report set uses THIS pipeline.
+
+    - ``selection``: ``(paths, declarations, origin)`` used INSTEAD of reading ``data/sources.json`` (the files and the
+      uploader's declarations of the batch being published or previewed). Nothing is discovered or inferred.
+    - ``expect_core_id``: the core generation identity that was previewed. The freshly built candidate must have exactly
+      this identity, otherwise the publication stops before anything live changes (a stale preview is never published).
+    - ``before_swap()``: runs under ``PUBLISH_LOCK`` right before the dashboard / manifest swap; returns an undo callable
+      that is run if the swap or the install fails (the Upload Center writes the selection files here).
+    - ``after_install()``: runs under ``PUBLISH_LOCK`` right after the context and generation were installed (the
+      Upload Center completes the rest of its batch here, in the same step for every reader). Must not raise.
+    - ``stage_only``: validate → build → verify into the given (private) dashboard path and stop; nothing is swapped or
+      installed. ``staged_out`` (dict) receives the staged context and manifest (the preview).
+    - ``progress(stage)``: called with a stage key as the pipeline advances (Turkish progress in the Upload Center).
+    - ``previous_date``: the live data date to compare against when the dashboard path is not the live one (preview).
+    """
+    selection: tuple | None = None
+    expect_core_id: str | None = None
+    before_swap: object = None
+    after_install: object = None
+    stage_only: bool = False
+    staged_out: dict | None = None
+    progress: object = None
+    previous_date: str | None = None
+
+
+def _progress(hooks, stage):
+    fn = getattr(hooks, "progress", None)
+    if fn is not None:
+        try:
+            fn(stage)
+        except Exception:
+            pass
+
+
 def run_refresh(data_folder=None, dashboard_path=None, *, previous_context=None, install=None,
-                inflation_rate=None, today=None, drop=None):
+                inflation_rate=None, today=None, drop=None, hooks: PublishHooks | None = None):
     """The one refresh pipeline. `install(staged_ctx)` makes the verified context live (the API passes
-    ContextRepository.replace_context; the CLI passes nothing). Returns the report dict. Never raises."""
+    ContextRepository.replace_context; the CLI passes nothing). Returns the report dict. Never raises.
+    `hooks` (M8-CP3): an explicit selection, the expected candidate identity and the swap / install hooks of an Upload
+    Center publication or preview (`PublishHooks`); without hooks the behaviour is exactly the M5–M8 refresh."""
     t0 = time.monotonic()
     data_folder = data_folder or DEFAULT_DATA_FOLDER
     dashboard_path = dashboard_path or DEFAULT_DASHBOARD
@@ -350,7 +412,7 @@ def run_refresh(data_folder=None, dashboard_path=None, *, previous_context=None,
     try:
         with refresh_lock(p["lock"]):
             rep = _pipeline(data_folder, p, previous_context, install, inflation_rate, today,
-                            PLAUSIBILITY_DROP if drop is None else drop)
+                            PLAUSIBILITY_DROP if drop is None else drop, hooks)
     except RefreshBusy:
         rep = _report(step="busy", message="Başka bir yenileme sürüyor; bitmesini bekleyin.",
                       errors=["Başka bir yenileme sürüyor."],
@@ -367,8 +429,10 @@ def _prev_date(previous_context, dashboard_path):
     return max(dates) if dates else None
 
 
-def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, drop):
+def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, drop, hooks=None):
     prev_date = _prev_date(previous_context, p["live"])
+    if hooks is not None and hooks.previous_date:
+        prev_date = max(d for d in (prev_date, hooks.previous_date) if d)
     common = {"sources": {"stock": None, "sales": None, "aging": None}, "previous_as_of_data_date": prev_date,
               "as_of_data_date": prev_date}
     warnings = []
@@ -376,10 +440,14 @@ def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, 
         _remove(p[k])
     try:
         # 0. explicit selection, one frozen read of every selected workbook (M8-ACCURACY-2)
-        try:
-            sources, declarations, origin = GEN.select_core(data_folder)
-        except GEN.SelectionError as e:
-            raise StepError("validate", f"Kaynak seçimi geçersiz: {e}.") from None
+        _progress(hooks, "core_validate")
+        if hooks is not None and hooks.selection is not None:
+            sources, declarations, origin = hooks.selection      # M8-CP3: the uploaded batch, never discovered
+        else:
+            try:
+                sources, declarations, origin = GEN.select_core(data_folder)
+            except GEN.SelectionError as e:
+                raise StepError("validate", f"Kaynak seçimi geçersiz: {e}.") from None
         common["sources"] = {k: (os.path.basename(v) if v else None) for k, v in sources.items()}
         try:
             frozen = GEN.freeze(sources)
@@ -398,6 +466,7 @@ def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, 
         frames = v["frames"]
 
         # 2. build into staging (in memory + dashboard.html.new)
+        _progress(hooks, "core_build")
         try:
             manifest = GEN.build_manifest(frozen, frames, declarations, origin, today)
             staged = CTX.build_context(data_folder, inflation_rate=inflation_rate, sources=sources, frames=frames)
@@ -421,6 +490,17 @@ def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, 
         if not ver["ok"]:
             common["errors"] = ver["errors"]
             raise StepError("verify", ver["errors"][0])
+        # M8-CP3: a publication must be exactly the generation that was previewed (same bytes, declarations,
+        # validation, evidence and joins); anything else stops here, before anything live changes
+        if hooks is not None and hooks.expect_core_id is not None and manifest.core_id != hooks.expect_core_id:
+            raise StepError("verify", "Yayımlanacak veri, onaylanan önizlemeyle aynı değil; önizlemeyi yeniden "
+                                      "oluşturun.")
+        if hooks is not None and hooks.stage_only:               # M8-CP3 preview: stop before any swap
+            if hooks.staged_out is not None:
+                hooks.staged_out.update(context=staged, manifest=manifest, frames=frames, sources=sources)
+            return _report(ok=True, step="staged", message="Önizleme hazır; canlı veriler değişmedi.",
+                           warnings=warnings, previous_data_kept=True,
+                           **{**common, "as_of_data_date": prev_date})
 
         # 4. publish: dashboard, manifest and context as ONE step for every in-process reader (request_pin
         #    PUBLISH_LOCK — a request captures its gate inputs under the same lock). On any failure the previous
@@ -428,8 +508,12 @@ def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, 
         #    the two files mid-swap; restore then refuses the pair (dashboard / manifest generation mismatch).
         had_live = os.path.exists(p["live"])
         had_manifest = os.path.exists(p["manifest"])
+        _progress(hooks, "publish_core")
         with RP.PUBLISH_LOCK:
+            undo = None
             try:
+                if hooks is not None and hooks.before_swap is not None:
+                    undo = hooks.before_swap()                # M8-CP3: the selection files of the batch
                 if had_live:
                     shutil.copy2(p["live"], p["prev_tmp"])
                 if had_manifest:
@@ -440,6 +524,7 @@ def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, 
             except Exception as e:
                 log.exception("refresh: dashboard swap failed")
                 _restore_previous(p, had_live, had_manifest)
+                _undo(undo)
                 raise StepError("swap", f"Pano değiştirilemedi ({type(e).__name__}).") from None
             if install is not None:
                 try:
@@ -447,8 +532,15 @@ def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, 
                 except Exception as e:
                     log.exception("refresh: context install failed")
                     restored = _restore_previous(p, had_live, had_manifest)
+                    _undo(undo)
                     raise StepError("swap", f"Yeni bağlam devreye alınamadı ({type(e).__name__}); "
                                     + ("önceki pano geri yüklendi." if restored else "pano geri yüklenemedi.")) from None
+            if hooks is not None and hooks.after_install is not None:
+                try:
+                    hooks.after_install()
+                except Exception:                             # documented as must-not-raise; never undo a live swap
+                    log.exception("refresh: after-install hook failed")
+                    warnings.append("Yayın sonrası adım tamamlanamadı; Yönetim kaynaklarını kontrol edin.")
         if had_live:
             try:
                 os.replace(p["prev_tmp"], p["prev"])

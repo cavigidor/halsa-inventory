@@ -30,7 +30,8 @@ def test_father_opens_the_link_and_navigates_without_login(browser, tmp_path):
         assert "Görüntüleme modu" in bar and page.get_attribute("#halsa-access a", "href") == "/giris"
         tabs = page.eval_on_selector_all(".tab", "els => els.map(e => e.dataset.t)")
         assert tabs[-7:] == TABS
-        for t in tabs:                                                          # every tab opens, read-only
+        assert page.is_hidden('.tab[data-t="up"]')                              # M8-CP3: owner-only upload tab
+        for t in (t for t in tabs if t != "up"):                                # every other tab opens, read-only
             page.click(f'.tab[data-t="{t}"]')
             assert page.is_visible(f"#{t}")
         page.click('.tab[data-t="ai"]')

@@ -86,6 +86,7 @@ class OwnerSourceConfig:
     key: str
     path: str | None
     options: dict = field(default_factory=dict)       # raw strings from the environment
+    origin: str = "env_path"                          # "env_path" | "upload" (M8-CP3: published by the Upload Center)
 
     @property
     def configured(self) -> bool:
@@ -107,6 +108,28 @@ def config_from_env(env: dict | None = None) -> dict[str, OwnerSourceConfig]:
     for key, (path_var, opts) in ENV_KEYS.items():
         path = (env.get(path_var) or "").strip() or None
         out[key] = OwnerSourceConfig(key, path, {k: (env.get(v) or "").strip() or None for k, v in opts.items()})
+    return out
+
+
+SELECTION_STATE: dict = {"error": None}        # M8-CP3: last owner_sources.json read (code only, no content)
+
+
+def config_with_uploads(data_folder: str | None, env: dict | None = None) -> dict[str, OwnerSourceConfig]:
+    """M8-CP3: the environment configuration, with each owner workbook that the owner PUBLISHED through the Upload
+    Center (`data/owner_sources.json`) taking precedence for its own source. An unreadable selection file is ignored
+    with a warning (the environment configuration stays in force); nothing is ever discovered or guessed."""
+    out = config_from_env(env)
+    if not data_folder:
+        return out
+    from services import generation as GEN
+    try:
+        sel = GEN.load_owner_selection(data_folder)
+    except GEN.SelectionError:
+        SELECTION_STATE["error"] = "owner_selection_invalid"      # shown in the owner status; nothing is logged
+        return out
+    SELECTION_STATE["error"] = None
+    for key, e in (sel or {}).items():
+        out[key] = OwnerSourceConfig(key, e["path"], dict(e["options"]), origin="upload")
     return out
 
 
@@ -344,7 +367,8 @@ def _load_kredi(cfg: OwnerSourceConfig):
     snap = _opt_date(cfg.options.get("snapshot_date"))
     fs = GEN.FrozenSource.read("kredi", cfg.path)
     res = KR.import_kredi(cfg.path, snapshot_date=snap, content=fs.data)
-    rec = GEN.owner_record("kredi", fs, res, declared={"snapshot_date": snap}, today=dt.date.today())
+    rec = GEN.owner_record("kredi", fs, res, declared={"snapshot_date": snap}, today=dt.date.today(),
+                           origin=cfg.origin)
     return res, (build_kredi_view(res) if res.ok else None), rec
 
 
@@ -355,13 +379,14 @@ def _guarded(key: str, cfg: OwnerSourceConfig, run, declared: dict):
     res = run()
     if GEN.sha256_file(cfg.path) != fs.sha256:
         raise SourceChanged(key)
-    return res, GEN.owner_record(key, fs, res, declared=declared, today=dt.date.today())
+    return res, GEN.owner_record(key, fs, res, declared=declared, today=dt.date.today(), origin=cfg.origin)
 
 
 def _load_gider_gelir(cfg: OwnerSourceConfig):
     from services.importers import gider_gelir as GG
     year = _opt_year(cfg.options.get("report_year"))
-    res, rec = _guarded("gider_gelir", cfg, lambda: GG.import_gider_gelir(cfg.path, report_year=year), {})
+    res, rec = _guarded("gider_gelir", cfg, lambda: GG.import_gider_gelir(cfg.path, report_year=year),
+                        {"report_year": year} if cfg.origin == "upload" else {})
     return res, (build_gider_gelir_view(res) if res.ok else None), rec
 
 
@@ -370,7 +395,7 @@ def _load_butce(cfg: OwnerSourceConfig):
     year = _opt_year(cfg.options.get("planning_year"))
     snap = _opt_date(cfg.options.get("snapshot_date"))
     res, rec = _guarded("butce", cfg, lambda: BU.import_butce(cfg.path, planning_year=year, snapshot_date=snap),
-                        {"snapshot_date": snap})
+                        {"snapshot_date": snap, **({"planning_year": year} if cfg.origin == "upload" else {})})
     return res, (build_butce_view(res) if res.ok else None), rec
 
 
@@ -461,6 +486,47 @@ class OwnerRepository:
     def inflight(self) -> bool:
         return self._inflight
 
+    # -- M8-CP3: publication of uploaded owner workbooks ----------------------------------------------------
+    def configs(self) -> dict[str, OwnerSourceConfig]:
+        with self._lock:
+            return dict(self._configs)
+
+    def prepare(self, key: str, cfg: OwnerSourceConfig) -> dict:
+        """Load one workbook into an entry WITHOUT publishing it (Upload Center preview / publication)."""
+        return self._load_one(key, cfg)
+
+    def stage_configs(self, changes: dict[str, OwnerSourceConfig]):
+        """Replace the configuration of the given sources (publication, under PUBLISH_LOCK). An in-flight load of the
+        old configuration can no longer publish (new generation). Returns an undo callable."""
+        with self._lock:
+            before = dict(self._configs)
+            self._configs = {**self._configs, **changes}
+            self._gen += 1
+            self._inflight = False
+
+        def undo():
+            with self._lock:
+                self._configs = before
+                self._gen += 1
+                self._inflight = False
+        return undo
+
+    def install_entries(self, entries: dict[str, dict]) -> None:
+        """Make prepared entries live and publish their records (caller holds PUBLISH_LOCK, so readers see the views
+        and the generation records change in one step)."""
+        with self._lock:
+            self._gen += 1
+            self._inflight = False
+            self._loaded_once = True
+            for k, e in entries.items():
+                self._entries[k] = dict(e)
+        if self._on_record is not None:
+            for k, e in entries.items():
+                try:
+                    self._on_record(k, e.get("record"))
+                except Exception:
+                    pass
+
     # -- internals -----------------------------------------------------------------------
     def _start_locked(self) -> int:
         self._gen += 1
@@ -511,7 +577,12 @@ class OwnerRepository:
             return {**base, "state": FAILED, "error_code": "file_missing"}
         try:
             self.loads[key] += 1
-            out = self._loaders[key](cfg)
+            if cfg.origin == "upload":                    # M8-CP3: the owner chose the type; the name is not used
+                from services.importers.base import explicit_source_type
+                with explicit_source_type():
+                    out = self._loaders[key](cfg)
+            else:
+                out = self._loaders[key](cfg)
         except _ConfigError:
             return {**base, "state": FAILED, "error_code": "config_invalid"}
         except SourceChanged:

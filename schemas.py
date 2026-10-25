@@ -1565,6 +1565,23 @@ class VkmPublicSummary(BaseModel):
     ai_used: Literal[False] = False
 
 
+class UploadAssignment(BaseModel):
+    """M8-CP3: the owner's choice of report type and declarations for one uploaded file (never inferred)."""
+    model_config = ConfigDict(extra="forbid")
+    slot: str = Field(min_length=1, max_length=20)
+    declarations: Dict[str, Optional[Any]] = {}
+
+
+class UploadValidateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    assignments: Dict[str, UploadAssignment] = Field(max_length=12)
+
+
+class UploadPublishRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    preview_token: str = Field(min_length=1, max_length=80)
+
+
 class VkmReviewRequest(BaseModel):
     """Owner review decision. The reviewer is the authenticated session, never a field of this body."""
     model_config = ConfigDict(extra="forbid")

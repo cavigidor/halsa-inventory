@@ -90,6 +90,12 @@ load may take noticeably longer on the large sales workbook. In a browser:
    SQLite state file rather than deleting/recreating it. Do not use production data to test destructive controls.
 8. Test a controlled monthly core refresh only when you have *new, verified core exports*. Owner files use
    their own **Yönetim verilerini yeniden oku** button, which does **not** refresh core sales/stock/Cari.
+   *Since M8-CP3 (D-065):* the preferred monthly path is the **Dosya Yükleme** tab (or `/yukleme`): log in as owner,
+   select the exported files, choose each report type yourself, declare only the dates / years you know, wait for the
+   validation, read the preview (errors, missing information, Veri Kontrol changes, sections still withheld) and press
+   **Değişiklikleri Yayınla**. Nothing changes before that button; an identical upload publishes nothing; a failure
+   keeps the previous data. Uploaded files are kept privately under `data/uploads` (or `UPLOAD_DIR`) and the published
+   choice is recorded in `data/sources.json` / `data/owner_sources.json` — back these up with `data/`.
 9. Keep AI disabled during validation. If enabled later, AI is **on demand only** and messages remain copy-only.
 
 **Acceptance for local trial use:** core context date is correct, M7 tabs render, configured owner sources pass,

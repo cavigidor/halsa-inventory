@@ -233,7 +233,9 @@ def test_api_documentation_and_schema_are_not_served(app_env):
 # ---------------------------------------------------------------------------------------------
 # B. anonymous viewer
 # ---------------------------------------------------------------------------------------------
-@pytest.mark.parametrize("method,path", [k for k in VIEWER_GETS if k[1] not in ("/", "/giris")])
+# M8-CP3: /yukleme is, like /giris, a fixed HTML page that embeds the shared access script (its own test:
+# tests/test_m8_cp3_upload_center.py::test_viewers_and_financial_viewers_cannot_upload_validate_or_publish)
+@pytest.mark.parametrize("method,path", [k for k in VIEWER_GETS if k[1] not in ("/", "/giris", "/yukleme")])
 def test_viewer_reads_need_no_login(app_env, method, path):
     cl = app_env()
     r = cl.get(_fill(path))

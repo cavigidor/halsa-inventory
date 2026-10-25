@@ -1101,3 +1101,31 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   negative control computing the expectation before the lock; an HTTP decision that waits for an in-flight
   publication and is then refused as stale; a busy issue store not blocking publication; interleaved publications and
   decisions without deadlock.
+
+### D-065 · 2026-10-25 · M8-CP3 Excel Upload Center: owner-only upload, declared report details, background validation, explicit generation-bound publication
+- **Context:** Step 1 (real Excel compatibility on the owner's Mac) was accepted 2026-10-25: the private Stock, Sales and
+  Cari exports load without manual changes; supported owner workbooks were tested; 0 of 33 metrics VERIFIED. The owner
+  requires the website to take the monthly Excel exports (exported by the father from DinamikCRM) with **no direct
+  DinamikCRM integration** of any kind.
+- **Decision:**
+  - Owner-only tab **Dosya Yükleme** and fixed page `/yukleme`: select files → declare report type and details →
+    background validation job (status polling) → preview → explicit **Değişiklikleri Yayınla**.
+  - The report type is chosen by the owner per file, never from the file name; dates / years are declared or unknown,
+    never inferred. Uploaded workbooks are stored privately under content-addressed names, so no reader can infer
+    anything from a name; the importer framework's file-name pattern check is skipped only for owner-typed uploads
+    (`explicit_source_type()`, recorded as INFO). Gider/Gelir and Bütçe need their year declared to be read.
+  - Upload safety: size limit while streaming, .xlsx container check, ZIP bomb / part-name / encryption / DTD rules.
+  - Validation reuses the controlled refresh in stage-only mode (`PublishHooks`), the M6 owner loaders without
+    publication and a read-only VKM delta; the preview changes nothing live.
+  - Publication reuses the generation-bound refresh with the batch as explicit selection and the previewed `core_id`
+    as the required identity; selection files (`data/sources.json`, new `data/owner_sources.json`) are written inside
+    the swap step and restored on failure; uploaded owner workbooks are installed in the same publish-lock step.
+    Only the newest batch is publishable; a preview is stale once the served core generation or a selection file
+    changed; an identical set publishes nothing.
+  - Core reports missing from a batch are carried over only from an explicit live selection.
+  - Hedef / Trodat are not offered (not in the generation manifest).
+- **Unchanged:** `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; no approval, mapping, source authority,
+  business definition, reporting date or Kredi `DURUM` meaning inferred; CRM / fair / action / VKM history untouched;
+  access model (owner_read / owner_write with session + CSRF + Origin; viewers and financial viewers refused).
+- **Docs / tests:** `docs/m8_cp3_upload_center.md`; `tests/test_m8_cp3_upload_files.py`,
+  `tests/test_m8_cp3_upload_center.py`, `tests/test_m8_cp3_browser.py` (real Chromium, production app and gate).

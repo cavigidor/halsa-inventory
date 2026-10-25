@@ -120,7 +120,11 @@ No public deployment until accepted. CI: unauthenticated read/write uniformly de
 uploads, health/readiness, safe process restart, staging env, no embedded secrets. Do not claim durability without
 actual host volume and backup configuration. CI: temp persisted mount + restart test.
 
-**CP3 — Owner-only upload UX and staging:** browser multi-report drop/select with manifest, explicit source type,
+**CP3 — Owner-only upload UX and staging** *(2026-10-25, D-065: implemented as the Excel Upload Center "Dosya Yükleme"
+— `docs/m8_cp3_upload_center.md`. It also covers the explicit, generation-bound publication of one validated report set
+from CP4 — preview token, stale-preview refusal, rollback, preserved operator state — for the existing core and owner
+sources; CP4's multi-period orchestration, cache invalidation beyond the existing swap and mixed-period prevention remain.
+PR open; not deployed.)* browser multi-report drop/select with manifest, explicit source type,
 business date, expected reporting period, size limits and safe filenames, validation preview per existing importer.
 No publication. CI: malformed files, path traversal, MIME spoof, formula errors, ambiguity, oversized requests.
 

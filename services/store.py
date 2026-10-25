@@ -56,6 +56,9 @@ def init_db():
         # M8-VKM-1 (D-062): Veri Kontrol Merkezi issues, append-only history and observations. CREATE IF NOT EXISTS.
         from services import vkm_store
         vkm_store.init_tables(c)
+        # M8-CP3 (D-065): Excel Upload Center batches, jobs and append-only upload history. CREATE IF NOT EXISTS.
+        from services import upload_center
+        upload_center.init_tables(c)
 
 
 def content_key(category, entity_id, content_hash):
