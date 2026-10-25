@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping
@@ -38,7 +39,16 @@ from services import store as ST
 from services import vkm as V
 
 log = logging.getLogger("vkm")
+# Lock order (review of PR #31 at 847c055, finding B): request_pin.PUBLISH_LOCK → _LOCK → GenerationStore._lock.
+# Publication holds PUBLISH_LOCK around install, then the observer takes _LOCK; owner decisions take PUBLISH_LOCK
+# first, then _LOCK, and only then read the live generation. Nothing holds _LOCK or GenerationStore._lock while
+# acquiring PUBLISH_LOCK, so the order is acyclic.
 _LOCK = threading.Lock()
+# The observer runs inside publication. It never waits unboundedly: if the issue store is busy or failing, the
+# observation is abandoned (recorded as a failure → "out of sync" shown, decisions refused, owner resync), and the
+# dashboard publication proceeds.
+OBSERVER_LOCK_TIMEOUT = 2.0
+OBSERVER_DB_TIMEOUT = 2.0
 NOTE_MAX = 500
 SEVERITY_ORDER = {s: i for i, s in enumerate(V.SEVERITIES)}
 _CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -140,19 +150,40 @@ class Observation:
         return hashlib.sha256(json.dumps(body, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
+class ObserverBusy(Exception):
+    """The issue store's write lock was not available within the observer's bound."""
+
+
+def _connect(db_timeout: float | None):
+    if db_timeout is None:
+        return ST._conn()
+    os.makedirs(os.path.dirname(ST.DB_PATH), exist_ok=True)
+    c = sqlite3.connect(ST.DB_PATH, timeout=db_timeout)
+    c.row_factory = sqlite3.Row
+    return c
+
+
 def observe(observations: Mapping[str, Observation], *, now: str | None = None,
-            guard: Callable[[], bool] | None = None) -> dict[str, Any]:
+            guard: Callable[[], bool] | None = None, lock_timeout: float | None = None,
+            db_timeout: float | None = None) -> dict[str, Any]:
     """Reconcile the store with one accepted upload's observations (one transaction). Idempotent per source: an
     observation whose digest equals the last one for that source changes and appends nothing. `guard` is evaluated
-    under the write lock; False → nothing is written (the observed generation is no longer the published one)."""
+    under the write lock; False → nothing is written (the observed generation is no longer the published one).
+    `lock_timeout` / `db_timeout` bound the waits (the publication observer uses them)."""
     now = now or _now()
     changed: list[str] = []
-    with _LOCK, ST._conn() as c:
-        if guard is not None and not guard():
-            return {"changed": [], "superseded": True}
-        for key in sorted(observations):
-            if _observe_source(c, key, observations[key], now):
-                changed.append(key)
+    if not _LOCK.acquire(timeout=-1 if lock_timeout is None else lock_timeout):
+        raise ObserverBusy()
+    try:
+        c = _connect(db_timeout)
+        with c:
+            if guard is not None and not guard():
+                return {"changed": [], "superseded": True}
+            for key in sorted(observations):
+                if _observe_source(c, key, observations[key], now):
+                    changed.append(key)
+    finally:
+        _LOCK.release()
     return {"changed": changed}
 
 
@@ -178,7 +209,7 @@ def _observe_source(c, key: str, obs: Observation, now: str) -> bool:
                 c.execute("UPDATE dq_issue SET presence='source_missing', updated_at=? WHERE issue_id=?", (now, iid))
                 _event(c, iid, obs.generation_id, obs.source_sha256, "source_missing", r["status"], None, None,
                        "system", None, now)
-        elif V.scope_of(r["check_code"], r["field_name"]) in scopes:
+        elif V.scope_of(r["check_code"], r["field_name"], r["column_letter"]) in scopes:
             # the source WAS uploaded, the check that found the problem WAS evaluated and found nothing:
             # resolved in the source (not by review)
             c.execute("""UPDATE dq_issue SET presence='absent', status='cozuldu_kaynakta', updated_at=?
@@ -344,7 +375,8 @@ def make_observer(owner_paths: Callable[[], Mapping[str, str | None]]):
                     return
                 obs = core_observations(manifest, owner_paths(), previously_seen_sources())
                 # checked again under the write lock: a newer generation published meanwhile observes itself
-                observe(obs, guard=lambda: (current() is not None and current().core_id == manifest.core_id))
+                observe(obs, guard=lambda: (current() is not None and current().core_id == manifest.core_id),
+                        lock_timeout=OBSERVER_LOCK_TIMEOUT, db_timeout=OBSERVER_DB_TIMEOUT)
             elif kind == "owner" and key in V.OWNER_SOURCES:
                 rec = manifest.record(key) if manifest is not None else None
 
@@ -352,7 +384,8 @@ def make_observer(owner_paths: Callable[[], Mapping[str, str | None]]):
                     cur = current()
                     cur_rec = cur.record(key) if cur is not None else None
                     return (rec.sha256 if rec else None) == (cur_rec.sha256 if cur_rec else None)
-                observe({key: owner_observation(manifest, key, rec)}, guard=same_record)
+                observe({key: owner_observation(manifest, key, rec)}, guard=same_record,
+                        lock_timeout=OBSERVER_LOCK_TIMEOUT, db_timeout=OBSERVER_DB_TIMEOUT)
         except Exception as e:                             # publication must never fail because of the review log
             _record_failure(e)
             log.warning("veri kontrol gözlemi yapılamadı (%s)", type(e).__name__)
@@ -416,7 +449,12 @@ def sync_state(expected: Mapping[str, str] | None) -> dict:
     return _sync(expected, stored_digests())
 
 
-def _check_sync(c, expected: Mapping[str, str] | None) -> None:
+def _check_sync(c, expected) -> None:
+    """`expected` is the served generation's expectation, or a CALLABLE producing it. Owner routes pass a callable so
+    the live generation is read HERE, under the write lock, in the same step as the decision is committed (review of
+    PR #31 at 847c055, finding B): a generation installed after the request began is always seen."""
+    if callable(expected):
+        expected = expected()
     if _sync(expected, stored_digests(c))["state"] != "in_sync":
         raise VKMError(409, "out_of_sync", OUT_OF_SYNC_TR)
 
@@ -485,7 +523,8 @@ def _check_generation(c, presented: str) -> None:
 
 
 def review(issue_id: str, action: str, *, vkm_generation_presented: str, actor: str,
-           expected: Mapping[str, str] | None, note: str | None = None) -> dict:
+           expected: "Mapping[str, str] | None | Callable[[], Mapping[str, str] | None]",
+           note: str | None = None) -> dict:
     """An owner decision. Changes ONLY the issue's review status and appends one history event. `expected` is what the
     SERVED generation implies (`expected_digests`); a store that does not hold exactly that refuses the decision."""
     if action not in REVIEW_EVENTS:
@@ -508,7 +547,7 @@ def review(issue_id: str, action: str, *, vkm_generation_presented: str, actor: 
 
 
 def add_note(issue_id: str, note: str, *, vkm_generation_presented: str, actor: str,
-             expected: Mapping[str, str] | None) -> dict:
+             expected: "Mapping[str, str] | None | Callable[[], Mapping[str, str] | None]") -> dict:
     text = clean_note(note, required=True)
     now = _now()
     with _LOCK, ST._conn() as c:
@@ -659,7 +698,9 @@ def list_issues(*, status: str = "open", severity: str | None = None, issue_type
             "catalogue": catalogue()}
 
 
-def issue_detail(issue_id: str, expected: Mapping[str, str] | None = None) -> dict:
+def issue_detail(issue_id: str, expected=None) -> dict:
+    if callable(expected):
+        expected = expected()
     with ST._conn() as c:
         r = c.execute("SELECT * FROM dq_issue WHERE issue_id=?", (issue_id,)).fetchone()
         if r is None:
@@ -691,4 +732,5 @@ def issue_detail(issue_id: str, expected: Mapping[str, str] | None = None) -> di
 __all__ = ["init_tables", "observe", "Observation", "core_observations", "owner_observation", "make_observer",
            "vkm_generation", "review", "add_note", "public_summary", "list_issues", "issue_detail", "VKMError",
            "clean_note", "allowed_actions", "NOTE_MAX", "previously_seen_sources", "expected_observations",
-           "expected_digests", "stored_digests", "sync_state", "resync", "record_provenance", "SYNC_STATES", "SYNC_TR"]
+           "expected_digests", "stored_digests", "sync_state", "resync", "record_provenance", "SYNC_STATES", "SYNC_TR",
+           "ObserverBusy", "OBSERVER_LOCK_TIMEOUT", "OBSERVER_DB_TIMEOUT"]

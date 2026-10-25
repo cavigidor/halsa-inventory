@@ -1069,3 +1069,35 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   `DURUM`, source date, authentication or source byte changed.
 - **Tests:** `tests/test_m8_vkm_integrity.py` (regressions with negative controls replaying the old rule, the old
   digest and the store-only review check), +1 browser scenario (out-of-sync banner, blocked decisions, owner resync).
+
+### D-064 · 2026-10-24 · Veri Kontrol Merkezi: per-column footer scopes and race-free owner decisions (M8-VKM-1 re-review)
+- **Context:** the independent re-review of PR #31 at `847c055` confirmed D-063 and found two narrower defects:
+  (A) `rows:footer` was granted for any `footer_by_column` mapping — including `{}` when no footer cell was
+  reconciled — and covered every column, so a column-H footer problem could be "resolved in the source" by an upload
+  with no footer or with a footer for column D only; (B) a review / note computed the served generation's expectation
+  BEFORE taking the issue-store lock, so a decision based on generation A could commit after generation B was
+  installed while B's observer was still waiting for that lock.
+- **Decision:**
+  - (A) Footer scopes are per physical column and per check (`footer:<letter>:footer_mismatch | footer_partial |
+    footer_missing_cache`). A column's footer scopes count as evaluated only when that column's footer cells were
+    reconciled again and ALL matched; no footer cells, a footer for other columns only, or a non-comparable
+    (error-propagated / SUBTOTAL / uncached) or mismatched footer leave earlier issues of that column `not_checked`.
+    Unrecognized trailing rows have their own scope (`footer:ambiguous_rows`). `DETECTOR_VERSION` `vkm-1.2`.
+  - (B) Owner decisions and the owner resync take `request_pin.PUBLISH_LOCK` first, then the issue-store lock, and
+    read the LIVE served generation under that lock in the same step as the commit (the expectation is passed as a
+    callable). Lock order everywhere: `PUBLISH_LOCK → vkm_store._LOCK → GenerationStore._lock`; nothing acquires
+    `PUBLISH_LOCK` while holding either of the others. Restart re-derivation installs outside `PUBLISH_LOCK` but only
+    moves "nothing served" to the already-published `core_id`, during which decisions are refused (`no_generation`).
+    The publication observer waits at most `OBSERVER_LOCK_TIMEOUT` (2 s) for the lock and `OBSERVER_DB_TIMEOUT` (2 s)
+    for SQLite; on timeout the observation is abandoned (recorded failure → out of sync, decisions refused, resync),
+    and publication proceeds.
+- **Unchanged:** D-062 / D-063 behaviour (detector scopes, provenance-bound observations, out-of-sync handling),
+  append-only history and no-delete triggers, `source_missing` carry-over, privacy controls, the three access levels,
+  `GENERATION_BOUND_API_EVIDENCE` False, no metric VERIFIED; no financial calculation, mapping, DQ rule, Kredi
+  `DURUM`, source date, authentication or source byte changed.
+- **Tests:** `tests/test_m8_vkm_review2.py` — H mismatch then no footer / D-only footer / non-comparable H footer →
+  UNKNOWN (with negative controls replaying the old `rows:footer` rule), rechecked matching H → resolved, per-column
+  scope unit test; a barrier-controlled A→B race (B installed, observer held) refusing the decision and note with a
+  negative control computing the expectation before the lock; an HTTP decision that waits for an in-flight
+  publication and is then refused as stale; a busy issue store not blocking publication; interleaved publications and
+  decisions without deadlock.

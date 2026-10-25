@@ -25,7 +25,7 @@ from typing import Any, Iterable, Mapping
 from services import accuracy as ACC
 from services import source_validation as SV
 
-DETECTOR_VERSION = "vkm-1.1"   # 1.1: detector scopes (unknown ≠ resolved), provenance-bound observations
+DETECTOR_VERSION = "vkm-1.2"   # 1.1: detector scopes, provenance-bound observations; 1.2: per-column footer scopes
 NOT_APPROVAL_TR = "İnceleme bir onay değildir; metrikler yalnızca doğrulanmış kanıtla gösterilir."
 
 # ---------------------------------------------------------------------------------------------
@@ -383,7 +383,7 @@ class Issue:
 
     @property
     def scope(self) -> str:
-        return scope_of(self.check, self.field_name)
+        return scope_of(self.check, self.field_name, self.column)
 
     def affected_metrics(self) -> tuple[str, ...]:
         return affected_metrics(self.source_key, field_name=self.field_name, join=self.join,
@@ -725,8 +725,7 @@ _SCOPE = {
     "mapping_not_approved": "mapping", "mapping_unknown": "mapping", "declared_totals_inconsistent": "declared_totals",
     "joins_not_checked": "joins",
     "stock_duplicate_code": "rows:counts", "stock_missing_identity": "rows:counts",
-    "footer_mismatch": "rows:footer", "footer_partial": "rows:footer", "footer_missing_cache": "rows:footer",
-    "footer_ambiguous": "rows:footer", "stock_coverage_undefined": "rows:coverage",
+    "footer_ambiguous": "footer:ambiguous_rows", "stock_coverage_undefined": "rows:coverage",
     "stock_coverage_error": "rows:coverage",
     "sales_duplicate_rows": "duplicates", "aging_duplicate_accounts": "duplicates", "owner_duplicates": "duplicates",
     "excel_errors": "cells:errors", "missing_cache": "cells:missing_cache", "owner_required_blank": "cells:required",
@@ -736,8 +735,18 @@ _SCOPE = {
 }
 
 
-def scope_of(check: str, field_name: str | None = None) -> str:
+# Footer reconciliation is judged PER PHYSICAL COLUMN and per check (review of PR #31 at 847c055, finding A): a
+# footer problem in column H can only be cleared by an upload in which column H's footer cells were reconciled again,
+# and only when EVERY one of them matched. A footer that checks only column D, an empty `footer_by_column`, or an
+# H footer that is now non-comparable (error-propagated / SUBTOTAL / uncached) leaves the H issue UNKNOWN. Each
+# footer check has its own scope, so observing one footer problem in H never "checks" another one in H.
+FOOTER_COLUMN_CHECKS = frozenset({"footer_mismatch", "footer_partial", "footer_missing_cache"})
+
+
+def scope_of(check: str, field_name: str | None = None, column: str | None = None) -> str:
     """The detector scope of a check (stored issues are judged by this, so it must stay stable)."""
+    if check in FOOTER_COLUMN_CHECKS:
+        return f"footer:{column}:{check}"
     if check in FIELD_CHECKS:
         return f"field:{field_name}"
     if check in JOIN_SCOPE_KEYS:
@@ -803,11 +812,26 @@ def _checked_core(key: str, ev, v: Mapping[str, Any], joins: Mapping[str, Any] |
     if key == "stock" and rows.get("ok"):
         if isinstance(rows.get("counts"), Mapping):
             out.add("rows:counts")
-        if isinstance(rows.get("footer_by_column"), Mapping):
-            out.add("rows:footer")
+        out |= _checked_footer(rows)
         if isinstance(rows.get("coverage"), Mapping):
             out.add("rows:coverage")
     return out | _checked_joins(joins)
+
+
+def _checked_footer(rows: Mapping[str, Any]) -> set[str]:
+    """Footer scopes that were genuinely evaluated: a column whose footer cells were ALL reconciled and matched
+    clears every footer check of that column; anything less (no footer cells, some cells non-comparable or
+    mismatched) clears nothing. Unrecognized trailing rows are counted for every analysed report."""
+    out: set[str] = set()
+    for letter, d in (rows.get("footer_by_column") or {}).items():
+        if not isinstance(d, Mapping):
+            continue
+        checked, matched = d.get("checked"), d.get("matched")
+        if isinstance(checked, int) and checked > 0 and matched == checked:
+            out |= {f"footer:{letter}:{c}" for c in FOOTER_COLUMN_CHECKS}
+    if isinstance(rows.get("ambiguous_rows"), int):
+        out.add("footer:ambiguous_rows")
+    return out
 
 
 def _checked_owner(key: str, ev, v: Mapping[str, Any]) -> set[str]:
@@ -840,4 +864,5 @@ __all__ = ["Issue", "Check", "CHECKS", "TYPES", "SEVERITIES", "SEVERITY_TR", "ST
            "PRESENCE_TR", "EVENTS", "EVENT_TR", "REASON_TR", "SOURCE_TR", "COUNT_TR", "CORE_SOURCES", "OWNER_SOURCES",
            "EXPECTED_ALWAYS", "DETECTOR_VERSION", "NOT_APPROVAL_TR", "issue_id", "detect_core", "detect_owner",
            "inspect_core", "inspect_owner", "Detection", "scope_of", "FIELD_CHECKS", "JOIN_SCOPE_KEYS",
+           "FOOTER_COLUMN_CHECKS",
            "missing_issue", "affected_metrics", "metric_titles", "texts", "OPEN_STATUSES"]

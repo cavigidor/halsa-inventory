@@ -214,3 +214,15 @@ notifications; any change to Kredi `DURUM`, revenue definitions, DQ-1–DQ-6, th
    another generation was published meanwhile; the next accepted publication also re-synchronizes. Owner workbooks
    configured but not yet loaded carry no expectation; a core observation never overwrites an owner workbook record
    the served generation carries.
+
+## 10. Corrections after the re-review of PR #31 at `847c055` (D-064)
+
+1. **Footer scopes per column and per check.** `footer:<letter>:footer_mismatch`, `…:footer_partial`,
+   `…:footer_missing_cache` count as evaluated only when that column's footer cells were reconciled again and every
+   one matched. An empty `footer_by_column`, a footer reconciling other columns only, or a column whose footer is now
+   mismatched or non-comparable clears nothing in that column; the earlier issue becomes `not_checked` with its review
+   status kept. `footer_ambiguous` has its own scope `footer:ambiguous_rows` (counted for every analysed report).
+2. **Race-free decisions.** Review, note and resync run under `PUBLISH_LOCK` and read the live served generation
+   under the issue-store lock before committing; lock order `PUBLISH_LOCK → vkm_store._LOCK →
+   GenerationStore._lock`. The publication observer waits at most 2 s for the lock and 2 s for SQLite; if the store is
+   busy or failing, the observation is abandoned, the page shows "out of sync", and publication proceeds.

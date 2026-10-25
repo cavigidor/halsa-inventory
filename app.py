@@ -1468,6 +1468,12 @@ def _vkm_expected():
     return VKMS.expected_digests(m, paths)
 
 
+# Owner decisions (review of PR #31 at 847c055, finding B): taken under PUBLISH_LOCK (no publication can install a
+# generation during the decision), and the live generation is re-read under the issue-store lock in the same step as
+# the commit (`_vkm_expected` passed as a callable). Lock order PUBLISH_LOCK → vkm_store._LOCK → GenerationStore._lock,
+# the same order publication uses, so no deadlock; a failing observer has a bounded wait and never blocks this.
+
+
 @app.get("/api/vkm/summary", response_model=S.VkmPublicSummary)
 def vkm_summary():
     """Viewer-level summary (no login): counts by severity / status / type, the last observation date and whether the
@@ -1508,8 +1514,9 @@ def vkm_review(issue_id: str, body: S.VkmReviewRequest, request: Request):
     if bad is not None:
         return bad
     try:
-        return VKMS.review(issue_id, body.action, vkm_generation_presented=body.vkm_generation,
-                           actor=_vkm_actor(request), expected=_vkm_expected(), note=body.note)
+        with RP.PUBLISH_LOCK:
+            return VKMS.review(issue_id, body.action, vkm_generation_presented=body.vkm_generation,
+                               actor=_vkm_actor(request), expected=_vkm_expected, note=body.note)
     except VKMS.VKMError as e:
         return _vkm_error(e)
 
@@ -1521,8 +1528,9 @@ def vkm_note(issue_id: str, body: S.VkmNoteRequest, request: Request):
     if bad is not None:
         return bad
     try:
-        return VKMS.add_note(issue_id, body.note, vkm_generation_presented=body.vkm_generation,
-                             actor=_vkm_actor(request), expected=_vkm_expected())
+        with RP.PUBLISH_LOCK:
+            return VKMS.add_note(issue_id, body.note, vkm_generation_presented=body.vkm_generation,
+                                 actor=_vkm_actor(request), expected=_vkm_expected)
     except VKMS.VKMError as e:
         return _vkm_error(e)
 
@@ -1532,10 +1540,11 @@ def vkm_sync():
     """Owner recovery after a failed observation: re-observe the SERVED generation (idempotent; nothing is written if
     the store already holds it; refused if no generation is served or another one was published meanwhile). Reads only
     the published manifest; never touches source files, evidence, the gate or the dashboard."""
-    m, paths = _vkm_served()
     store = app.state.generations
     try:
-        res = VKMS.resync(m, paths, store.current)
+        with RP.PUBLISH_LOCK:                        # same lock order as publication; no install during the resync
+            m, paths = _vkm_served()
+            res = VKMS.resync(m, paths, store.current)
     except VKMS.VKMError as e:
         return _vkm_error(e)
     except Exception as e:                       # the store itself is failing: report, never echo internals

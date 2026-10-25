@@ -43,8 +43,8 @@ def legacy(obs: dict) -> dict:
     previously stored issue missing from it was 'resolved in the source'."""
     con = sqlite3.connect(ST.DB_PATH)
     every = {r[0]: set() for r in con.execute("SELECT DISTINCT source_key FROM dq_issue")}
-    for key, check, fname in con.execute("SELECT source_key, check_code, field_name FROM dq_issue"):
-        every[key].add(V.scope_of(check, fname))
+    for key, check, fname, col in con.execute("SELECT source_key, check_code, field_name, column_letter FROM dq_issue"):
+        every[key].add(V.scope_of(check, fname, col))
     con.close()
     return {k: (dataclasses.replace(o, checked=o.checked | frozenset(every.get(k, ()))) if o.state == "present" else o)
             for k, o in obs.items()}
