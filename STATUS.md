@@ -5,7 +5,7 @@ _Updated 2026-10-24 (M8-VKM-1 PR #31 independently reviewed at `b2b4639` and squ
 ## Git
 - **`claude/m8-vkm-1-veri-kontrol-merkezi`:** M8-VKM-1 (D-062–D-064), PR #31 independently reviewed and squash-merged into `main` as `422f3a4` (reviewed head `b2b4639`); NOT deployed or validated against real data.
 - **`claude/m8-cp1-simplified-access`:** PR #30 reviewed at `318491d` and squash-merged to `main` (`a03efbf`, 2026-10-22). Three access levels are implemented and locally tested; **not deployed**.
-- **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), M8 source-evidence PR #28 (`5baa92a`), M8 precise validation PR #29 (`4ad8d8a`) M8-CP1 access PR #30 (`a03efbf`) and M8-VKM-1 PR #31 (`422f3a4`) merged.
+- **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), M8 source-evidence PR #28 (`5baa92a`), M8 precise validation PR #29 (`4ad8d8a`), M8-CP1 access PR #30 (`a03efbf`) and M8-VKM-1 PR #31 (`422f3a4`) merged.
 - **`claude/m8-accuracy-2-shared-evidence`:** PR #28 merged as technical infrastructure 2026-10-20; all production metrics still withheld and `GENERATION_BOUND_API_EVIDENCE` remains False.
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
 - **Owner's Mac folder:** current checkout state was not inspected in this checkpoint. Previous notes reported an older checkout; verify `git status` before pulling, protect private `.env`, data and SQLite, and follow `docs/owner_launch_checklist.md`. Browser/real-data acceptance remains owner-local.
