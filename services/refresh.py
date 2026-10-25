@@ -374,7 +374,11 @@ class PublishHooks:
     - ``before_swap()``: runs under ``PUBLISH_LOCK`` right before the dashboard / manifest swap; returns an undo callable
       that is run if the swap or the install fails (the Upload Center writes the selection files here).
     - ``after_install()``: runs under ``PUBLISH_LOCK`` right after the context and generation were installed (the
-      Upload Center completes the rest of its batch here, in the same step for every reader). Must not raise.
+      Upload Center completes the rest of its batch here, in the same step for every reader). If it raises, the
+      publication FAILS: the previous dashboard and manifest are restored and the ``before_swap`` undo is run (which
+      must restore everything it and the install changed). A failure is never reported as a successful publication.
+    - ``on_commit()``: runs under ``PUBLISH_LOCK`` once everything above succeeded (the Upload Center delivers the
+      generation notifications it held back here). Errors are logged, never undo a completed publication.
     - ``stage_only``: validate → build → verify into the given (private) dashboard path and stop; nothing is swapped or
       installed. ``staged_out`` (dict) receives the staged context and manifest (the preview).
     - ``progress(stage)``: called with a stage key as the pipeline advances (Turkish progress in the Upload Center).
@@ -384,6 +388,7 @@ class PublishHooks:
     expect_core_id: str | None = None
     before_swap: object = None
     after_install: object = None
+    on_commit: object = None
     stage_only: bool = False
     staged_out: dict | None = None
     progress: object = None
@@ -523,9 +528,11 @@ def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, 
                 os.replace(p["staged"], p["live"])
             except Exception as e:
                 log.exception("refresh: dashboard swap failed")
-                _restore_previous(p, had_live, had_manifest)
+                restored = _restore_previous(p, had_live, had_manifest)
                 _undo(undo)
-                raise StepError("swap", f"Pano değiştirilemedi ({type(e).__name__}).") from None
+                raise StepError("swap", f"Pano değiştirilemedi ({type(e).__name__}); "
+                                + ("önceki pano geri yüklendi." if (restored or not had_live)
+                                   else "pano geri yüklenemedi.")) from None
             if install is not None:
                 try:
                     install(staged)
@@ -538,9 +545,18 @@ def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, 
             if hooks is not None and hooks.after_install is not None:
                 try:
                     hooks.after_install()
-                except Exception:                             # documented as must-not-raise; never undo a live swap
-                    log.exception("refresh: after-install hook failed")
-                    warnings.append("Yayın sonrası adım tamamlanamadı; Yönetim kaynaklarını kontrol edin.")
+                except Exception as e:                        # fail closed: the whole publication is undone
+                    log.exception("refresh: after-install step failed")
+                    restored = _restore_previous(p, had_live, had_manifest)
+                    _undo(undo)                               # restores selections, context, generation, the rest
+                    raise StepError("swap", f"Yayın tamamlanamadı ({type(e).__name__}); "
+                                    + ("önceki pano ve veriler geri yüklendi." if restored
+                                       else "pano geri yüklenemedi.")) from None
+            if hooks is not None and hooks.on_commit is not None:
+                try:
+                    hooks.on_commit()                         # e.g. deliver the held generation notifications
+                except Exception:
+                    log.exception("refresh: on-commit step failed")
         if had_live:
             try:
                 os.replace(p["prev_tmp"], p["prev"])

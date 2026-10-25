@@ -923,6 +923,23 @@ class UploadCenter:
         self._finish(job_id, "failed", code, message)
 
     def _publish(self, r, candidate: Mapping[str, Any], job_id: str) -> dict:
+        """Publish exactly the previewed set (see `_publish_set`). Data-folder copies created by THIS attempt are removed
+        again when it does not commit, so a failed publication leaves the data folder as it was."""
+        copied: list[str] = []
+        ok = False
+        try:
+            result = self._publish_set(r, candidate, job_id, copied)
+            ok = bool(result.get("ok"))
+            return result
+        finally:
+            if not ok:
+                for path in copied:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+
+    def _publish_set(self, r, candidate: Mapping[str, Any], job_id: str, copied: list) -> dict:
         from services import refresh as RF
         from services import owner_view as OV
         if self._base() != json.loads(r["base"] or "{}"):
@@ -947,6 +964,7 @@ class UploadCenter:
                 os.remove(tmp)
                 raise UploadError(409, "file_missing")
             os.replace(tmp, dest)
+            copied.append(dest)
         plan = self._plan(r, where="data")
         if plan["errors"]:
             return {"ok": False, "code": "plan", "message": plan["errors"][0]["message"]}
@@ -981,21 +999,18 @@ class UploadCenter:
                 merged[k] = {"file": u["name"], **self._owner_options(k, u["declarations"])}
             owner_doc = GEN.owner_selection_document(merged)
 
-        def write_selections():
-            undo_steps = []
-            for name, doc in ((GEN.SELECTION_FILE, core_doc), (GEN.OWNER_SELECTION_FILE, owner_doc)):
-                if doc is None:
-                    continue
-                path = os.path.join(self.deps.data_folder, name)
-                before = self._selection_bytes(name) if os.path.exists(path) else None
-                GEN.write_json_atomic(path, doc)
-                undo_steps.append((path, before))
-            undo_cfg = owner_repo.stage_configs(cfgs) if cfgs else None
+        # 4. the commit (under PUBLISH_LOCK). Everything it changes is captured first and restored by ONE rollback
+        #    if ANY step fails — a selection file, the owner configuration, the dashboard / manifest swap (refresh),
+        #    the context / generation install, or the owner workbook installation. Generation notifications (the
+        #    Veri Kontrol observers) are held and delivered only when the whole batch committed, so a rolled-back
+        #    publication never writes an observation or a history event.
+        gens = self.deps.generations()
+        repo = self.deps.context_repo()
+        txn: dict = {}
 
-            def undo():
-                if undo_cfg is not None:
-                    undo_cfg()
-                for path, before in reversed(undo_steps):
+        def rollback():
+            for path, before in reversed(txn.get("files", [])):
+                try:
                     if before is None:
                         try:
                             os.remove(path)
@@ -1006,41 +1021,94 @@ class UploadCenter:
                         with open(tmp, "wb") as fh:
                             fh.write(before)
                         os.replace(tmp, path)
-            return undo
+                except Exception:
+                    log.exception("upload: could not restore a selection file")
+            if "owner" in txn:
+                owner_repo.restore_state(txn["owner"])
+            if "gen" in txn:
+                gens.restore_state(txn["gen"])
+            if "ctx" in txn:
+                live = txn["ctx"]
+                if hasattr(repo, "restore_live"):
+                    repo.restore_live(live)
+                elif live is not None:
+                    repo.replace_context(live)
+            gens.release_notifications(deliver=False)
+
+        def begin():
+            """before_swap: snapshot, hold notifications, write both selections, stage the owner configuration.
+            Self-contained: a failure in any of these steps rolls back the steps already done, then re-raises."""
+            txn.clear()
+            txn["ctx"] = repo.live() if hasattr(repo, "live") else repo.current()
+            txn["gen"] = gens.snapshot_state()
+            txn["owner"] = owner_repo.snapshot_state()
+            txn["files"] = []
+            gens.hold_notifications()
+            try:
+                for name, doc in ((GEN.SELECTION_FILE, core_doc), (GEN.OWNER_SELECTION_FILE, owner_doc)):
+                    if doc is None:
+                        continue
+                    path = os.path.join(self.deps.data_folder, name)
+                    before = self._selection_bytes(name) if os.path.exists(path) else None
+                    txn["files"].append((path, before))     # recorded first: a half-written replace is restored too
+                    GEN.write_json_atomic(path, doc)
+                if cfgs:
+                    owner_repo.stage_configs(cfgs)
+            except Exception:
+                rollback()
+                raise
+            return rollback
 
         def install_owner():
             if entries:
                 self._stage(job_id, "publish_owner")
                 owner_repo.install_entries(entries)
 
-        if plan["core_changed"]:
-            paths, decls = self._core_selection(plan["core"])
-            repo = self.deps.context_repo()
-            rep = RF.run_refresh(self.deps.data_folder, self.deps.dashboard_path,
-                                 previous_context=repo.live() if hasattr(repo, "live") else repo.current(),
-                                 install=self.deps.install, inflation_rate=self.deps.inflation_rate,
-                                 hooks=RF.PublishHooks(selection=(paths, decls, "explicit"),
-                                                       expect_core_id=candidate.get("core_id"),
-                                                       before_swap=write_selections, after_install=install_owner,
-                                                       progress=lambda s: self._stage(job_id, s)))
-            if not rep.get("ok"):
-                busy = rep.get("step") == "busy"
-                if busy:
-                    return {"ok": False, "code": "busy", "retry": True,
-                            "message": "Başka bir yenileme sürüyor; önizleme geçerli, birazdan yeniden yayınlayın."}
-                kept = RF.PREVIOUS_KEPT if rep.get("previous_data_kept") else "Önceki pano geri yüklenemedi; kontrol edin."
-                return {"ok": False, "code": "refresh_failed", "message": f"{rep.get('message') or MSG['internal']} {kept}"}
-            return {"ok": True, "warnings": [w for w in rep.get("warnings") or [] if "yayın sonrası" in w.lower()]}
-        with RP.PUBLISH_LOCK:                                        # owner workbooks only: one step for every reader
-            if self._base() != json.loads(r["base"] or "{}"):
-                return {"ok": False, "code": "stale", "message": MSG["stale"]}
-            undo = write_selections()
-            try:
-                install_owner()
-            except Exception:
-                undo()
-                raise
-        return {"ok": True}
+        def commit():
+            gens.release_notifications(deliver=True)
+
+        try:
+            if plan["core_changed"]:
+                paths, decls = self._core_selection(plan["core"])
+                rep = RF.run_refresh(self.deps.data_folder, self.deps.dashboard_path,
+                                     previous_context=repo.live() if hasattr(repo, "live") else repo.current(),
+                                     install=self.deps.install, inflation_rate=self.deps.inflation_rate,
+                                     hooks=RF.PublishHooks(selection=(paths, decls, "explicit"),
+                                                           expect_core_id=candidate.get("core_id"),
+                                                           before_swap=begin, after_install=install_owner,
+                                                           on_commit=commit,
+                                                           progress=lambda s: self._stage(job_id, s)))
+                if not rep.get("ok"):
+                    busy = rep.get("step") == "busy"
+                    if busy:
+                        return {"ok": False, "code": "busy", "retry": True,
+                                "message": "Başka bir yenileme sürüyor; önizleme geçerli, birazdan yeniden yayınlayın."}
+                    kept = (RF.PREVIOUS_KEPT if rep.get("previous_data_kept")
+                            else "Önceki pano geri yüklenemedi; kontrol edin.")
+                    return {"ok": False, "code": "refresh_failed",
+                            "message": f"{rep.get('message') or MSG['internal']} {kept}"}
+                return {"ok": True}
+            with RP.PUBLISH_LOCK:                                    # owner workbooks only: one step for every reader
+                if self._base() != json.loads(r["base"] or "{}"):
+                    return {"ok": False, "code": "stale", "message": MSG["stale"]}
+                try:
+                    begin()                                          # rolls back its own partial work on failure
+                except Exception:
+                    log.exception("upload: selection could not be written")
+                    return {"ok": False, "code": "selection_failed",
+                            "message": "Kaynak seçimi kaydedilemedi; hiçbir şey yayınlanmadı. " + RF.PREVIOUS_KEPT}
+                try:
+                    install_owner()
+                except Exception:
+                    log.exception("upload: owner workbook installation failed")
+                    rollback()
+                    return {"ok": False, "code": "owner_install_failed",
+                            "message": "Yönetim kaynakları yayınlanamadı; önceki seçim ve görünümler geri yüklendi. "
+                                       + RF.PREVIOUS_KEPT}
+                commit()
+            return {"ok": True}
+        finally:
+            gens.release_notifications(deliver=False)               # never leave this thread holding notifications
 
     # -- read models -----------------------------------------------------------------------------------------
     @staticmethod

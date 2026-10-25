@@ -1129,3 +1129,35 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   access model (owner_read / owner_write with session + CSRF + Origin; viewers and financial viewers refused).
 - **Docs / tests:** `docs/m8_cp3_upload_center.md`; `tests/test_m8_cp3_upload_files.py`,
   `tests/test_m8_cp3_upload_center.py`, `tests/test_m8_cp3_browser.py` (real Chromium, production app and gate).
+
+### D-066 · 2026-10-25 · M8-CP3 review fix: an Upload Center publication is all-or-nothing
+- **Context:** independent review of PR #32 at `40fdef1` found two failure-atomicity gaps: (1) if `data/sources.json`
+  was written but writing `data/owner_sources.json` (or staging the owner configuration) failed, the earlier selection
+  file stayed rewritten; (2) a failing owner-workbook installation after the core dashboard had already changed was
+  reported as a successful publication (with a warning).
+- **Decision:**
+  - The commit step (`before_swap`, under `PUBLISH_LOCK`) snapshots the live context, the generation state, the owner
+    repository state and the bytes (or absence) of both selection files, then writes the files and stages the owner
+    configuration; any failure inside it restores everything it already changed before re-raising.
+  - `refresh.PublishHooks.after_install` now **fails closed**: a failure restores the previous dashboard and manifest
+    and runs the full refresh undo (context, generation, selections); the job ends as `publish_failed` with
+    "önceki pano ve veriler geri yüklendi". A new `on_commit` hook runs only after every step succeeded.
+  - `OwnerRepository.install_entries` no longer swallows a failing generation-record publication; the repository and
+    `GenerationStore` have `snapshot_state` / `restore_state`, so a partial installation (one record published, the
+    next failing) is undone exactly. `ContextRepository.restore_live` puts the previous context object back.
+  - Generation observer notifications (the Veri Kontrol Merkezi path) raised by the publishing thread are **held**
+    during the commit and delivered only on commit; on rollback they are dropped, so a failed publication writes no
+    VKM observation or history. Holding is thread-scoped (other threads are notified at once).
+  - Workbook copies placed in the data folder by a failed publication attempt are removed again.
+  - The swap-step failure message now says whether the previous dashboard was restored.
+  - Lock order unchanged (`PUBLISH_LOCK → vkm_store._LOCK → GenerationStore._lock`); notifications are still issued
+    outside `GenerationStore._lock`. No change to the Upload Center UI or to any business calculation.
+- **Unchanged:** `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; CRM / fair / action / VKM review history
+  untouched (also asserted after every injected failure).
+- **Tests:** `tests/test_m8_cp3_atomicity.py` — failure injection at the first and second selection write, a torn
+  owner-selection write, owner configuration staging, owner installation before any record is published and after a
+  partial installation (mixed and owner-only batches); after each failure dashboard / manifest / selection bytes,
+  data-folder and upload bytes, context object, generation and evidence binding, owner configs and views, finance
+  states, all VKM tables and CRM / fair / action tables are unchanged, and a restart serves the same generation; a
+  clean publication afterwards commits and is observed.
+- **Still open before hosting (not part of this fix):** single-process serving (CP2) and upload retention / cleanup (CP5).

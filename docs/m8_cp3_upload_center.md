@@ -108,14 +108,22 @@ never workbook values, names or amounts.
 2. The exact previewed bytes are copied into the data folder under the same content-addressed names (fingerprints
    verified). Owner workbooks are imported from those copies and must reproduce the previewed record fingerprints.
 3. **Core in the batch:** `run_refresh` with `PublishHooks(selection=…, expect_core_id=<previewed core_id>,
-   before_swap=…, after_install=…)`. The candidate must have exactly the previewed identity (else refused before any
-   swap). Under `PUBLISH_LOCK`: the selection files are written (atomic) and the owner configs staged right before the
-   dashboard / manifest swap; the context and generation are installed (`_install_generation`); the uploaded owner
-   workbooks are installed in the same step. Any swap / install failure restores the previous dashboard, manifest,
-   context, both selection files and the owner configuration.
-4. **Owner workbooks only:** under `PUBLISH_LOCK`, the owner selection is written and the prepared entries installed
-   (their generation records are published by the existing `on_record` path); a failure restores the selection and
-   configuration.
+   before_swap=…, after_install=…, on_commit=…)`. The candidate must have exactly the previewed identity (else refused
+   before any swap). Under `PUBLISH_LOCK`, **all-or-nothing (D-066)**:
+   - `before_swap` snapshots the live context, generation state, owner repository state and the bytes (or absence) of
+     both selection files, holds the publishing thread's generation notifications, writes `sources.json` and
+     `owner_sources.json` (atomic each) and stages the owner configs. A failure in any of these restores what was
+     already changed and the publication stops with nothing swapped.
+   - The dashboard / manifest swap and `_install_generation` follow; `after_install` installs the uploaded owner
+     workbooks and publishes their generation records. `after_install` **fails closed**: any failure (before the first
+     record or after a partial installation) restores the previous dashboard and manifest, and the full refresh undo
+     restores context, generation, both selection files and the owner configuration and views.
+   - `on_commit` delivers the held notifications only after every step succeeded; on any rollback they are dropped,
+     so a failed publication writes no Veri Kontrol observation or history. Copies the failed attempt placed in the
+     data folder are removed.
+4. **Owner workbooks only:** under `PUBLISH_LOCK`, the same `before_swap` / install / commit steps without a dashboard
+   swap; a failure in writing, staging or installing (including a partial installation) restores both selection
+   files, the owner configuration, the owner views and the generation state.
 5. VKM observes the accepted generation through the existing observers (no special path). CRM notes, follow-ups, fair
    campaigns, action state and VKM review history are never touched (tested across publications and restarts).
 
@@ -157,6 +165,8 @@ inferred; a new upload never carries an approval.
 - A publication changes the date-dependent evidence only on the day it was previewed: a preview validated before
   midnight and published after it may be refused as "önizlemeyle aynı değil" and must be validated again.
 - Hedef / Trodat uploads are out of scope (not in the generation manifest).
-- A crash between writing the selection files and the dashboard swap (a few milliseconds inside one lock) leaves a
-  selection that no longer matches the published manifest: the restart then fails closed (nothing served) until the
-  owner re-validates and publishes.
+- The rollback covers every exception inside the process. A hard process crash (power loss, kill) between writing
+  the selection files and the dashboard swap (a few milliseconds inside one lock) still leaves a selection that no
+  longer matches the published manifest: the restart then fails closed (nothing served) until the owner re-validates
+  and publishes.
+- Before hosting: single-process serving (CP2) and upload retention / cleanup (CP5) must be resolved.

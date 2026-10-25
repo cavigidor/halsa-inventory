@@ -1,10 +1,10 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-25 (Step 1 real-Excel compatibility acceptance on the owner's Mac ACCEPTED by the owner; **M8-CP3 Excel Upload Center** implemented on `claude/m8-cp3-upload-center` (D-065), PR open for independent review — NOT merged, NOT deployed. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False)._
+_Updated 2026-10-25 (Step 1 real-Excel compatibility acceptance on the owner's Mac ACCEPTED by the owner; **M8-CP3 Excel Upload Center** implemented on `claude/m8-cp3-upload-center` (D-065; review fix D-066 all-or-nothing publication), PR #32 awaiting independent re-review — NOT merged, NOT deployed. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False)._
 
 ## Git
-- **`claude/m8-cp3-upload-center`:** M8-CP3 Excel Upload Center (D-065) from `main` @ `4a5817b`; PR open, awaiting
-  independent review. NOT merged, NOT deployed.
+- **`claude/m8-cp3-upload-center`:** M8-CP3 Excel Upload Center (D-065) from `main` @ `4a5817b`; PR #32 reviewed at
+  `40fdef1`, failure-atomicity fix D-066 pushed, awaiting independent re-review. NOT merged, NOT deployed.
 - **`claude/m8-vkm-1-veri-kontrol-merkezi`:** M8-VKM-1 (D-062–D-064), PR #31 independently reviewed and squash-merged into `main` as `422f3a4` (reviewed head `b2b4639`); NOT deployed or validated against real data.
 - **`claude/m8-cp1-simplified-access`:** PR #30 reviewed at `318491d` and squash-merged to `main` (`a03efbf`, 2026-10-22). Three access levels are implemented and locally tested; **not deployed**.
 - **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), M8 source-evidence PR #28 (`5baa92a`), M8 precise validation PR #29 (`4ad8d8a`), M8-CP1 access PR #30 (`a03efbf`) and M8-VKM-1 PR #31 (`422f3a4`) merged.
@@ -37,8 +37,15 @@ _Updated 2026-10-25 (Step 1 real-Excel compatibility acceptance on the owner's M
   `tests/test_m8_cp3_upload_files.py` 21, `tests/test_m8_cp3_upload_center.py` 39, `tests/test_m8_cp3_browser.py` 8 in
   real Chromium against the production app and gate; existing route / tab sweeps extended to the new page and tab).
   Design: `docs/m8_cp3_upload_center.md`.
+- **Review fix (D-066, after review of `40fdef1`):** a publication is all-or-nothing. A failure while writing either
+  selection file or staging the owner configuration restores both files and the owner state; a failing owner-workbook
+  installation (before any record or after a partial one) now fails the whole publication and restores the previous
+  dashboard, manifest, context, generation, selections and owner views (previously reported as success with a
+  warning). Generation notifications are held until commit, so a failed publication writes no Veri Kontrol history;
+  copies of a failed attempt are removed. Lock order unchanged. New `tests/test_m8_cp3_atomicity.py` (10, incl.
+  restart after every injected failure). Full run: **1775 passed / 7 skipped / 2 xfailed**.
 - **Open:** owner-local acceptance of an upload through the UI with the private exports; retention policy for stored
-  uploads (CP5); single-process server assumed (CP2); Hedef / Trodat not offered (not in the generation manifest).
+  uploads (CP5) and single-process serving (CP2) — both must be resolved before hosting; Hedef / Trodat not offered (not in the generation manifest).
 
 ## Step 1 — real Excel compatibility acceptance (owner's Mac, 2026-10-25; ACCEPTED by the owner)
 - Isolated copy of `main` @ `4a5817b` in the Mac's local sandbox, AI disabled; originals, `.env` and the checkout

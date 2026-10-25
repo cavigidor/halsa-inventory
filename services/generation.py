@@ -730,6 +730,8 @@ class GenerationStore:
         self._dash_pending: str | None = None        # core_id whose dashboard re-publication is expected (2B)
         self.restore_reason: str | None = None
         self._observers: list = []                   # M8-VKM-1: notified after a generation is ACCEPTED
+        self._hold_tid: int | None = None            # M8-CP3: notifications held during one publication
+        self._held: list = []
 
     # -- M8-VKM-1: observers of accepted generations (Veri Kontrol Merkezi) ---------------------------------------
     def add_observer(self, fn) -> None:
@@ -739,11 +741,48 @@ class GenerationStore:
         self._observers.append(fn)
 
     def _notify(self, kind: str, manifest: "Manifest | None", key: str | None = None) -> None:
+        with self._lock:
+            if self._hold_tid is not None and self._hold_tid == threading.get_ident():
+                self._held.append((kind, manifest, key))      # delivered only if the publication commits
+                return
+        self._deliver(kind, manifest, key)
+
+    def _deliver(self, kind: str, manifest: "Manifest | None", key: str | None = None) -> None:
         for fn in list(self._observers):
             try:
                 fn(kind, manifest, key, self)
             except Exception:
                 pass
+
+    # -- M8-CP3: one multi-step publication (core + owner) is all-or-nothing --------------------------------------
+    def hold_notifications(self) -> None:
+        """Queue the observer notifications raised by THIS thread (the publisher, holding PUBLISH_LOCK) until
+        `release_notifications`. A publication that is rolled back therefore never reaches the observers (no VKM
+        observation, no history event). Other threads are unaffected."""
+        with self._lock:
+            self._hold_tid, self._held = threading.get_ident(), []
+
+    def release_notifications(self, *, deliver: bool) -> None:
+        """End the hold of this thread: deliver the queued notifications in order (commit) or drop them (rollback).
+        A no-op when this thread holds nothing."""
+        with self._lock:
+            if self._hold_tid != threading.get_ident():
+                return
+            held, self._held, self._hold_tid = self._held, [], None
+        if deliver:
+            for kind, manifest, key in held:
+                self._deliver(kind, manifest, key)
+
+    def snapshot_state(self) -> tuple:
+        """The served / pending generation state (immutable manifests), for a publication's rollback."""
+        with self._lock:
+            return (self._m, self._pending, self._dash_pending, self.restore_reason)
+
+    def restore_state(self, state: tuple) -> None:
+        """Put back a `snapshot_state` exactly (rollback of a failed publication). Notifies no observer."""
+        with self._cond:
+            self._m, self._pending, self._dash_pending, self.restore_reason = state
+            self._cond.notify_all()
 
     # -- dashboard re-publication after a restart (M8-ACCURACY-2B) ---------------------------------------------
     @property

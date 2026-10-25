@@ -109,6 +109,12 @@ class ContextRepository:
             self.last_error = None
         return self._ctx
 
+    def restore_live(self, ctx):
+        """M8-CP3: put back the exact live context object of before a failed publication (None = not built yet)."""
+        with self._lock:
+            self._ctx = ctx
+            self._cust_idx = self._prod_idx = None
+
     # ---- indices built from the assembled context (no Excel re-read) ----
     def _indices(self):
         """Indices of the context THIS caller sees (pinned in a request). Cached only for the live context, so a

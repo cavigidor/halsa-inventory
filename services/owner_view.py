@@ -513,19 +513,37 @@ class OwnerRepository:
 
     def install_entries(self, entries: dict[str, dict]) -> None:
         """Make prepared entries live and publish their records (caller holds PUBLISH_LOCK, so readers see the views
-        and the generation records change in one step)."""
+        and the generation records change in one step). A record that cannot be published RAISES: the caller (the
+        Upload Center publication) then restores the `snapshot_state` taken before, so a view is never served without
+        its generation record. Another configured source whose lazy load was cancelled by `stage_configs` is loaded
+        again on the next `ensure_loaded()`."""
         with self._lock:
             self._gen += 1
             self._inflight = False
-            self._loaded_once = True
+            self._loaded_once = not any(e["state"] == LOADING and k not in entries for k, e in self._entries.items())
             for k, e in entries.items():
                 self._entries[k] = dict(e)
         if self._on_record is not None:
             for k, e in entries.items():
-                try:
-                    self._on_record(k, e.get("record"))
-                except Exception:
-                    pass
+                self._on_record(k, e.get("record"))
+
+    def snapshot_state(self) -> tuple:
+        """Configs, entries (immutable views) and load bookkeeping, for a publication's rollback."""
+        with self._lock:
+            return (dict(self._configs), {k: dict(v) for k, v in self._entries.items()}, self._inflight,
+                    self._loaded_once)
+
+    def restore_state(self, state: tuple) -> None:
+        """Put back a `snapshot_state` (failed publication). The load generation only moves forward, so no load that
+        started in between can publish; a lazy load that was in flight at the snapshot is simply started again by the
+        next `ensure_loaded()` (its sources show the restored 'loading' state until then)."""
+        configs, entries, inflight, loaded_once = state
+        with self._lock:
+            self._configs = dict(configs)
+            self._entries = {k: dict(v) for k, v in entries.items()}
+            self._gen += 1
+            self._inflight = False
+            self._loaded_once = loaded_once and not inflight
 
     # -- internals -----------------------------------------------------------------------
     def _start_locked(self) -> int:
