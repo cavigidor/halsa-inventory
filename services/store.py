@@ -53,6 +53,9 @@ def init_db():
         # M8-CP1 (D-060): owner sessions (token hashes only) and login-failure throttle. CREATE IF NOT EXISTS only.
         from services import owner_auth
         owner_auth.init_tables(c)
+        # M8-VKM-1 (D-062): Veri Kontrol Merkezi issues, append-only history and observations. CREATE IF NOT EXISTS.
+        from services import vkm_store
+        vkm_store.init_tables(c)
 
 
 def content_key(category, entity_id, content_hash):

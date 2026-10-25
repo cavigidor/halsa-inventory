@@ -475,6 +475,14 @@ ROUTES: dict[tuple[str, str], tuple[str, str | tuple[str, ...] | None]] = {
     ("POST", "/api/actions/{action_id}/defer"): ("operational", None),
     ("POST", "/api/actions/{action_id}/dismiss"): ("operational", None),
     ("POST", "/api/actions/{action_id}/reopen"): ("operational", None),
+    # M8-VKM-1 (D-062): data-quality issue records (counts of problems in the sources, never a business number) and
+    # the owner's review decisions. Reviewing never changes a gate decision or evidence.
+    ("GET", "/api/vkm/summary"): ("system", None),
+    ("GET", "/api/vkm/issues"): ("system", None),
+    ("GET", "/api/vkm/issues/{issue_id}"): ("system", None),
+    ("POST", "/api/vkm/issues/{issue_id}/review"): ("operational", None),
+    ("POST", "/api/vkm/issues/{issue_id}/notes"): ("operational", None),
+    ("POST", "/api/vkm/sync"): ("operational", None),
 }
 
 

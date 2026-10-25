@@ -92,6 +92,13 @@ ACCESS: dict[tuple[str, str], str] = {
     ("GET", "/api/owner/overview"): OWNER_READ,                  # full Yönetim: + operations, system, issues, reload
     ("GET", "/api/owner/status"): OWNER_READ,                    # source file names, system state
     ("POST", "/api/owner/reload"): OWNER_WRITE,                  # re-reads the owner workbooks
+    # --- M8-VKM-1 Veri Kontrol Merkezi (D-062) ---
+    ("GET", "/api/vkm/summary"): VIEWER,                         # allow-listed counts only (schemas.VkmPublicSummary)
+    ("GET", "/api/vkm/issues"): OWNER_READ,                      # locators, counts, observations, fingerprints
+    ("GET", "/api/vkm/issues/{issue_id}"): OWNER_READ,           # + history and owner notes
+    ("POST", "/api/vkm/issues/{issue_id}/review"): OWNER_WRITE,  # review decision (never certifies a metric)
+    ("POST", "/api/vkm/issues/{issue_id}/notes"): OWNER_WRITE,   # append-only owner note
+    ("POST", "/api/vkm/sync"): OWNER_WRITE,                      # re-observe the served generation (recovery)
 }
 
 # Query parameters that make a viewer GET an owner action (value considered set unless false-like).

@@ -242,7 +242,7 @@ def m_collections(path,df=None):
     return rows, owed_map
 
 # ---------- oluştur ----------
-def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True,own_panel=True,gate=None,manifest=None):
+def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True,own_panel=True,gate=None,manifest=None,vkm_panel=True):
     """sources/frames (M5-5): a frozen source selection and the already-read raw frames, so a controlled
     refresh builds from exactly what it validated. stats_out (dict): filled with build totals for verification.
     gate (M8-ACCURACY): the factual-integrity gate; default = the production gate (services/accuracy.py). Every
@@ -355,7 +355,7 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
           'total_shown':_dec('stock.product_counts').displayable,
           # M8-ACCURACY-2: every metric whose output this HTML embeds; GET / re-authorizes exactly these keys
           'displayed':sorted(k for k,d in decisions.items() if d.displayable)}
-    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel,opp_panel=opp_panel,fair_panel=fair_panel,crm_panel=crm_panel,own_panel=own_panel))
+    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel,opp_panel=opp_panel,fair_panel=fair_panel,crm_panel=crm_panel,own_panel=own_panel,vkm_panel=vkm_panel))
     if stats_out is not None:
         # Internal build totals for the refresh's context ↔ dashboard reconciliation (never displayed as such).
         stats_out.update({'asof':meta['asof'],'overdue_total':overdue_total,'overstock_value':over_val,
@@ -2621,6 +2621,249 @@ tabBtn.addEventListener('click',start);   // lazy: nothing is fetched (and no ow
 })();
 """
 
+# ---------------------------------------------------------------------------------------------
+# M8-VKM-1 Veri Kontrol Merkezi (D-062): server-driven tab. Everyone sees the allow-listed counts summary
+# (GET /api/vkm/summary); the owner sees the issue list, details, history and the review controls (owner_read /
+# owner_write; the server enforces every permission). All text goes through textContent (never innerHTML).
+# ---------------------------------------------------------------------------------------------
+_VKM_CSS=r"""
+#vkm .vk-intro{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:6px 0 12px;font-size:13px}
+#vkm .vk-intro p{margin:4px 0}
+#vkm .vk-notapproval{background:#eef2ff;border:1px solid #c7d2fe;color:#3730a3;border-radius:8px;padding:8px 11px;font-weight:700;font-size:13px;margin:6px 0 0}
+#vkm .vk-state{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:11px 14px;margin:8px 0 12px;overflow-wrap:anywhere}
+#vkm .vk-state.err{border-color:#f3c4c4;background:#fdf3f3;color:#b42318;font-weight:600}
+#vkm .vk-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,120px),1fr));gap:8px;margin:0 0 10px}
+#vkm .vk-tile{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 11px;min-width:0}
+#vkm .vk-tile .n{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
+#vkm .vk-tile .l{font-size:12px;color:var(--muted)}
+#vkm .vk-muted{font-size:12px;color:var(--muted);margin:4px 0;overflow-wrap:anywhere}
+#vkm .vk-types{list-style:none;padding:0;margin:4px 0 12px;display:flex;flex-wrap:wrap;gap:6px}
+#vkm .vk-types li{border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;background:var(--card)}
+#vkm .vk-viewer{background:var(--warn-bg);border:1px solid #f5d9a8;border-radius:10px;padding:10px 13px;font-size:13px;margin:6px 0 12px}
+#vkm .vk-viewer a{color:#1f5fbf;font-weight:600}
+#vkm .vk-srcs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+#vkm .vk-src{border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:12px;background:var(--card)}
+#vkm .vk-src[data-state="missing"]{border-color:#f3c4c4;background:#fdf3f3;color:#b42318}
+#vkm .vk-filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,170px),1fr));gap:8px;margin:0 0 8px;align-items:end}
+#vkm .vk-filters label{display:flex;flex-direction:column;gap:3px;font-size:12px;font-weight:700;color:var(--muted)}
+#vkm select,#vkm textarea{font:inherit;font-size:14px;border:1px solid #b8bfcc;border-radius:8px;padding:7px 9px;background:var(--card);color:var(--ink);min-height:38px;max-width:100%}
+#vkm textarea{width:100%;min-height:76px;resize:vertical}
+#vkm .vk-btn{border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-size:13px;font-weight:600;padding:8px 12px;border-radius:8px;cursor:pointer;min-height:38px}
+#vkm .vk-btn.pri{background:var(--ink);color:#fff;border-color:var(--ink)}
+#vkm .vk-btn:disabled{opacity:.5;cursor:not-allowed}
+#vkm .vk-btn:focus-visible,#vkm .vk-item:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+#vkm .vk-list{list-style:none;padding:0;margin:0}
+#vkm .vk-item{display:block;width:100%;text-align:left;font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-left-width:5px;border-radius:10px;padding:10px 12px;margin:0 0 8px;cursor:pointer}
+#vkm .vk-item[data-severity="kritik"]{border-left-color:#b42318}#vkm .vk-item[data-severity="yuksek"]{border-left-color:#c2410c}
+#vkm .vk-item[data-severity="orta"]{border-left-color:#b45309}#vkm .vk-item[data-severity="dusuk"]{border-left-color:#94a3b8}
+#vkm .vk-item[data-status="cozuldu_kaynakta"]{opacity:.75}
+#vkm .vk-t{font-weight:700;font-size:14px;display:block;margin:3px 0 2px;overflow-wrap:anywhere}
+#vkm .vk-meta{font-size:12px;color:var(--muted);display:block;overflow-wrap:anywhere}
+#vkm .vk-chip{display:inline-block;font-size:11px;font-weight:700;border:1px solid var(--line);border-radius:999px;padding:1px 8px;margin:0 4px 2px 0;white-space:nowrap}
+#vkm .vk-chip.sev-kritik{color:#b42318;border-color:#f3c4c4}#vkm .vk-chip.sev-yuksek{color:#c2410c;border-color:#fed7aa}
+#vkm .vk-chip.sev-orta{color:#b45309;border-color:#f5d9a8}#vkm .vk-chip.sev-dusuk{color:#475569}
+#vkm .vk-chip.st-cozuldu_kaynakta{color:#1a7f4b;border-color:#bfe3cf}#vkm .vk-chip.st-yeniden_acildi{color:#b42318;border-color:#f3c4c4}
+#vkm .vk-chip.pr-source_missing,#vkm .vk-chip.pr-not_checked{color:#b45309;border-color:#f5d9a8}
+#vkm .vk-sync{background:#fdf3f3;border:1px solid #f3c4c4;color:#b42318;border-radius:10px;padding:10px 13px;margin:6px 0 12px;font-weight:600;font-size:13px;overflow-wrap:anywhere}
+#vkm .vk-sync p{margin:3px 0}#vkm .vk-sync .vk-btn{margin-top:6px}
+#vkm .vk-detail{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:0 0 14px}
+#vkm .vk-detail h3{font-size:16px;margin:6px 0;overflow-wrap:anywhere}
+#vkm .vk-detail h4{font-size:12px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;margin:12px 0 4px;color:var(--muted)}
+#vkm .vk-detail p{margin:4px 0;font-size:13px;overflow-wrap:anywhere}
+#vkm .vk-kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:4px 14px;font-size:13px}
+#vkm .vk-kv b{color:var(--muted);font-weight:600;margin-right:4px}
+#vkm .vk-acts{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+#vkm .vk-msg{min-height:1.2em;font-weight:600;font-size:13px;margin:6px 0}#vkm .vk-msg.err{color:#b42318}#vkm .vk-msg.ok{color:#1a7f4b}
+#vkm .vk-hist{list-style:none;padding:0;margin:0}
+#vkm .vk-hist li{border-bottom:1px solid var(--line);padding:6px 0;font-size:13px;overflow-wrap:anywhere}
+#vkm .vk-hist .vk-note{white-space:pre-wrap;background:#f6f7f8;border-radius:6px;padding:5px 8px;margin:4px 0 0}
+#vkm [hidden]{display:none!important}
+@media(max-width:600px){#vkm .vk-acts .vk-btn{flex:1 1 100%}}
+"""
+
+_VKM_BODY="""
+<h2 class="sec">Veri Kontrol Merkezi</h2>
+<div class="vk-intro" role="note"><p>Bu bölüm, aylık DinamikCRM Excel raporlarında sistemin kural tabanlı (yapay zekâ kullanmayan) denetimlerle bulduğu veri sorunlarını listeler. Her sorun her yeni yüklemede yeniden denetlenir: devam ediyorsa açık kalır, kaynakta düzelirse “kaynakta çözüldü” olur, geri gelirse yeniden açılır. Kaynak dosyalarda hiçbir satır değiştirilmez veya silinmez.</p>
+<p class="vk-notapproval">İnceleme bir onay değildir; metrikler yalnızca doğrulanmış kanıtla gösterilir.</p></div>
+<div class="vk-state" role="status" hidden></div>
+<div class="vk-sync" role="alert" hidden><p class="vk-sync-msg"></p><p class="vk-sync-src"></p><button type="button" class="vk-btn pri vk-resync" hidden>Denetimi yeniden çalıştır</button></div>
+<section class="vk-sum" hidden><div class="vk-tiles"></div><p class="vk-muted vk-last"></p><ul class="vk-types"></ul></section>
+<p class="vk-viewer" hidden>Sorunların yeri, ayrıntıları, geçmişi ve notlar yalnızca yönetici girişiyle görüntülenir; inceleme kararlarını yalnızca yönetici verebilir. <a href="/giris">Yönetici girişi</a></p>
+<section class="vk-owner" hidden>
+<p class="vk-muted">Son yükleme gözlemi (hangi dosyaların bu listeye dayandığı):</p><div class="vk-srcs"></div>
+<form class="vk-filters" onsubmit="return false"><label>Durum<select class="vk-f" data-f="status"></select></label><label>Önem<select class="vk-f" data-f="severity"></select></label>
+<label>Sorun türü<select class="vk-f" data-f="type"></select></label><label>Kaynak<select class="vk-f" data-f="source"></select></label>
+<label>Bu yüklemede<select class="vk-f" data-f="presence"></select></label><button type="button" class="vk-btn vk-clear">Filtreleri temizle</button></form>
+<section class="vk-detail" hidden aria-live="polite"></section>
+<p class="vk-muted vk-count" role="status"></p><ul class="vk-list"></ul>
+</section>
+"""
+
+_VKM_JS=r"""
+(function(){
+'use strict';
+const root=document.getElementById('vkm'), tabBtn=document.querySelector('.tab[data-t="vkm"]');
+if(!root||!tabBtn) return;
+const H={'Content-Type':'application/json','X-StockAgent':'1'};   // local guard (D-020); the CSRF token is added by the access script
+const MSG={file:'Veri Kontrol Merkezi için panoyu http://127.0.0.1:8000/ üzerinden açın.',
+  offline:'Sunucu çalışmıyor. Terminalde uvicorn app:app --host 127.0.0.1 çalıştırıp http://127.0.0.1:8000 adresini açın. Diğer sekmeler normal çalışır.',
+  fail:'Veri Kontrol Merkezi yüklenemedi', none:'Henüz gözlenmiş bir veri yüklemesi yok. Veriler yenilendiğinde denetim sonuçları burada görünür.',
+  empty:'Bu filtrelerle eşleşen konu yok.', noOpen:'Açık veri sorunu yok.', auth:'Oturum sona erdi; yeniden yönetici girişi yapın.',
+  stale:'Veriler bu sayfa açıldıktan sonra yeniden gözlendi; liste yenilendi. Lütfen konuyu kontrol edip tekrar deneyin.',
+  saved:'Kaydedildi.', noteNeeded:'Not boş olamaz.', synced:'Denetim sonuçları güncellendi.',
+  blocked:'Denetim sonuçları yayımlanan verilerle güncel olmadığı için şu anda inceleme kararı verilemez.'};
+const SEV=[['kritik','Kritik'],['yuksek','Yüksek'],['orta','Orta'],['dusuk','Düşük']];
+const AY=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+const st={started:false,seq:0,role:null,gen:null,cat:null,filters:{status:'open'},open:null,busy:false};
+const $=s=>root.querySelector(s);
+function el(tag,cls,text){const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=String(text); return e;}
+function show(n,on){n.hidden=!on;}
+function state(t,k){const n=$('.vk-state'); n.textContent=t||''; n.className='vk-state'+(k?' '+k:''); show(n,!!t);}
+function num(v){return (v==null||!Number.isFinite(Number(v)))?'—':Number(v).toLocaleString('tr-TR');}
+function fmtDay(iso){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||'')); return m?(+m[3])+' '+AY[+m[2]-1]+' '+m[1]:'—';}
+function fmtWhen(iso){if(!iso) return '—'; const d=new Date(iso); if(isNaN(d)) return fmtDay(iso);
+  return d.getDate()+' '+AY[d.getMonth()]+' '+d.getFullYear()+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
+async function api(path,opt){
+  let r; try{r=await fetch(path,opt||{headers:{'Accept':'application/json'}});}catch(e){const x=new Error('offline'); x.offline=true; throw x;}
+  let b=null; try{b=await r.json();}catch(e){b=null;}
+  if(!r.ok){const x=new Error('HTTP '+r.status); x.status=r.status; x.body=b; x.code=b&&b.detail&&b.detail.error_code; throw x;} return b;}
+function errText(e){if(e.offline) return MSG.offline; if(e.status===401) return MSG.auth;
+  const m=e.body&&e.body.detail&&e.body.detail.message; return m||(MSG.fail+(e.status?' (HTTP '+e.status+')':'')+'.');}
+async function role(force){try{const a=window.StockAgentAccess; const s=a?await a.session(force):null; return s&&s.role||null;}catch(e){return null;}}
+
+function start(){if(st.started) return; st.started=true;
+  if(location.protocol==='file:'){state(MSG.file,'err'); return;}
+  load();}
+async function load(force){
+  const my=++st.seq; st.role=await role(force);
+  if(st.role==='owner'){try{const d=await api(listUrl()); if(my!==st.seq) return; renderOwner(d); return;}
+    catch(e){if(my!==st.seq) return; if(e.status!==401&&e.status!==403){state(errText(e),'err'); return;} st.role=null;}}
+  try{const s=await api('/api/vkm/summary'); if(my!==st.seq) return; state(''); renderSummary(s); show($('.vk-owner'),false); show($('.vk-viewer'),true); root.dataset.access='viewer';}
+  catch(e){if(my===st.seq) state(errText(e),'err');}
+}
+function listUrl(){const q=new URLSearchParams(); Object.entries(st.filters).forEach(([k,v])=>{if(v) q.set(k,v);}); return '/api/vkm/issues?'+q.toString();}
+function tiles(c,last){const box=$('.vk-tiles'); box.replaceChildren();
+  const t=(k,n,l)=>{const d=el('div','vk-tile'); d.dataset.k=k; d.append(el('div','n',num(n)),el('div','l',l)); box.append(d);};
+  t('open',c.open_total,'Açık konu'); SEV.forEach(([k,l])=>t(k,(c.by_severity||{})[k],l+' (açık)'));
+  t('resolved',(c.by_status||{}).cozuldu_kaynakta,'Kaynakta çözüldü');
+  $('.vk-last').textContent=last?('Son gözlem: '+last):''; show($('.vk-sum'),true);}
+function renderSync(sy,owner){const box=$('.vk-sync'); const st0=sy&&(sy.state||sy);
+  root.dataset.sync=st0||'';
+  if(!st0||st0==='in_sync'){show(box,false); return;}
+  $('.vk-sync-msg').textContent=(sy&&sy.message)||'';
+  const src=(sy&&sy.sources||[]).map(x=>x.label); $('.vk-sync-src').textContent=src.length?('Güncel olmayan kaynaklar: '+src.join(', ')):'';
+  show($('.vk-resync'),!!owner&&st0==='out_of_sync'); show(box,true);}
+function renderSummary(s){
+  renderSync({state:s.sync,message:s.sync_message},false);
+  if(!s.observed){state(MSG.none); show($('.vk-sum'),false); return;}
+  tiles(s,fmtDay(s.last_observed_on));
+  const ul=$('.vk-types'); ul.replaceChildren(); (s.by_type||[]).forEach(x=>{const li=el('li',null,x.label+': '+num(x.open)); li.dataset.type=x.key; ul.append(li);});
+  if(!s.open_total) state(MSG.noOpen); }
+function options(sel,items,cur,all){sel.replaceChildren(); if(all!==null){const o=el('option',null,all||'Tümü'); o.value=''; sel.append(o);}
+  items.forEach(([k,l])=>{const o=el('option',null,l); o.value=k; sel.append(o);}); sel.value=cur||'';}
+function renderFilters(cat){
+  const f=st.filters, get=k=>root.querySelector('.vk-f[data-f="'+k+'"]');
+  options(get('status'),[['open','Açık olanlar (çözülmemiş)'],['all','Tümü (geçmiş dahil)']].concat(cat.statuses.map(x=>[x.key,x.label])),f.status||'open',null);
+  options(get('severity'),cat.severities.map(x=>[x.key,x.label]),f.severity,'Tüm önem düzeyleri');
+  options(get('type'),cat.types.map(x=>[x.key,x.label]),f.type,'Tüm sorun türleri');
+  options(get('source'),cat.sources.map(x=>[x.key,x.label]),f.source,'Tüm kaynaklar');
+  options(get('presence'),cat.presence.map(x=>[x.key,x.label]),f.presence,'Hepsi');}
+function renderOwner(d){
+  root.dataset.access='owner'; st.gen=d.vkm_generation; root.dataset.gen=d.vkm_generation; st.cat=d.catalogue;
+  show($('.vk-viewer'),false); show($('.vk-owner'),true); state(''); renderSync(d.sync,true);
+  if(!(d.sources||[]).length){state(MSG.none);}
+  tiles(d.counts,(d.sources||[]).length?fmtWhen((d.sources||[]).map(s=>s.observed_at).sort().pop()):'');
+  const ty=$('.vk-types'); ty.replaceChildren(); (d.counts.by_type||[]).filter(x=>x.open).forEach(x=>{const li=el('li',null,x.label+': '+num(x.open)); li.dataset.type=x.key; ty.append(li);});
+  const srcs=$('.vk-srcs'); srcs.replaceChildren();
+  (d.sources||[]).forEach(s=>{const b=el('span','vk-src',s.label+' · '+s.state_label+' · '+fmtWhen(s.observed_at)+(s.period_end?' · rapor tarihi '+fmtDay(s.period_end):'')); b.dataset.key=s.key; b.dataset.state=s.state;
+    if(s.fingerprint) b.title='Dosya parmak izi '+s.fingerprint+' · yükleme '+(s.generation||''); srcs.append(b);});
+  renderFilters(d.catalogue);
+  const ul=$('.vk-list'); ul.replaceChildren();
+  d.issues.forEach(i=>ul.append(item(i)));
+  $('.vk-count').textContent=d.issues.length?(num(d.issues.length)+' konu gösteriliyor.'):(st.filters.status==='open'&&!Object.keys(st.filters).some(k=>k!=='status'&&st.filters[k])?MSG.noOpen:MSG.empty);
+}
+function chip(cls,text){return el('span','vk-chip '+cls,text);}
+function item(i){
+  const li=el('li'); const b=el('button','vk-item'); b.type='button';
+  b.dataset.id=i.issue_id; b.dataset.severity=i.severity; b.dataset.status=i.status; b.dataset.presence=i.presence; b.dataset.type=i.issue_type;
+  const top=el('span'); top.append(chip('sev-'+i.severity,i.severity_label),chip('st-'+i.status,i.status_label),chip('pr-'+i.presence,i.presence_label));
+  if(i.notes) top.append(chip('vk-notes',i.notes+' not'));
+  b.append(top,el('span','vk-t',i.title),el('span','vk-meta',i.source_label+' · '+i.location+' · '+i.type_label),
+    el('span','vk-meta','İlk görülme: '+fmtWhen(i.first_seen_at)+' · Son görülme: '+fmtWhen(i.last_seen_at)));
+  b.addEventListener('click',()=>openIssue(i.issue_id)); li.append(b); return li;}
+async function openIssue(id){
+  st.open=id; const box=$('.vk-detail'); show(box,true); box.replaceChildren(el('p','vk-muted','Yükleniyor…'));
+  try{const d=await api('/api/vkm/issues/'+encodeURIComponent(id)); if(st.open!==id) return; st.gen=d.vkm_generation; root.dataset.gen=d.vkm_generation; renderDetail(d);}
+  catch(e){if(st.open===id) box.replaceChildren(el('p','vk-msg err',errText(e)));}}
+function kv(pairs){const g=el('div','vk-kv'); pairs.forEach(([k,v])=>{const d=el('div'); d.append(el('b',null,k+':'),document.createTextNode(v==null||v===''?'—':String(v))); g.append(d);}); return g;}
+function renderDetail(d){
+  const i=d.issue, box=$('.vk-detail'); box.replaceChildren(); box.dataset.id=i.issue_id; box.dataset.status=i.status;
+  const back=el('button','vk-btn vk-back','← Listeye dön'); back.type='button'; back.addEventListener('click',()=>{st.open=null; show(box,false); box.replaceChildren(); const t=root.querySelector('.vk-item[data-id="'+i.issue_id+'"]'); if(t) t.focus();});
+  const h=el('h3','vk-dt',i.title); h.tabIndex=-1;
+  const chips=el('p'); chips.append(chip('sev-'+i.severity,i.severity_label),chip('st-'+i.status,i.status_label),chip('pr-'+i.presence,i.presence_label));
+  box.append(back,h,chips,el('p','vk-notapproval',d.notice));
+  box.append(el('h4',null,'Ne anlama geliyor?'),el('p','vk-explain',i.explanation));
+  box.append(el('h4',null,'Ne yapmalı?'),el('p','vk-action',i.action));
+  box.append(el('h4',null,'Nerede?'),kv([['Kaynak',i.source_label],['Konum',i.location],['Sorun türü',i.type_label],['Konu numarası',i.issue_id]]));
+  if((i.labels||[]).length) box.append(el('p','vk-muted vk-labels','Ayrıntı: '+i.labels.join(', ')));
+  if((i.counts||[]).length){box.append(el('h4',null,'Bu yüklemedeki sayılar')); box.append(kv(i.counts.map(c=>[c.label,num(c.value)])));}
+  box.append(el('h4',null,'Ne zaman?'),kv([['İlk görülme',fmtWhen(i.first_seen_at)],['Son görülme',fmtWhen(i.last_seen_at)],
+    ['Bu yüklemede',i.presence_label],['Beyan edilen rapor tarihi',i.period_end?fmtDay(i.period_end):'beyan edilmedi'],
+    ['İlk / son yükleme',(i.first_seen_generation||'—')+' / '+(i.last_seen_generation||'—')]]));
+  box.append(el('h4',null,'Etkilenen analizler'));
+  if((i.affected_metrics||[]).length){const u=el('ul','vk-types vk-affected'); i.affected_metrics.forEach(m=>{const li=el('li',null,m.title); li.dataset.metric=m.key; u.append(li);}); box.append(u);
+    box.append(el('p','vk-muted','Bu analizler doğrulanmış kanıt olmadan gösterilmez; incelemek onları göstermez.'));}
+  else box.append(el('p','vk-muted','Kayıtlı bir analiz bu konuya doğrudan bağlı değil.'));
+  // owner decision (server-enforced; the reviewer is the logged-in owner, never a form field)
+  box.append(el('h4',null,'İnceleme kararı ve not'));
+  const lab=el('label','vk-muted','Not (isteğe bağlı, en fazla 500 karakter; yapay zekâya gönderilmez)'); const ta=el('textarea','vk-notein'); ta.maxLength=500; lab.append(ta); box.append(lab);
+  const acts=el('div','vk-acts'), msg=el('p','vk-msg'); msg.setAttribute('role','status');
+  (i.allowed_actions||[]).forEach(a=>{const b=el('button','vk-btn pri vk-act',a.label); b.type='button'; b.dataset.action=a.key; b.addEventListener('click',()=>decide(i.issue_id,a.key,ta,msg)); acts.append(b);});
+  const nb=el('button','vk-btn vk-addnote','Yalnızca not ekle'); nb.type='button'; nb.addEventListener('click',()=>addNote(i.issue_id,ta,msg)); acts.append(nb);
+  box.append(acts,msg);
+  if(i.decisions_blocked){ta.disabled=true; nb.disabled=true; nb.hidden=true; msg.textContent=MSG.blocked; msg.className='vk-msg err vk-blocked';}
+  else if(!(i.allowed_actions||[]).length) box.append(el('p','vk-muted','Bu konu kaynakta çözüldü; yalnızca not eklenebilir. Sorun yeniden görülürse otomatik olarak yeniden açılır.'));
+  box.append(el('h4',null,'Geçmiş'));
+  const ul=el('ul','vk-hist'); (d.history||[]).forEach(e=>{const li=el('li'); li.dataset.event=e.event;
+    li.append(el('b',null,fmtWhen(e.at)+' · '+e.event_label));
+    const meta=[e.actor_label]; if(e.status_after_label) meta.push('durum: '+e.status_after_label); if(e.reason_label) meta.push(e.reason_label);
+    if((e.counts||[]).length) meta.push(e.counts.map(c=>c.label+' '+num(c.value)).join(', '));
+    li.append(el('div','vk-muted',meta.join(' · '))); if(e.note) li.append(el('div','vk-note',e.note)); ul.append(li);});
+  box.append(ul); h.focus();
+}
+async function post(path,body,msg){
+  if(st.busy) return null; st.busy=true; root.querySelectorAll('.vk-detail .vk-btn').forEach(b=>b.disabled=true); msg.textContent='Kaydediliyor…'; msg.className='vk-msg';
+  try{return await api(path,{method:'POST',headers:H,body:JSON.stringify(body)});}
+  catch(e){if(e.code==='stale_generation'||e.code==='out_of_sync'){const id=st.open; await load(); if(id) await openIssue(id); const m=root.querySelector('.vk-detail .vk-msg'); if(m){m.textContent=e.code==='out_of_sync'?MSG.blocked:MSG.stale; m.className='vk-msg err';} return null;}
+    msg.textContent=errText(e); msg.className='vk-msg err'; return null;}
+  finally{st.busy=false; root.querySelectorAll('.vk-detail .vk-btn').forEach(b=>b.disabled=false);}}
+async function decide(id,action,ta,msg){const body={action:action,vkm_generation:st.gen}; if(ta.value.trim()) body.note=ta.value;
+  const d=await post('/api/vkm/issues/'+encodeURIComponent(id)+'/review',body,msg); if(d) after(d);}
+async function addNote(id,ta,msg){if(!ta.value.trim()){msg.textContent=MSG.noteNeeded; msg.className='vk-msg err'; ta.focus(); return;}
+  const d=await post('/api/vkm/issues/'+encodeURIComponent(id)+'/notes',{note:ta.value,vkm_generation:st.gen},msg); if(d) after(d);}
+async function after(d){st.gen=d.vkm_generation; renderDetail(d); const m=root.querySelector('.vk-detail .vk-msg'); if(m){m.textContent=MSG.saved; m.className='vk-msg ok';}
+  try{const l=await api(listUrl()); renderOwner(l);}catch(e){}}
+root.querySelectorAll('.vk-f').forEach(s=>s.addEventListener('change',()=>{st.filters[s.dataset.f]=s.value||undefined; if(!st.filters.status) st.filters.status='open'; load();}));
+$('.vk-clear').addEventListener('click',()=>{st.filters={status:'open'}; load();});
+$('.vk-resync').addEventListener('click',async()=>{const b=$('.vk-resync'); if(b.disabled) return; b.disabled=true; const m=$('.vk-sync-src');
+  try{const r=await api('/api/vkm/sync',{method:'POST',headers:H,body:'{}'}); const id=st.open; await load(); if(id) await openIssue(id);
+    if(r&&r.sync&&r.sync.state==='in_sync') state(MSG.synced);}
+  catch(e){m.textContent=errText(e);} finally{b.disabled=false;}});
+tabBtn.addEventListener('click',start);   // lazy: nothing is fetched until the tab is opened
+})();
+"""
+
+
+def _vkm_panel(meta):
+    """(tab button, panel block) for Veri Kontrol Merkezi, wrapped in markers like the other server-driven tabs."""
+    asof=html.escape(str(meta.get('asof') or ''),quote=True)
+    btn='<button class="tab" data-t="vkm">Veri Kontrol</button>'
+    block=('\n<!--VKM-TAB-START-->\n<style>'+_VKM_CSS+'</style>\n'
+           f'<div id="vkm" class="panel" data-asof="{asof}">'+_VKM_BODY+'</div>\n'
+           '<script>'+_VKM_JS+'</script>\n<!--VKM-TAB-END-->')
+    return btn,block
+
+
 def _own_panel(meta):
     """(tab button, panel block) for Yönetim, wrapped in markers like the other server-driven tabs."""
     asof=html.escape(str(meta.get('asof') or ''),quote=True)
@@ -2631,7 +2874,7 @@ def _own_panel(meta):
     return btn,block
 
 
-def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True,own_panel=True):
+def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True,own_panel=True,vkm_panel=True):
     blob=json.dumps(modules,ensure_ascii=False).replace('</','<\\/')
     tabs=['overview']+list(modules.keys())
     tabbtns=''.join(f'<button class="tab" data-t="{t}">{("Genel Bakış" if t=="overview" else modules[t]["title"])}'
@@ -2656,6 +2899,7 @@ def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,o
     fm_btn,fm_block=_fair_panel(meta) if fair_panel else ('','')
     cr_btn,cr_block=_crm_panel(meta) if crm_panel else ('','')
     ow_btn,ow_block=_own_panel(meta) if own_panel else ('','')
+    vk_btn,vk_block=_vkm_panel(meta) if vkm_panel else ('','')   # M8-VKM-1: after the analysis tabs it explains
     return f"""<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="stockagent-accuracy" content="{acc}"><meta name="stockagent-generation" content="{gen}"><meta name="stockagent-displayed" content="{shown}"><title>Şirket Panosu — {meta['date']}</title>
 <style>
@@ -2725,7 +2969,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <div class="acc-bar" id="halsa-access" hidden></div></header>
 <div class="acc-msg" id="halsa-access-msg" role="alert" hidden></div>
 <script>{_ACCESS_JS}</script>
-<div class="tabs">{tabbtns}{sq_btn}{c3_btn}{op_btn}{fm_btn}{cr_btn}{ow_btn}{ai_btn}</div>
+<div class="tabs">{tabbtns}{vk_btn}{sq_btn}{c3_btn}{op_btn}{fm_btn}{cr_btn}{ow_btn}{ai_btn}</div>
 <div id="overview" class="panel on">
 <h2 class="sec">Aktif Analizler</h2>
 <p class="note">Bu panoda yalnızca kaynağı, tarihi, tanımı ve hesabı doğrulanmış sonuçlar gösterilir. Doğrulanmamış bir analizin yerinde rakam değil, neyin eksik olduğunu söyleyen kısa bir not görürsünüz. Rakamlar yapay zekâ tarafından üretilmez.</p>
@@ -2735,7 +2979,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <p class="note">İleride eklenebilecek analizler. Her biri ancak kaynağı sağlanıp doğrulandıktan sonra gösterilir.</p>
 <ul class="later">{laterlist}</ul>
 </div>
-<div id="panels"></div>{sq_block}{c3_block}{op_block}{fm_block}{cr_block}{ow_block}{ai_block}
+<div id="panels"></div>{vk_block}{sq_block}{c3_block}{op_block}{fm_block}{cr_block}{ow_block}{ai_block}
 <script>
 const DATA={blob};
 const fmtMoney=v=>'₺'+Math.round(v).toLocaleString('tr-TR');

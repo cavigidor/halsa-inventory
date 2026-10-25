@@ -271,7 +271,8 @@ from fastapi.exception_handlers import request_validation_exception_handler
 @app.exception_handler(RequestValidationError)
 async def _validation_error(request: Request, exc: RequestValidationError):
     # M8-CP1: /api/auth/ is included so a rejected login body (e.g. an over-long password) is never echoed back
-    if not request.url.path.startswith(("/api/crm/", "/api/auth/")):
+    # M8-VKM-1: /api/vkm/ is included so a rejected review note is never echoed back
+    if not request.url.path.startswith(("/api/crm/", "/api/auth/", "/api/vkm/")):
         return await request_validation_exception_handler(request, exc)
     errors = [{"loc": list(e.get("loc", ())), "type": e.get("type"), "msg": e.get("msg")} for e in exc.errors()]
     return JSONResponse(status_code=422, content={"detail": errors})
@@ -296,6 +297,12 @@ def _startup():
     # M8-ACCURACY-2: restore the published generation only if the dashboard and every source still match it
     app.state.generations = GEN.GenerationStore()
     app.state.generations.restore(GEN.manifest_path(DASHBOARD_PATH), DASHBOARD_PATH, DATA_FOLDER)
+    # M8-VKM-1 (D-062): every ACCEPTED generation (refresh, restart re-derivation, owner-source load) is observed by the
+    # Veri Kontrol Merkezi issue store; the observer only reads the manifest and never affects publication.
+    _owner_cfg = OV.config_from_env()
+    from services import vkm_store as _VKMS
+    app.state.vkm_owner_paths = lambda: {k: c.path for k, c in _owner_cfg.items()}
+    app.state.generations.add_observer(_VKMS.make_observer(app.state.vkm_owner_paths))
     app.state.repo = ContextRepository(data_folder=DATA_FOLDER, inflation_rate=INFLATION,
                                        generation_store=app.state.generations,
                                        on_generation_accepted=_republish_dashboard)
@@ -304,7 +311,7 @@ def _startup():
     app.state.c360 = C360.Customer360Repository(DATA_FOLDER, app.state.repo, hedef_path=HEDEF_PATH,
                                                 hedef_snapshot=HEDEF_SNAPSHOT_DATE, background=True)
     # M7-6 Yönetim: owner sources only from explicit env paths; loaded lazily when the tab is first opened.
-    app.state.owner = OV.OwnerRepository(OV.config_from_env(), background=True,
+    app.state.owner = OV.OwnerRepository(_owner_cfg, background=True,
                                          on_record=lambda k, r: app.state.generations.replace_owner(k, r))
     if WARMUP_CONTEXT:
         threading.Thread(target=_warm_up, args=(app.state.repo, app.state.c360), name="context-warmup",
@@ -1418,6 +1425,133 @@ def owner_reload(owner: OV.OwnerRepository = Depends(get_owner)):
     entries = owner.snapshot()
     return S.OwnerReloadResponse(started=r["started"], reload={"inflight": owner.inflight, "generation": owner.generation},
                                  sources=[OV.source_head(owner, k, entries[k]) for k in OV.SOURCES])
+
+
+# ---------------- M8-VKM-1 Veri Kontrol Merkezi (D-062) ----------------
+# Reads come from the private SQLite issue store, which only the publication of an ACCEPTED generation writes (the
+# GenerationStore observer registered at startup); no GET here writes anything. Viewers (public and financial) get the
+# allow-listed counts summary only; issue details, locators, history and notes are owner_read; every decision is
+# owner_write (session + CSRF + Origin, services/access.py). Nothing here touches source data, evidence, the gate or a
+# manifest: reviewing an issue never certifies a metric.
+import re as _re
+from services import vkm as VKM
+from services import vkm_store as VKMS
+
+_VKM_ID = _re.compile(r"^VKM-[0-9a-f]{16}$")
+_VKM_FILTERS = {"status": ("open", "all", *VKM.STATUSES), "severity": VKM.SEVERITIES, "type": tuple(VKM.TYPES),
+                "source": (*VKM.CORE_SOURCES, *VKM.OWNER_SOURCES), "presence": VKM.PRESENCE}
+
+
+def _vkm_error(e: "VKMS.VKMError") -> JSONResponse:
+    return _deny(e.status, e.code, e.message)
+
+
+def _vkm_id_or_404(issue_id: str):
+    return None if _VKM_ID.match(issue_id or "") else _deny(404, "not_found", VKMS.NOT_FOUND_TR)
+
+
+def _vkm_actor(request: Request) -> str:
+    sess = _owner(request)                       # resolved by the access middleware; never from the request body
+    return getattr(sess, "role", None) or "owner"
+
+
+def _vkm_served():
+    """(served manifest, owner paths): the generation the dashboard and API serve right now."""
+    store = getattr(app.state, "generations", None)
+    paths = getattr(app.state, "vkm_owner_paths", None)
+    return (store.current() if store is not None else None), (paths() if paths else {})
+
+
+def _vkm_expected():
+    """What the issue store must hold for the served generation (None = no generation served). Read only."""
+    m, paths = _vkm_served()
+    return VKMS.expected_digests(m, paths)
+
+
+# Owner decisions (review of PR #31 at 847c055, finding B): taken under PUBLISH_LOCK (no publication can install a
+# generation during the decision), and the live generation is re-read under the issue-store lock in the same step as
+# the commit (`_vkm_expected` passed as a callable). Lock order PUBLISH_LOCK → vkm_store._LOCK → GenerationStore._lock,
+# the same order publication uses, so no deadlock; a failing observer has a bounded wait and never blocks this.
+
+
+@app.get("/api/vkm/summary", response_model=S.VkmPublicSummary)
+def vkm_summary():
+    """Viewer-level summary (no login): counts by severity / status / type, the last observation date and whether the
+    counts describe the served upload (sync) only."""
+    return S.VkmPublicSummary(**VKMS.public_summary(_vkm_expected()))
+
+
+@app.get("/api/vkm/issues")
+def vkm_issues(status: str = "open", severity: str | None = None, type: str | None = None,
+               source: str | None = None, presence: str | None = None):
+    """Owner: the issue list with filters, the per-source observation state and the observation token
+    (`vkm_generation`) a review must present."""
+    picked = {"status": status, "severity": severity, "type": type, "source": source, "presence": presence}
+    for k, v in picked.items():
+        if v is not None and v not in _VKM_FILTERS[k]:
+            return _deny(422, "bad_filter", "Geçersiz filtre.")
+    return VKMS.list_issues(status=status, severity=severity, issue_type=type, source=source, presence=presence,
+                            expected=_vkm_expected())
+
+
+@app.get("/api/vkm/issues/{issue_id}")
+def vkm_issue(issue_id: str):
+    """Owner: one issue with its explanation, recommended action, affected analyses and full history (incl. notes)."""
+    bad = _vkm_id_or_404(issue_id)
+    if bad is not None:
+        return bad
+    try:
+        return VKMS.issue_detail(issue_id, _vkm_expected())
+    except VKMS.VKMError as e:
+        return _vkm_error(e)
+
+
+@app.post("/api/vkm/issues/{issue_id}/review")
+def vkm_review(issue_id: str, body: S.VkmReviewRequest, request: Request):
+    """Owner decision: incelendi / kabul_edildi / back to acik (+ optional note). Refused against an older
+    observation (409 stale_generation). Records a human decision only; never certifies a metric."""
+    bad = _vkm_id_or_404(issue_id)
+    if bad is not None:
+        return bad
+    try:
+        with RP.PUBLISH_LOCK:
+            return VKMS.review(issue_id, body.action, vkm_generation_presented=body.vkm_generation,
+                               actor=_vkm_actor(request), expected=_vkm_expected, note=body.note)
+    except VKMS.VKMError as e:
+        return _vkm_error(e)
+
+
+@app.post("/api/vkm/issues/{issue_id}/notes")
+def vkm_note(issue_id: str, body: S.VkmNoteRequest, request: Request):
+    """Owner note (append-only history; ≤ 500 characters; never logged, never sent to an AI provider)."""
+    bad = _vkm_id_or_404(issue_id)
+    if bad is not None:
+        return bad
+    try:
+        with RP.PUBLISH_LOCK:
+            return VKMS.add_note(issue_id, body.note, vkm_generation_presented=body.vkm_generation,
+                                 actor=_vkm_actor(request), expected=_vkm_expected)
+    except VKMS.VKMError as e:
+        return _vkm_error(e)
+
+
+@app.post("/api/vkm/sync")
+def vkm_sync():
+    """Owner recovery after a failed observation: re-observe the SERVED generation (idempotent; nothing is written if
+    the store already holds it; refused if no generation is served or another one was published meanwhile). Reads only
+    the published manifest; never touches source files, evidence, the gate or the dashboard."""
+    store = app.state.generations
+    try:
+        with RP.PUBLISH_LOCK:                        # same lock order as publication; no install during the resync
+            m, paths = _vkm_served()
+            res = VKMS.resync(m, paths, store.current)
+    except VKMS.VKMError as e:
+        return _vkm_error(e)
+    except Exception as e:                       # the store itself is failing: report, never echo internals
+        log.warning("veri kontrol yeniden eşitlenemedi (%s)", type(e).__name__)
+        return _deny(503, "vkm_unavailable", "Denetim kaydı şu anda yazılamıyor; daha sonra tekrar deneyin.")
+    return {"changed": res.get("changed", []), "sync": VKMS.sync_state(_vkm_expected()),
+            "vkm_generation": VKMS.vkm_generation()}
 
 
 # ---------------- draft message (copy-only; nothing is ever sent) ----------------

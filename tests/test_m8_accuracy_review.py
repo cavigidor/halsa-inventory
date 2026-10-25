@@ -374,19 +374,31 @@ def _walk(obj, path=""):
             yield from _walk(v, f"{path}[{i}]")
 
 
-def _permitted_gets(code, cid):
+def _permitted_gets(code, cid, issue_id):
     out = []
     for (method, path), (kind, _) in ACC.ROUTES.items():
         if method != "GET" or kind == "metric" or path in ("/", "/docs", "/redoc", "/openapi.json",
                                                           "/docs/oauth2-redirect", "/giris"):   # HTML, no data
             continue
-        out.append(path.replace("{customer_code}", code).replace("{campaign_id}", str(cid)))
+        out.append(path.replace("{customer_code}", code).replace("{campaign_id}", str(cid))
+                   .replace("{issue_id}", issue_id))
     return out
 
 
-def test_permitted_endpoints_expose_no_unverified_values_and_no_ai(client):
+def _seed_vkm(world):
+    """M8-VKM-1: observe the synthetic generation so the Veri Kontrol Merkezi routes return real issues."""
+    from services import generation as GEN
+    from services import vkm_store as VKMS
+    paths, decl, origin = GEN.select_core(world["data"])
+    frozen = GEN.freeze({k: p for k, p in paths.items() if p})
+    m = GEN.build_manifest(frozen, GEN.frames_from_frozen(frozen), decl, origin)
+    VKMS.observe(VKMS.core_observations(m, {}, ()))
+    return VKMS.list_issues(status="all")["issues"][0]["issue_id"]
+
+
+def test_permitted_endpoints_expose_no_unverified_values_and_no_ai(client, world):
     code, cid = _seed_operational(client)
-    paths = _permitted_gets(code, cid) + ["/api/customer360/search?q=" + FX.P[1][:7],
+    paths = _permitted_gets(code, cid, _seed_vkm(world)) + ["/api/customer360/search?q=" + FX.P[1][:7],
                                           "/api/crm/followups?mode=all"]
     seen = {}
     for p in paths:
