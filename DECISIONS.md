@@ -1161,3 +1161,34 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   states, all VKM tables and CRM / fair / action tables are unchanged, and a restart serves the same generation; a
   clean publication afterwards commits and is observed.
 - **Still open before hosting (not part of this fix):** single-process serving (CP2) and upload retention / cleanup (CP5).
+
+### D-067 · 2026-10-25 · M8-CP3 review fix: the final freshness check is atomic with the commit
+- **Context:** the D-066 re-review of PR #32 at `f1d4e25` confirmed the rollback fixes and found one remaining merge
+  blocker. A core-changing upload compared the preview's base (served `core_id` + selection-file hash) with the live
+  state only before the long copy / owner import / build; `refresh._pipeline` then took `PUBLISH_LOCK` for the swap
+  without comparing again. An independent publication B (e.g. the owner changes `sources.json` and runs the controlled
+  refresh) finishing in that window would be overwritten by the older preview A. The identical-upload path likewise
+  reported "Değişiklik yoktu" without rechecking what was served when the job ran.
+- **Decision:**
+  - `refresh.PublishHooks.precheck()`: runs FIRST under `PUBLISH_LOCK`, before `before_swap`, before any selection
+    file, configuration, dashboard or manifest byte changes. A refusal ends the run as step `stale` with nothing
+    changed (`previous_data_kept`); `had_live` / `had_manifest` are now observed under the lock, so a refusal or a
+    restore can never touch another publisher's files.
+  - The Upload Center's precheck compares the preview's base with the live base (same `_base()` as the earlier
+    checks). A refused job ends with code `stale`, batch status `stale` and the existing stale message ("Hiçbir şey
+    yayınlanmadı; dosyaları yeniden doğrulayın"), recorded as `publication_failed` (code `stale`) in the append-only
+    history. The owner-only path uses the same check under the same lock.
+  - The identical-upload path rechecks the base under `PUBLISH_LOCK` before reporting "unchanged"; if the served
+    version changed it is refused as stale.
+  - Cleanup of a failed attempt never removes a data-folder file that a live selection file names.
+  - Lock order unchanged (`PUBLISH_LOCK → vkm_store._LOCK → GenerationStore._lock`); no new lock edge. D-066 rollback
+    unchanged; single-process scope unchanged.
+- **Unchanged:** `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; upload permissions; CRM / fair / action /
+  VKM review history.
+- **Tests:** `tests/test_m8_cp3_stale_race.py` (8, event-gated, no timing): core-only and mixed core + owner batches
+  overtaken by an independent controlled refresh B before the refresh lock and by a selection change inside it are
+  refused, and B's dashboard / manifest / selection / data bytes, context, generation, owner views, finance states, all
+  VKM tables and CRM / fair / action tables stay exactly as B published them, also across a restart; an identical
+  upload overtaken by B is stale, not "unchanged"; a fresh preview afterwards publishes; the hook runs under the lock
+  and a refusal changes nothing. Six of these fail on `f1d4e25` (the obsolete preview publishes over B / reports
+  "unchanged").

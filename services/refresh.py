@@ -55,7 +55,7 @@ AGING_REQUIRED = ["Hesap kodu", "Hesap adı", "Temsilci kodu"]
 _MONTHS = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
 
 STEP_TR = {"busy": "kilit", "validate": "doğrulama", "build": "oluşturma", "verify": "kontrol",
-           "swap": "değiştirme", "done": "tamam", "staged": "önizleme"}
+           "swap": "değiştirme", "done": "tamam", "staged": "önizleme", "stale": "güncellik"}
 PREVIOUS_KEPT = "Önceki veriler kullanılmaya devam ediyor."
 
 
@@ -371,6 +371,10 @@ class PublishHooks:
       uploader's declarations of the batch being published or previewed). Nothing is discovered or inferred.
     - ``expect_core_id``: the core generation identity that was previewed. The freshly built candidate must have exactly
       this identity, otherwise the publication stops before anything live changes (a stale preview is never published).
+    - ``precheck()``: runs FIRST under ``PUBLISH_LOCK``, before ``before_swap`` and before anything live is touched.
+      It returns a refusal message (the live state is no longer the one the batch was previewed against: another
+      publication happened during the long validate / build) or None. A refusal ends the run as step ``stale`` with
+      nothing changed — the newer published version stays exactly as it is.
     - ``before_swap()``: runs under ``PUBLISH_LOCK`` right before the dashboard / manifest swap; returns an undo callable
       that is run if the swap or the install fails (the Upload Center writes the selection files here).
     - ``after_install()``: runs under ``PUBLISH_LOCK`` right after the context and generation were installed (the
@@ -386,6 +390,7 @@ class PublishHooks:
     """
     selection: tuple | None = None
     expect_core_id: str | None = None
+    precheck: object = None
     before_swap: object = None
     after_install: object = None
     on_commit: object = None
@@ -511,10 +516,20 @@ def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, 
         #    PUBLISH_LOCK — a request captures its gate inputs under the same lock). On any failure the previous
         #    dashboard, manifest and context are restored inside the same step. Another process (a restart) can see
         #    the two files mid-swap; restore then refuses the pair (dashboard / manifest generation mismatch).
-        had_live = os.path.exists(p["live"])
-        had_manifest = os.path.exists(p["manifest"])
         _progress(hooks, "publish_core")
         with RP.PUBLISH_LOCK:
+            # M8-CP3: the final, atomic freshness check of an Upload Center batch (same lock as every publisher)
+            if hooks is not None and hooks.precheck is not None:
+                try:
+                    refusal = hooks.precheck()
+                except Exception as e:
+                    log.exception("refresh: pre-publication check failed")
+                    raise StepError("verify", f"Yayın öncesi denetim tamamlanamadı ({type(e).__name__}); hiçbir şey "
+                                              "değişmedi.") from None
+                if refusal:
+                    raise StepError("stale", str(refusal))
+            had_live = os.path.exists(p["live"])           # observed under the lock: never another publisher's state
+            had_manifest = os.path.exists(p["manifest"])
             undo = None
             try:
                 if hooks is not None and hooks.before_swap is not None:

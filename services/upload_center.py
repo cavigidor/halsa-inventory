@@ -884,6 +884,13 @@ class UploadCenter:
             preview = json.loads(r["preview"] or "{}")
             candidate = json.loads(r["candidate"] or "{}")
             if preview.get("noop"):
+                # "nothing to publish" is only true for the version the preview was built against: checked again,
+                # atomically, against what is served NOW (another publication may have happened since the request)
+                with RP.PUBLISH_LOCK:
+                    fresh = self._base() == json.loads(r["base"] or "{}")
+                if not fresh:
+                    self._failed_publish(batch_id, job_id, actor, "stale", MSG["stale"])
+                    return
                 self._done_publish(batch_id, job_id, actor, "unchanged", "unchanged")
                 return
             result = self._publish(r, candidate, job_id)
@@ -932,12 +939,16 @@ class UploadCenter:
             ok = bool(result.get("ok"))
             return result
         finally:
-            if not ok:
-                for path in copied:
-                    try:
-                        os.remove(path)
-                    except OSError:
-                        pass
+            if not ok and copied:
+                with RP.PUBLISH_LOCK:                        # never remove a file a (newer) live selection names
+                    live = self._selection_bytes(GEN.SELECTION_FILE) + self._selection_bytes(GEN.OWNER_SELECTION_FILE)
+                    for path in copied:
+                        if os.path.basename(path).encode() in live:
+                            continue
+                        try:
+                            os.remove(path)
+                        except OSError:
+                            pass
 
     def _publish_set(self, r, candidate: Mapping[str, Any], job_id: str, copied: list) -> dict:
         from services import refresh as RF
@@ -1007,6 +1018,13 @@ class UploadCenter:
         gens = self.deps.generations()
         repo = self.deps.context_repo()
         txn: dict = {}
+        base = json.loads(r["base"] or "{}")
+
+        def precheck():
+            """Under PUBLISH_LOCK, before ANY selection file, configuration or dashboard byte changes: the served core
+            generation and both selection files must still be exactly what the preview was built against. The
+            earlier checks run before the (long) copy / import / build; another publication may have happened since."""
+            return None if self._base() == base else MSG["stale"]
 
         def rollback():
             for path, before in reversed(txn.get("files", [])):
@@ -1075,10 +1093,13 @@ class UploadCenter:
                                      install=self.deps.install, inflation_rate=self.deps.inflation_rate,
                                      hooks=RF.PublishHooks(selection=(paths, decls, "explicit"),
                                                            expect_core_id=candidate.get("core_id"),
+                                                           precheck=precheck,
                                                            before_swap=begin, after_install=install_owner,
                                                            on_commit=commit,
                                                            progress=lambda s: self._stage(job_id, s)))
                 if not rep.get("ok"):
+                    if rep.get("step") == "stale":               # a newer publication won: it stays as it is
+                        return {"ok": False, "code": "stale", "message": MSG["stale"]}
                     busy = rep.get("step") == "busy"
                     if busy:
                         return {"ok": False, "code": "busy", "retry": True,
@@ -1089,7 +1110,7 @@ class UploadCenter:
                             "message": f"{rep.get('message') or MSG['internal']} {kept}"}
                 return {"ok": True}
             with RP.PUBLISH_LOCK:                                    # owner workbooks only: one step for every reader
-                if self._base() != json.loads(r["base"] or "{}"):
+                if precheck():
                     return {"ok": False, "code": "stale", "message": MSG["stale"]}
                 try:
                     begin()                                          # rolls back its own partial work on failure

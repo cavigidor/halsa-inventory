@@ -104,12 +104,18 @@ never workbook values, names or amounts.
 
 1. **Refusals before anything changes:** not the newest batch (a newer upload supersedes older previews), not ready,
    wrong token, or **stale** — the served core generation or either selection file changed since the preview
-   (`base`); an identical set (same bytes + declarations as served) publishes nothing ("Değişiklik yoktu").
+   (`base`); an identical set (same bytes + declarations as served) publishes nothing ("Değişiklik yoktu") — but only
+   after the base was compared once more under `PUBLISH_LOCK` when the job runs; if another publication happened in
+   the meantime the batch is refused as stale instead (D-067).
 2. The exact previewed bytes are copied into the data folder under the same content-addressed names (fingerprints
    verified). Owner workbooks are imported from those copies and must reproduce the previewed record fingerprints.
 3. **Core in the batch:** `run_refresh` with `PublishHooks(selection=…, expect_core_id=<previewed core_id>,
    before_swap=…, after_install=…, on_commit=…)`. The candidate must have exactly the previewed identity (else refused
    before any swap). Under `PUBLISH_LOCK`, **all-or-nothing (D-066)**:
+   - `precheck` (D-067) runs first: the served core generation and both selection files must still be exactly the
+     preview's base. The earlier checks ran before the (long) copy / owner import / build, during which an
+     independent publication (e.g. a controlled refresh after the owner changed `sources.json`) may have happened. A
+     refusal ends the job as `stale` before anything live is touched; the newer version stays exactly as published.
    - `before_swap` snapshots the live context, generation state, owner repository state and the bytes (or absence) of
      both selection files, holds the publishing thread's generation notifications, writes `sources.json` and
      `owner_sources.json` (atomic each) and stages the owner configs. A failure in any of these restores what was
@@ -121,7 +127,7 @@ never workbook values, names or amounts.
    - `on_commit` delivers the held notifications only after every step succeeded; on any rollback they are dropped,
      so a failed publication writes no Veri Kontrol observation or history. Copies the failed attempt placed in the
      data folder are removed.
-4. **Owner workbooks only:** under `PUBLISH_LOCK`, the same `before_swap` / install / commit steps without a dashboard
+4. **Owner workbooks only:** under `PUBLISH_LOCK`, the same precheck, then the same `before_swap` / install / commit steps without a dashboard
    swap; a failure in writing, staging or installing (including a partial installation) restores both selection
    files, the owner configuration, the owner views and the generation state.
 5. VKM observes the accepted generation through the existing observers (no special path). CRM notes, follow-ups, fair
