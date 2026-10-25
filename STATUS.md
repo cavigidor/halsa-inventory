@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-24 (M8-VKM-1 review corrections D-063 pushed to PR #31; awaiting independent re-review; NOT merged, NOT deployed. Local suite **1667 passed / 7 skipped / 2 xfailed** with JS/browser tests required. Core owner-local reconciliation still FAIL, Kredi NOT RUN, no metrics VERIFIED, `GENERATION_BOUND_API_EVIDENCE` False)._
+_Updated 2026-10-24 (M8-VKM-1 re-review corrections D-064 pushed to PR #31; awaiting independent re-review; NOT merged, NOT deployed. Local suite **1676 passed / 7 skipped / 2 xfailed** with JS/browser tests required. Core owner-local reconciliation still FAIL, Kredi NOT RUN, no metrics VERIFIED, `GENERATION_BOUND_API_EVIDENCE` False)._
 
 ## Git
 - **`claude/m8-vkm-1-veri-kontrol-merkezi`:** M8-VKM-1 (D-062), PR #31 open for independent review; not merged, not deployed.
@@ -37,6 +37,15 @@ _Updated 2026-10-24 (M8-VKM-1 review corrections D-063 pushed to PR #31; awaitin
      to every audience, decisions refused (409), owner-only idempotent `POST /api/vkm/sync`; publication independent.
   Tests: +15 `tests/test_m8_vkm_integrity.py` (with negative controls replaying the old behaviour), +1 browser
   scenario; suite **1667 passed / 7 skipped / 2 xfailed**.
+- **Re-review corrections (2026-10-24, D-064, after the re-review of `847c055`):**
+  - *Footer scopes per column and per check:* a column's footer issues clear only when that column was reconciled
+    again and every cell matched; empty / other-column / non-comparable footers leave them `not_checked`.
+  - *Race-free decisions:* review, note and resync take `PUBLISH_LOCK`, then the issue-store lock, and read the live
+    served generation under it (order `PUBLISH_LOCK → vkm _LOCK → GenerationStore._lock`); the publication observer
+    waits ≤ 2 s for the lock and SQLite, then abandons (shown as out of sync).
+  Tests: +9 `tests/test_m8_vkm_review2.py` (negative controls for the old footer rule and the pre-lock expectation,
+  barrier-controlled A→B race, in-flight publication, busy store, no deadlock); suite **1676 passed / 7 skipped /
+  2 xfailed**.
 - **Open questions for review:** DQ-1, DQ-2 and the 120/320 split are not detectable from the current pipeline; owner
   workbooks have no mapping-approval path (not flagged); on real data every core export will show "Kaynak eşlemesi
   onaylanmadı", "Rapor tarihi beyan edilmedi" and "Dosya açıkça seçilmedi" until `data/sources.json` declarations
