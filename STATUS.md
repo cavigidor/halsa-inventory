@@ -1,19 +1,18 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-25 (Step 1 real-Excel compatibility acceptance on the owner's Mac ACCEPTED by the owner; **M8-CP3 Excel Upload Center** implemented on `claude/m8-cp3-upload-center` (D-065; review fixes D-066 all-or-nothing publication and D-067 atomic final freshness check), PR #32 awaiting independent re-review — NOT merged, NOT deployed. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False)._
+_Updated 2026-10-25 (Step 1 real-Excel compatibility acceptance on the owner's Mac ACCEPTED; **M8-CP3 Excel Upload Center** (D-065–D-067) independently reviewed and squash-merged from PR #32 to `main` as `e2b0e74` (reviewed head `5b78a25`, CI `40216919121`: 1783 passed / 7 skipped / 2 xfailed). **Current:** private real-file upload and publish acceptance through `/yukleme` on isolated Mac copy. NOT deployed. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False)._
 
 ## Git
-- **`claude/m8-cp3-upload-center`:** M8-CP3 Excel Upload Center (D-065) from `main` @ `4a5817b`; PR #32 reviewed at
-  `40fdef1` (fixed by D-066) and `f1d4e25` (D-066 confirmed; stale-preview blocker fixed by D-067), awaiting
-  independent re-review. NOT merged, NOT deployed.
+- **`claude/m8-cp3-upload-center`:** M8-CP3 (D-065–D-067), PR #32 independently reviewed at `5b78a25` and squash-merged into `main` as `e2b0e74` (2026-10-25); GitHub Actions `40216919121` PASS. NOT deployed or privately accepted through the upload UI.
 - **`claude/m8-vkm-1-veri-kontrol-merkezi`:** M8-VKM-1 (D-062–D-064), PR #31 independently reviewed and squash-merged into `main` as `422f3a4` (reviewed head `b2b4639`); NOT deployed or validated against real data.
 - **`claude/m8-cp1-simplified-access`:** PR #30 reviewed at `318491d` and squash-merged to `main` (`a03efbf`, 2026-10-22). Three access levels are implemented and locally tested; **not deployed**.
-- **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), M8 source-evidence PR #28 (`5baa92a`), M8 precise validation PR #29 (`4ad8d8a`), M8-CP1 access PR #30 (`a03efbf`) and M8-VKM-1 PR #31 (`422f3a4`) merged.
+- **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), M8 source-evidence PR #28 (`5baa92a`), M8 precise validation PR #29 (`4ad8d8a`), M8-CP1 access PR #30 (`a03efbf`) M8-VKM-1 PR #31 (`422f3a4`) and M8-CP3 PR #32 (`e2b0e74`) merged.
 - **`claude/m8-accuracy-2-shared-evidence`:** PR #28 merged as technical infrastructure 2026-10-20; all production metrics still withheld and `GENERATION_BOUND_API_EVIDENCE` remains False.
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
 - **Owner's Mac folder:** current checkout state was not inspected in this checkpoint. Previous notes reported an older checkout; verify `git status` before pulling, protect private `.env`, data and SQLite, and follow `docs/owner_launch_checklist.md`. Browser/real-data acceptance remains owner-local.
 
-## M8-CP3 — Excel Upload Center "Dosya Yükleme" (D-065; PR open; NOT deployed)
+## M8-CP3 — Excel Upload Center "Dosya Yükleme" (D-065–D-067; PR #32 MERGED; NOT deployed)
+- **Independent final review and merge:** PR #32 at head `5b78a25` passed GitHub Actions `40216919121` (**1783 passed / 7 skipped / 2 xfailed**, browser/JS required, AI disabled). Both D-066 rollback defects and D-067 under-lock stale-preview protections independently verified; squash-merged `e2b0e74`. Code acceptance only. **Next CURRENT:** private real-export test through `/yukleme`, including preview, publish, restart, rejection/rollback and CRM/fair/VKM preservation. No business metric VERIFIED or hosting sign-off.
 - **Flow (owner only):** select Excel files → declare report type and details → background validation job (Turkish
   progress, polling) → preview → explicit **Değişiklikleri Yayınla** → dashboard updates. Dashboard tab (hidden unless
   the session is the owner) and fixed page `/yukleme` (works before any dashboard exists). **No DinamikCRM connection.**
