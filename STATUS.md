@@ -1,16 +1,17 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-24 (M8-VKM-1 re-review corrections D-064 pushed to PR #31; awaiting independent re-review; NOT merged, NOT deployed. Local suite **1676 passed / 7 skipped / 2 xfailed** with JS/browser tests required. Core owner-local reconciliation still FAIL, Kredi NOT RUN, no metrics VERIFIED, `GENERATION_BOUND_API_EVIDENCE` False)._
+_Updated 2026-10-24 (M8-VKM-1 PR #31 independently reviewed at `b2b4639` and squash-merged `422f3a4` to `main`; GitHub Actions `40146502629` confirmed **1676 passed / 7 skipped / 2 xfailed** with JS/browser tests required. NOT deployed. Current: owner-local Mac acceptance against private DinamikCRM exports. Core owner-local reconciliation still FAIL, Kredi NOT RUN, no metrics VERIFIED, `GENERATION_BOUND_API_EVIDENCE` False)._
 
 ## Git
-- **`claude/m8-vkm-1-veri-kontrol-merkezi`:** M8-VKM-1 (D-062), PR #31 open for independent review; not merged, not deployed.
+- **`claude/m8-vkm-1-veri-kontrol-merkezi`:** M8-VKM-1 (D-062–D-064), PR #31 independently reviewed and squash-merged into `main` as `422f3a4` (reviewed head `b2b4639`); NOT deployed or validated against real data.
 - **`claude/m8-cp1-simplified-access`:** PR #30 reviewed at `318491d` and squash-merged to `main` (`a03efbf`, 2026-10-22). Three access levels are implemented and locally tested; **not deployed**.
-- **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), M8 source-evidence PR #28 (`5baa92a`), M8 precise validation PR #29 (`4ad8d8a`) and M8-CP1 access PR #30 (`a03efbf`) merged.
+- **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), M8 source-evidence PR #28 (`5baa92a`), M8 precise validation PR #29 (`4ad8d8a`) M8-CP1 access PR #30 (`a03efbf`) and M8-VKM-1 PR #31 (`422f3a4`) merged.
 - **`claude/m8-accuracy-2-shared-evidence`:** PR #28 merged as technical infrastructure 2026-10-20; all production metrics still withheld and `GENERATION_BOUND_API_EVIDENCE` remains False.
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
 - **Owner's Mac folder:** current checkout state was not inspected in this checkpoint. Previous notes reported an older checkout; verify `git status` before pulling, protect private `.env`, data and SQLite, and follow `docs/owner_launch_checklist.md`. Browser/real-data acceptance remains owner-local.
 
-## M8-VKM-1 — Veri Kontrol Merkezi (PR #31 open; awaiting independent review; NOT merged, NOT deployed)
+## M8-VKM-1 — Veri Kontrol Merkezi (PR #31 MERGED; NOT deployed; real-data acceptance OPEN)
+- **Independent final review and merge (2026-10-24):** All prior D-063/D-064 issues verified fixed, GitHub Actions `40146502629` confirmed **1676 passed / 7 skipped / 2 xfailed** including JS and browser tests. PR #31 squash-merged at `422f3a4`. This is technical code acceptance only; no source/date approval, business conclusions, metric promotion or public hosting.
 - **Built (D-062):** `services/vkm.py` (pure deterministic detection from each accepted generation's validation
   counts, `SourceEvidence` and join report; fixed Turkish title / explanation / action per check; stable IDs
   `VKM-` + SHA-256(type | source | schema locator), no values), `services/vkm_store.py` (private SQLite: `dq_issue`
@@ -50,7 +51,7 @@ _Updated 2026-10-24 (M8-VKM-1 re-review corrections D-064 pushed to PR #31; awai
   workbooks have no mapping-approval path (not flagged); on real data every core export will show "Kaynak eşlemesi
   onaylanmadı", "Rapor tarihi beyan edilmedi" and "Dosya açıkça seçilmedi" until `data/sources.json` declarations
   exist — intended, but the owner should expect it.
-- **Next:** independent review of PR #31; then owner-local run on the real exports (counts only leave the Mac).
+- **Next CURRENT:** owner-local Mac acceptance on private real exports: confirm checkout/backup of `.env`, reports and SQLite; run VKM observation and review sync, check expected issue classes and DQ exceptions, validate Turkish desktop/phone views with no sensitive screenshots posted publicly. Keep counts/issue types only off Mac. Source authority, declared periods, Kredi workbook, DQ-1 / DQ-2, 120/320 and business-metric reconciliation remain open.
 
 ## M8-ACCURACY-2A / 2B — real-data diagnosis and precise validation (2B merged; acceptance still OPEN)
 - **2A (owner's Mac, 2026-10-20/21, read-only, AI disabled; counts only left the Mac):**
@@ -81,7 +82,7 @@ _Updated 2026-10-24 (M8-VKM-1 re-review corrections D-064 pushed to PR #31; awai
 
 ## M8-CP1 — web access: public viewer, financial viewer, owner (PR #30 MERGED; NOT deployed)
 - **Independent review and merge (2026-10-22):** Full route register and financial read-only API inspected. `FinanceOverview` uses a strict allow-list response schema, the existing accuracy gate and separates Kredi/Gider-Gelir/Bütçe from owner diagnostics; finance sessions never grant owner writes or reads. GitHub Actions run `39808020049` confirms **1554 passed, 7 skipped, 2 xfailed**, JS/browser tests required. Squash merge `a03efbf`. Public CRM/fair/customer notes approved by owner; financial viewer requires shared password; owner editing uses separate password. No deployment or real-data financial approval. Anonymous queue reads can materialize deterministic system rows (not human decisions); document/bound ahead of hosting. Open hosting decisions: network gate and KVKK region.
-- **Next:** M8-VKM-1 owner-only mutations / privacy-safe data review; current historical issue/design source `docs/m8_veri_kontrol_merkezi.md`. Future CP2–CP8 are still required before a publicly reachable dashboard.
+- **Next:** M8-VKM-1 is merged but owner-local real-data acceptance remains open; future CP2–CP8 upload, publication, backups and hosting are still required before public hosting.
 - **Revision D-061 (owner-approved, same day, pushed to PR #30):** three levels. Public viewer (no password; customer
   names, CRM / follow-up / fair notes approved). **Financial viewer** — `HALSA_FINANCE_PASSWORD_HASH`, role-bound
   sessions (separate credential id, cap 10, per-role throttling, revocation by logout / owner "end financial
