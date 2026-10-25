@@ -483,6 +483,19 @@ ROUTES: dict[tuple[str, str], tuple[str, str | tuple[str, ...] | None]] = {
     ("POST", "/api/vkm/issues/{issue_id}/review"): ("operational", None),
     ("POST", "/api/vkm/issues/{issue_id}/notes"): ("operational", None),
     ("POST", "/api/vkm/sync"): ("operational", None),
+    # M8-CP3 (D-065): the owner-only Excel Upload Center. File receipt, validation jobs and the preview carry schema
+    # labels, codes, counts and the gate's own decisions — never a business number; publication runs the same
+    # generation-bound refresh, so every metric stays withheld exactly as before.
+    ("GET", "/yukleme"): ("system", None),
+    ("GET", "/api/uploads"): ("system", None),
+    ("POST", "/api/uploads"): ("operational", None),
+    ("GET", "/api/uploads/jobs/{job_id}"): ("system", None),
+    ("GET", "/api/uploads/{batch_id}"): ("system", None),
+    ("POST", "/api/uploads/{batch_id}/files"): ("operational", None),
+    ("POST", "/api/uploads/{batch_id}/files/{file_id}/remove"): ("operational", None),
+    ("POST", "/api/uploads/{batch_id}/validate"): ("operational", None),
+    ("POST", "/api/uploads/{batch_id}/publish"): ("operational", None),
+    ("POST", "/api/uploads/{batch_id}/discard"): ("operational", None),
 }
 
 

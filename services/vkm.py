@@ -340,8 +340,10 @@ CHECKS: dict[str, Check] = {
         "anlamına gelmez; o sorunlar 'kaynak dosya yüklenmedi' olarak işaretlenir ve açık kalır.",
         "{hint}"),
 }
-MISSING_HINT_CORE = "Dosyayı veri klasörüne koyup data/sources.json ile seçin ve verileri yenileyin."
-MISSING_HINT_OWNER = ("Dosya yolunu sunucu ayarında ({env}) açıkça belirtin; ardından Yönetim sekmesinden sahip "
+MISSING_HINT_CORE = ("Raporu 'Dosya Yükleme' sekmesinden yükleyip doğrulayın ve yayınlayın (sunucuda: veri klasörüne "
+                     "koyup data/sources.json ile seçin ve verileri yenileyin).")
+MISSING_HINT_OWNER = ("Dosyayı 'Dosya Yükleme' sekmesinden yükleyip yayınlayın ya da dosya yolunu sunucu ayarında ({env}) "
+                      "açıkça belirtin; ardından Yönetim sekmesinden sahip "
                       "verilerini yeniden okuyun.")
 MISSING_HINT_LISTE = "Satış dosyasında 'liste' sayfasının (KODU sütunuyla) bulunduğunu kontrol edin."
 

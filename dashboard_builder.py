@@ -242,7 +242,7 @@ def m_collections(path,df=None):
     return rows, owed_map
 
 # ---------- oluştur ----------
-def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True,own_panel=True,gate=None,manifest=None,vkm_panel=True):
+def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True,own_panel=True,gate=None,manifest=None,vkm_panel=True,up_panel=True):
     """sources/frames (M5-5): a frozen source selection and the already-read raw frames, so a controlled
     refresh builds from exactly what it validated. stats_out (dict): filled with build totals for verification.
     gate (M8-ACCURACY): the factual-integrity gate; default = the production gate (services/accuracy.py). Every
@@ -355,7 +355,7 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
           'total_shown':_dec('stock.product_counts').displayable,
           # M8-ACCURACY-2: every metric whose output this HTML embeds; GET / re-authorizes exactly these keys
           'displayed':sorted(k for k,d in decisions.items() if d.displayable)}
-    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel,opp_panel=opp_panel,fair_panel=fair_panel,crm_panel=crm_panel,own_panel=own_panel,vkm_panel=vkm_panel))
+    with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel,opp_panel=opp_panel,fair_panel=fair_panel,crm_panel=crm_panel,own_panel=own_panel,vkm_panel=vkm_panel,up_panel=up_panel))
     if stats_out is not None:
         # Internal build totals for the refresh's context ↔ dashboard reconciliation (never displayed as such).
         stats_out.update({'asof':meta['asof'],'overdue_total':overdue_total,'overstock_value':over_val,
@@ -2874,7 +2874,7 @@ def _own_panel(meta):
     return btn,block
 
 
-def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True,own_panel=True,vkm_panel=True):
+def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True,own_panel=True,vkm_panel=True,up_panel=True):
     blob=json.dumps(modules,ensure_ascii=False).replace('</','<\\/')
     tabs=['overview']+list(modules.keys())
     tabbtns=''.join(f'<button class="tab" data-t="{t}">{("Genel Bakış" if t=="overview" else modules[t]["title"])}'
@@ -2900,6 +2900,8 @@ def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,o
     cr_btn,cr_block=_crm_panel(meta) if crm_panel else ('','')
     ow_btn,ow_block=_own_panel(meta) if own_panel else ('','')
     vk_btn,vk_block=_vkm_panel(meta) if vkm_panel else ('','')   # M8-VKM-1: after the analysis tabs it explains
+    from services import upload_ui as _UPUI
+    up_btn,up_block=_UPUI.panel() if up_panel else ('','')        # M8-CP3: owner-only Dosya Yükleme (hidden for viewers)
     return f"""<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><meta name="stockagent-accuracy" content="{acc}"><meta name="stockagent-generation" content="{gen}"><meta name="stockagent-displayed" content="{shown}"><title>Şirket Panosu — {meta['date']}</title>
 <style>
@@ -2969,7 +2971,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <div class="acc-bar" id="halsa-access" hidden></div></header>
 <div class="acc-msg" id="halsa-access-msg" role="alert" hidden></div>
 <script>{_ACCESS_JS}</script>
-<div class="tabs">{tabbtns}{vk_btn}{sq_btn}{c3_btn}{op_btn}{fm_btn}{cr_btn}{ow_btn}{ai_btn}</div>
+<div class="tabs">{tabbtns}{up_btn}{vk_btn}{sq_btn}{c3_btn}{op_btn}{fm_btn}{cr_btn}{ow_btn}{ai_btn}</div>
 <div id="overview" class="panel on">
 <h2 class="sec">Aktif Analizler</h2>
 <p class="note">Bu panoda yalnızca kaynağı, tarihi, tanımı ve hesabı doğrulanmış sonuçlar gösterilir. Doğrulanmamış bir analizin yerinde rakam değil, neyin eksik olduğunu söyleyen kısa bir not görürsünüz. Rakamlar yapay zekâ tarafından üretilmez.</p>
@@ -2979,7 +2981,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <p class="note">İleride eklenebilecek analizler. Her biri ancak kaynağı sağlanıp doğrulandıktan sonra gösterilir.</p>
 <ul class="later">{laterlist}</ul>
 </div>
-<div id="panels"></div>{vk_block}{sq_block}{c3_block}{op_block}{fm_block}{cr_block}{ow_block}{ai_block}
+<div id="panels"></div>{up_block}{vk_block}{sq_block}{c3_block}{op_block}{fm_block}{cr_block}{ow_block}{ai_block}
 <script>
 const DATA={blob};
 const fmtMoney=v=>'₺'+Math.round(v).toLocaleString('tr-TR');

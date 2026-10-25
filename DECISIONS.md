@@ -1101,3 +1101,94 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   negative control computing the expectation before the lock; an HTTP decision that waits for an in-flight
   publication and is then refused as stale; a busy issue store not blocking publication; interleaved publications and
   decisions without deadlock.
+
+### D-065 · 2026-10-25 · M8-CP3 Excel Upload Center: owner-only upload, declared report details, background validation, explicit generation-bound publication
+- **Context:** Step 1 (real Excel compatibility on the owner's Mac) was accepted 2026-10-25: the private Stock, Sales and
+  Cari exports load without manual changes; supported owner workbooks were tested; 0 of 33 metrics VERIFIED. The owner
+  requires the website to take the monthly Excel exports (exported by the father from DinamikCRM) with **no direct
+  DinamikCRM integration** of any kind.
+- **Decision:**
+  - Owner-only tab **Dosya Yükleme** and fixed page `/yukleme`: select files → declare report type and details →
+    background validation job (status polling) → preview → explicit **Değişiklikleri Yayınla**.
+  - The report type is chosen by the owner per file, never from the file name; dates / years are declared or unknown,
+    never inferred. Uploaded workbooks are stored privately under content-addressed names, so no reader can infer
+    anything from a name; the importer framework's file-name pattern check is skipped only for owner-typed uploads
+    (`explicit_source_type()`, recorded as INFO). Gider/Gelir and Bütçe need their year declared to be read.
+  - Upload safety: size limit while streaming, .xlsx container check, ZIP bomb / part-name / encryption / DTD rules.
+  - Validation reuses the controlled refresh in stage-only mode (`PublishHooks`), the M6 owner loaders without
+    publication and a read-only VKM delta; the preview changes nothing live.
+  - Publication reuses the generation-bound refresh with the batch as explicit selection and the previewed `core_id`
+    as the required identity; selection files (`data/sources.json`, new `data/owner_sources.json`) are written inside
+    the swap step and restored on failure; uploaded owner workbooks are installed in the same publish-lock step.
+    Only the newest batch is publishable; a preview is stale once the served core generation or a selection file
+    changed; an identical set publishes nothing.
+  - Core reports missing from a batch are carried over only from an explicit live selection.
+  - Hedef / Trodat are not offered (not in the generation manifest).
+- **Unchanged:** `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; no approval, mapping, source authority,
+  business definition, reporting date or Kredi `DURUM` meaning inferred; CRM / fair / action / VKM history untouched;
+  access model (owner_read / owner_write with session + CSRF + Origin; viewers and financial viewers refused).
+- **Docs / tests:** `docs/m8_cp3_upload_center.md`; `tests/test_m8_cp3_upload_files.py`,
+  `tests/test_m8_cp3_upload_center.py`, `tests/test_m8_cp3_browser.py` (real Chromium, production app and gate).
+
+### D-066 · 2026-10-25 · M8-CP3 review fix: an Upload Center publication is all-or-nothing
+- **Context:** independent review of PR #32 at `40fdef1` found two failure-atomicity gaps: (1) if `data/sources.json`
+  was written but writing `data/owner_sources.json` (or staging the owner configuration) failed, the earlier selection
+  file stayed rewritten; (2) a failing owner-workbook installation after the core dashboard had already changed was
+  reported as a successful publication (with a warning).
+- **Decision:**
+  - The commit step (`before_swap`, under `PUBLISH_LOCK`) snapshots the live context, the generation state, the owner
+    repository state and the bytes (or absence) of both selection files, then writes the files and stages the owner
+    configuration; any failure inside it restores everything it already changed before re-raising.
+  - `refresh.PublishHooks.after_install` now **fails closed**: a failure restores the previous dashboard and manifest
+    and runs the full refresh undo (context, generation, selections); the job ends as `publish_failed` with
+    "önceki pano ve veriler geri yüklendi". A new `on_commit` hook runs only after every step succeeded.
+  - `OwnerRepository.install_entries` no longer swallows a failing generation-record publication; the repository and
+    `GenerationStore` have `snapshot_state` / `restore_state`, so a partial installation (one record published, the
+    next failing) is undone exactly. `ContextRepository.restore_live` puts the previous context object back.
+  - Generation observer notifications (the Veri Kontrol Merkezi path) raised by the publishing thread are **held**
+    during the commit and delivered only on commit; on rollback they are dropped, so a failed publication writes no
+    VKM observation or history. Holding is thread-scoped (other threads are notified at once).
+  - Workbook copies placed in the data folder by a failed publication attempt are removed again.
+  - The swap-step failure message now says whether the previous dashboard was restored.
+  - Lock order unchanged (`PUBLISH_LOCK → vkm_store._LOCK → GenerationStore._lock`); notifications are still issued
+    outside `GenerationStore._lock`. No change to the Upload Center UI or to any business calculation.
+- **Unchanged:** `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; CRM / fair / action / VKM review history
+  untouched (also asserted after every injected failure).
+- **Tests:** `tests/test_m8_cp3_atomicity.py` — failure injection at the first and second selection write, a torn
+  owner-selection write, owner configuration staging, owner installation before any record is published and after a
+  partial installation (mixed and owner-only batches); after each failure dashboard / manifest / selection bytes,
+  data-folder and upload bytes, context object, generation and evidence binding, owner configs and views, finance
+  states, all VKM tables and CRM / fair / action tables are unchanged, and a restart serves the same generation; a
+  clean publication afterwards commits and is observed.
+- **Still open before hosting (not part of this fix):** single-process serving (CP2) and upload retention / cleanup (CP5).
+
+### D-067 · 2026-10-25 · M8-CP3 review fix: the final freshness check is atomic with the commit
+- **Context:** the D-066 re-review of PR #32 at `f1d4e25` confirmed the rollback fixes and found one remaining merge
+  blocker. A core-changing upload compared the preview's base (served `core_id` + selection-file hash) with the live
+  state only before the long copy / owner import / build; `refresh._pipeline` then took `PUBLISH_LOCK` for the swap
+  without comparing again. An independent publication B (e.g. the owner changes `sources.json` and runs the controlled
+  refresh) finishing in that window would be overwritten by the older preview A. The identical-upload path likewise
+  reported "Değişiklik yoktu" without rechecking what was served when the job ran.
+- **Decision:**
+  - `refresh.PublishHooks.precheck()`: runs FIRST under `PUBLISH_LOCK`, before `before_swap`, before any selection
+    file, configuration, dashboard or manifest byte changes. A refusal ends the run as step `stale` with nothing
+    changed (`previous_data_kept`); `had_live` / `had_manifest` are now observed under the lock, so a refusal or a
+    restore can never touch another publisher's files.
+  - The Upload Center's precheck compares the preview's base with the live base (same `_base()` as the earlier
+    checks). A refused job ends with code `stale`, batch status `stale` and the existing stale message ("Hiçbir şey
+    yayınlanmadı; dosyaları yeniden doğrulayın"), recorded as `publication_failed` (code `stale`) in the append-only
+    history. The owner-only path uses the same check under the same lock.
+  - The identical-upload path rechecks the base under `PUBLISH_LOCK` before reporting "unchanged"; if the served
+    version changed it is refused as stale.
+  - Cleanup of a failed attempt never removes a data-folder file that a live selection file names.
+  - Lock order unchanged (`PUBLISH_LOCK → vkm_store._LOCK → GenerationStore._lock`); no new lock edge. D-066 rollback
+    unchanged; single-process scope unchanged.
+- **Unchanged:** `GENERATION_BOUND_API_EVIDENCE` False; no metric VERIFIED; upload permissions; CRM / fair / action /
+  VKM review history.
+- **Tests:** `tests/test_m8_cp3_stale_race.py` (8, event-gated, no timing): core-only and mixed core + owner batches
+  overtaken by an independent controlled refresh B before the refresh lock and by a selection change inside it are
+  refused, and B's dashboard / manifest / selection / data bytes, context, generation, owner views, finance states, all
+  VKM tables and CRM / fair / action tables stay exactly as B published them, also across a restart; an identical
+  upload overtaken by B is stale, not "unchanged"; a fresh preview afterwards publishes; the hook runs under the lock
+  and a refusal changes nothing. Six of these fail on `f1d4e25` (the obsolete preview publishes over B / reports
+  "unchanged").

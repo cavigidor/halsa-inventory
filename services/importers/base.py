@@ -9,8 +9,10 @@ the live M5 context or refresh; M6 sources plug in when they are introduced.
 """
 from __future__ import annotations
 
+import contextvars
 import datetime as dt
 import zipfile
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Mapping
@@ -122,6 +124,23 @@ class _Raw:
 
 
 # ---------------------------------------------------------------------------------------------
+# M8-CP3 (Excel Upload Center): a workbook whose source type the owner CHOSE explicitly in the upload form is stored
+# under a content-addressed name, so its file name carries no meaning and the file-name pattern check does not apply.
+# The exemption is scoped to the import calls inside `explicit_source_type()` (set by the owner loaders only for
+# uploaded sources); it is recorded as an INFO issue and changes nothing else (schema, layout, every rule still apply).
+_EXPLICIT_SOURCE_TYPE: contextvars.ContextVar[bool] = contextvars.ContextVar("halsa_explicit_source_type",
+                                                                           default=False)
+
+
+@contextmanager
+def explicit_source_type():
+    token = _EXPLICIT_SOURCE_TYPE.set(True)
+    try:
+        yield
+    finally:
+        _EXPLICIT_SOURCE_TYPE.reset(token)
+
+
 def run_import(path: str | Path, spec: SourceSpec, *, declared_date: dt.date | None = None,
                masters: Mapping[str, MasterIndex] | None = None, content: bytes | None = None) -> ImportResult:
     """`content` (M8-ACCURACY-2): the workbook bytes frozen once by the caller; `path` then only names the file."""
@@ -132,7 +151,10 @@ def run_import(path: str | Path, spec: SourceSpec, *, declared_date: dt.date | N
                               sheet=spec.sheet_label(), layout=spec.layout_name)
     state = _State(spec=spec, report=report)
 
-    if not spec.matches_filename(basename):
+    if _EXPLICIT_SOURCE_TYPE.get():
+        report.add(Severity.INFO, "filename_not_used", "The source type was chosen explicitly by the owner (upload); "
+                                                       "the file name is not checked or used.")
+    elif not spec.matches_filename(basename):
         report.add(Severity.ERROR, "filename_mismatch", "The file name does not match the source's declared patterns.")
     if path.suffix.lower() not in SUPPORTED_SUFFIXES:
         report.add(Severity.ERROR, "unsupported_format", "Only .xlsx / .xlsm workbooks are supported.")

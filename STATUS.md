@@ -1,14 +1,69 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-24 (M8-VKM-1 PR #31 independently reviewed at `b2b4639` and squash-merged `422f3a4` to `main`; GitHub Actions `40146502629` confirmed **1676 passed / 7 skipped / 2 xfailed** with JS/browser tests required. NOT deployed. Current: owner-local Mac acceptance against private DinamikCRM exports. Core owner-local reconciliation still FAIL, Kredi NOT RUN, no metrics VERIFIED, `GENERATION_BOUND_API_EVIDENCE` False)._
+_Updated 2026-10-25 (Step 1 real-Excel compatibility acceptance on the owner's Mac ACCEPTED by the owner; **M8-CP3 Excel Upload Center** implemented on `claude/m8-cp3-upload-center` (D-065; review fixes D-066 all-or-nothing publication and D-067 atomic final freshness check), PR #32 awaiting independent re-review — NOT merged, NOT deployed. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False)._
 
 ## Git
+- **`claude/m8-cp3-upload-center`:** M8-CP3 Excel Upload Center (D-065) from `main` @ `4a5817b`; PR #32 reviewed at
+  `40fdef1` (fixed by D-066) and `f1d4e25` (D-066 confirmed; stale-preview blocker fixed by D-067), awaiting
+  independent re-review. NOT merged, NOT deployed.
 - **`claude/m8-vkm-1-veri-kontrol-merkezi`:** M8-VKM-1 (D-062–D-064), PR #31 independently reviewed and squash-merged into `main` as `422f3a4` (reviewed head `b2b4639`); NOT deployed or validated against real data.
 - **`claude/m8-cp1-simplified-access`:** PR #30 reviewed at `318491d` and squash-merged to `main` (`a03efbf`, 2026-10-22). Three access levels are implemented and locally tested; **not deployed**.
 - **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), M8 source-evidence PR #28 (`5baa92a`), M8 precise validation PR #29 (`4ad8d8a`), M8-CP1 access PR #30 (`a03efbf`) and M8-VKM-1 PR #31 (`422f3a4`) merged.
 - **`claude/m8-accuracy-2-shared-evidence`:** PR #28 merged as technical infrastructure 2026-10-20; all production metrics still withheld and `GENERATION_BOUND_API_EVIDENCE` remains False.
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
 - **Owner's Mac folder:** current checkout state was not inspected in this checkpoint. Previous notes reported an older checkout; verify `git status` before pulling, protect private `.env`, data and SQLite, and follow `docs/owner_launch_checklist.md`. Browser/real-data acceptance remains owner-local.
+
+## M8-CP3 — Excel Upload Center "Dosya Yükleme" (D-065; PR open; NOT deployed)
+- **Flow (owner only):** select Excel files → declare report type and details → background validation job (Turkish
+  progress, polling) → preview → explicit **Değişiklikleri Yayınla** → dashboard updates. Dashboard tab (hidden unless
+  the session is the owner) and fixed page `/yukleme` (works before any dashboard exists). **No DinamikCRM connection.**
+- **Types:** Stok, Satış, Cari (core refresh) and Kredi, Gider/Gelir, Bütçe (owner repository). Type chosen per file,
+  never from the name; dates / years declared or unknown, never inferred. Content-addressed private storage
+  (`UPLOAD_DIR`, default `data/uploads`); the importer file-name pattern check is skipped only for owner-typed uploads.
+- **Safety:** streaming size limit (96 MB), .xlsx container / ZIP bomb / part-name / encryption / DTD checks; owner
+  session + CSRF + Origin on every route; viewers 401, financial viewers 403.
+- **Validation:** the controlled refresh in stage-only mode (`refresh.PublishHooks`), the M6 owner loaders without
+  publication, read-only VKM delta (`vkm_store.preview_delta`), gate decisions per dashboard section. Nothing live
+  changes during validation (tested: dashboard, manifest, context, owner views, selection files, VKM history).
+- **Publication:** the generation-bound refresh with the batch as explicit selection and the previewed `core_id` as the
+  required identity; `data/sources.json` and the new `data/owner_sources.json` are written inside the swap step and
+  restored on failure; uploaded owner workbooks installed in the same publish-lock step. Newest batch only; stale
+  previews refused; identical sets publish nothing; failures keep the previous dashboard, manifest, context, selections.
+  CRM / fair / action / VKM history untouched.
+- **Also changed:** refresh message distinguishes a broken workbook from a valid workbook with another report's layout;
+  VKM "missing source" hints point to Dosya Yükleme; `/api/uploads/*` added to the access and accuracy route registers
+  and the disclosure inventory (`docs/m8_cp1_access.md` §6).
+- **Tests (cloud, synthetic, `REQUIRE_JS_TESTS=1 REQUIRE_BROWSER_TESTS=1 AI_PROVIDER=disabled`):** baseline `main`
+  `4a5817b` 1676 passed / 7 skipped / 2 xfailed → **1765 passed / 7 skipped / 2 xfailed** (new:
+  `tests/test_m8_cp3_upload_files.py` 21, `tests/test_m8_cp3_upload_center.py` 39, `tests/test_m8_cp3_browser.py` 8 in
+  real Chromium against the production app and gate; existing route / tab sweeps extended to the new page and tab).
+  Design: `docs/m8_cp3_upload_center.md`.
+- **Review fix (D-066, after review of `40fdef1`):** a publication is all-or-nothing. A failure while writing either
+  selection file or staging the owner configuration restores both files and the owner state; a failing owner-workbook
+  installation (before any record or after a partial one) now fails the whole publication and restores the previous
+  dashboard, manifest, context, generation, selections and owner views (previously reported as success with a
+  warning). Generation notifications are held until commit, so a failed publication writes no Veri Kontrol history;
+  copies of a failed attempt are removed. Lock order unchanged. New `tests/test_m8_cp3_atomicity.py` (10, incl.
+  restart after every injected failure). Full run at `f1d4e25`: 1775 passed / 7 skipped / 2 xfailed (D-066 confirmed
+  by the re-review).
+- **Review fix (D-067, after re-review of `f1d4e25`):** the freshness check of a preview is repeated atomically under
+  `PUBLISH_LOCK` immediately before any selection file, configuration or dashboard byte changes (new
+  `refresh.PublishHooks.precheck`, also used by the owner-only path and before reporting an identical upload as
+  "unchanged"). A publication overtaken by an independent one (e.g. a controlled refresh after a selection change
+  during the long build) is refused as stale and the newer version stays exactly as published. New
+  `tests/test_m8_cp3_stale_race.py` (8, event-gated; six fail on `f1d4e25`). Full run: **1783 passed / 7 skipped / 2 xfailed**.
+- **Open:** owner-local acceptance of an upload through the UI with the private exports; retention policy for stored
+  uploads (CP5) and single-process serving (CP2) — both must be resolved before hosting; Hedef / Trodat not offered (not in the generation manifest).
+
+## Step 1 — real Excel compatibility acceptance (owner's Mac, 2026-10-25; ACCEPTED by the owner)
+- Isolated copy of `main` @ `4a5817b` in the Mac's local sandbox, AI disabled; originals, `.env` and the checkout
+  untouched; counts only left the Mac (project note `claude/m8-step1-real-excel-acceptance.md`).
+- Core exports (stock, sales, Cari, 5 Oct 2026) load without manual changes; refresh, restart re-derivation, API
+  refresh and three broken-upload rollbacks passed; real-data tests 7/7. Core reconciliation still **FAIL** (7 technical,
+  29 OPEN); Veri Kontrol 27 open issues; 0 of 33 metrics VERIFIED; finance sections withheld.
+- Owner workbooks (May–June 2026 candidates from an old transfer folder) pass except the known-unsupported revolving
+  Kredi and TASLAK Gider/Gelir layouts. The revised filtered `kredi takip(1).xlsx` is **not** on the Mac (Projects and
+  Downloads searched read-only 2026-10-25; the only Kredi file in Downloads is the Feb 2026 ERP export).
 
 ## M8-VKM-1 — Veri Kontrol Merkezi (PR #31 MERGED; NOT deployed; real-data acceptance OPEN)
 - **Independent final review and merge (2026-10-24):** All prior D-063/D-064 issues verified fixed, GitHub Actions `40146502629` confirmed **1676 passed / 7 skipped / 2 xfailed** including JS and browser tests. PR #31 squash-merged at `422f3a4`. This is technical code acceptance only; no source/date approval, business conclusions, metric promotion or public hosting.

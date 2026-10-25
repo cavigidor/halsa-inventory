@@ -198,6 +198,100 @@ def freeze(paths: Mapping[str, str | None]) -> dict[str, FrozenSource]:
     return {k: FrozenSource.read(k, p) for k, p in paths.items() if p}
 
 
+# ---------------------------------------------------------------------------------------------
+# M8-CP3 (Excel Upload Center): writing the explicit selections, owner workbook selection
+# ---------------------------------------------------------------------------------------------
+# The core selection keeps its existing file and schema (data/sources.json). The owner workbooks published through the
+# Upload Center are recorded in a second private file next to it; the owner's environment paths (KREDI_PATH, …) still
+# work, and an uploaded workbook takes precedence for its own source only. Both files hold basenames and the owner's
+# declarations only — never a path, a value, a fingerprint-derived approval or anything inferred.
+OWNER_SELECTION_FILE = "owner_sources.json"
+OWNER_SELECTION_SCHEMA = "halsa-owner-selection/1"
+OWNER_OPTION_FIELDS = {"kredi": ("snapshot_date",), "gider_gelir": ("report_year",),
+                       "butce": ("planning_year", "snapshot_date")}
+
+
+def write_json_atomic(path: str, doc: Mapping[str, Any]) -> None:
+    """tmp + fsync + os.replace in the same folder: a reader sees the old or the new file, never a partial one."""
+    d = os.path.dirname(os.path.abspath(path))
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".sel-", dir=d)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(_jsonable(dict(doc)), fh, ensure_ascii=False, indent=1, sort_keys=True)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def core_selection_document(entries: Mapping[str, Mapping[str, Any]]) -> dict:
+    """`data/sources.json` content for {key: {"file": basename, <declarations>}} (the schema `load_selection` reads).
+    Unknown (None) declarations are left out: unknown stays unknown."""
+    core = {}
+    for key in CORE_KEYS:
+        e = entries.get(key)
+        if not e:
+            continue
+        out = {"file": e["file"]}
+        for f in _DECL_FIELDS:
+            v = e.get(f)
+            if v is not None:
+                out[f] = _jsonable(v)
+        if e.get("approval"):
+            out["approval"] = dict(e["approval"])      # an existing, fingerprint-bound owner approval is carried as is
+        core[key] = out
+    return {"schema": SELECTION_SCHEMA, "core": core}
+
+
+def owner_selection_document(entries: Mapping[str, Mapping[str, Any]]) -> dict:
+    owner = {}
+    for key in OWNER_KEYS:
+        e = entries.get(key)
+        if not e:
+            continue
+        out = {"file": e["file"]}
+        for f in OWNER_OPTION_FIELDS[key]:
+            if e.get(f) is not None:
+                out[f] = str(e[f])
+        owner[key] = out
+    return {"schema": OWNER_SELECTION_SCHEMA, "owner": owner}
+
+
+def load_owner_selection(data_folder: str) -> dict | None:
+    """{key: {"path", "options"}} from `owner_sources.json`, or None when the file does not exist. Plain basenames in
+    the data folder only; an invalid file raises SelectionError (the caller decides; nothing is guessed)."""
+    p = os.path.join(data_folder, OWNER_SELECTION_FILE)
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, encoding="utf-8") as fh:
+            raw = json.load(fh)
+    except (OSError, ValueError):
+        raise SelectionError("owner_sources.json okunamadı")
+    if not isinstance(raw, dict) or raw.get("schema") != OWNER_SELECTION_SCHEMA or not isinstance(raw.get("owner"), dict):
+        raise SelectionError(f"owner_sources.json şeması '{OWNER_SELECTION_SCHEMA}' olmalı")
+    out = {}
+    for key, entry in raw["owner"].items():
+        if key not in OWNER_KEYS or not isinstance(entry, dict):
+            raise SelectionError(f"bilinmeyen yönetim kaynağı: {key}")
+        name = entry.get("file")
+        if (not isinstance(name, str) or not name or os.path.basename(name) != name or name.startswith(".")
+                or name.startswith("~$")):
+            raise SelectionError(f"{key}.file yalnızca dosya adı olmalı")
+        opts = {}
+        for f in OWNER_OPTION_FIELDS[key]:
+            v = entry.get(f)
+            if v is not None and not isinstance(v, str):
+                raise SelectionError(f"{key}.{f} metin olmalı")
+            opts[f] = v or None
+        out[key] = {"path": os.path.join(data_folder, name), "options": opts}
+    return out
+
+
 def frames_from_frozen(frozen: Mapping[str, FrozenSource]) -> dict:
     """The M5 raw frames, parsed from the frozen bytes with the pipeline's own readers."""
     import dashboard_builder as db
@@ -522,7 +616,7 @@ def _issue_total(report, codes) -> int:
 
 
 def owner_record(key: str, frozen: FrozenSource, result, *, declared: dict | None = None,
-                 today: dt.date | None = None) -> SourceRecord:
+                 today: dt.date | None = None, origin: str = "env_path") -> SourceRecord:
     """Evidence for one owner source from its importer result (counts only). Unknown facts stay None."""
     declared = dict(declared or {})
     report = getattr(result, "report", None)
@@ -559,7 +653,7 @@ def owner_record(key: str, frozen: FrozenSource, result, *, declared: dict | Non
             "hidden_installment_rows", "visible_installment_rows", "subtotal_row", "filtered_totals_match",
             "negative_remaining_rows", "closed_with_positive_remaining")})
     return SourceRecord(key, "owner", SOURCE_TYPES[key], DATE_KINDS[key], frozen.file, frozen.sha256, frozen.size,
-                        "env_path", declared, {}, validation, ev, frozen.file_modified)
+                        origin, declared, {}, validation, ev, frozen.file_modified)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -636,6 +730,8 @@ class GenerationStore:
         self._dash_pending: str | None = None        # core_id whose dashboard re-publication is expected (2B)
         self.restore_reason: str | None = None
         self._observers: list = []                   # M8-VKM-1: notified after a generation is ACCEPTED
+        self._hold_tid: int | None = None            # M8-CP3: notifications held during one publication
+        self._held: list = []
 
     # -- M8-VKM-1: observers of accepted generations (Veri Kontrol Merkezi) ---------------------------------------
     def add_observer(self, fn) -> None:
@@ -645,11 +741,48 @@ class GenerationStore:
         self._observers.append(fn)
 
     def _notify(self, kind: str, manifest: "Manifest | None", key: str | None = None) -> None:
+        with self._lock:
+            if self._hold_tid is not None and self._hold_tid == threading.get_ident():
+                self._held.append((kind, manifest, key))      # delivered only if the publication commits
+                return
+        self._deliver(kind, manifest, key)
+
+    def _deliver(self, kind: str, manifest: "Manifest | None", key: str | None = None) -> None:
         for fn in list(self._observers):
             try:
                 fn(kind, manifest, key, self)
             except Exception:
                 pass
+
+    # -- M8-CP3: one multi-step publication (core + owner) is all-or-nothing --------------------------------------
+    def hold_notifications(self) -> None:
+        """Queue the observer notifications raised by THIS thread (the publisher, holding PUBLISH_LOCK) until
+        `release_notifications`. A publication that is rolled back therefore never reaches the observers (no VKM
+        observation, no history event). Other threads are unaffected."""
+        with self._lock:
+            self._hold_tid, self._held = threading.get_ident(), []
+
+    def release_notifications(self, *, deliver: bool) -> None:
+        """End the hold of this thread: deliver the queued notifications in order (commit) or drop them (rollback).
+        A no-op when this thread holds nothing."""
+        with self._lock:
+            if self._hold_tid != threading.get_ident():
+                return
+            held, self._held, self._hold_tid = self._held, [], None
+        if deliver:
+            for kind, manifest, key in held:
+                self._deliver(kind, manifest, key)
+
+    def snapshot_state(self) -> tuple:
+        """The served / pending generation state (immutable manifests), for a publication's rollback."""
+        with self._lock:
+            return (self._m, self._pending, self._dash_pending, self.restore_reason)
+
+    def restore_state(self, state: tuple) -> None:
+        """Put back a `snapshot_state` exactly (rollback of a failed publication). Notifies no observer."""
+        with self._cond:
+            self._m, self._pending, self._dash_pending, self.restore_reason = state
+            self._cond.notify_all()
 
     # -- dashboard re-publication after a restart (M8-ACCURACY-2B) ---------------------------------------------
     @property
@@ -797,4 +930,6 @@ class GenerationStore:
 __all__ = ["FrozenSource", "SourceRecord", "Manifest", "GenerationStore", "SelectionError", "load_selection",
            "select_core", "freeze", "build_core_records", "build_manifest", "rederive_core", "dashboard_markers", "owner_record", "manifest_path",
            "write_manifest", "read_manifest", "dashboard_generation", "sha256_bytes", "sha256_file", "CORE_KEYS",
-           "OWNER_KEYS", "SELECTION_FILE", "SELECTION_SCHEMA"]
+           "OWNER_KEYS", "SELECTION_FILE", "SELECTION_SCHEMA", "OWNER_SELECTION_FILE", "OWNER_SELECTION_SCHEMA",
+           "OWNER_OPTION_FIELDS", "write_json_atomic", "core_selection_document", "owner_selection_document",
+           "load_owner_selection"]

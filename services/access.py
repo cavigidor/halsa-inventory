@@ -99,6 +99,17 @@ ACCESS: dict[tuple[str, str], str] = {
     ("POST", "/api/vkm/issues/{issue_id}/review"): OWNER_WRITE,  # review decision (never certifies a metric)
     ("POST", "/api/vkm/issues/{issue_id}/notes"): OWNER_WRITE,   # append-only owner note
     ("POST", "/api/vkm/sync"): OWNER_WRITE,                      # re-observe the served generation (recovery)
+    # --- M8-CP3 Excel Upload Center (D-065): every upload, validation job and publication is owner-only ---
+    ("GET", "/yukleme"): VIEWER,                                 # fixed page (no data); every data call is owner-only
+    ("GET", "/api/uploads"): OWNER_READ,                         # batches, file labels, published selection
+    ("POST", "/api/uploads"): OWNER_WRITE,                       # starts a new upload batch
+    ("GET", "/api/uploads/jobs/{job_id}"): OWNER_READ,           # validation / publication progress
+    ("GET", "/api/uploads/{batch_id}"): OWNER_READ,              # batch + validation preview
+    ("POST", "/api/uploads/{batch_id}/files"): OWNER_WRITE,      # receives one workbook (size / type / archive checks)
+    ("POST", "/api/uploads/{batch_id}/files/{file_id}/remove"): OWNER_WRITE,
+    ("POST", "/api/uploads/{batch_id}/validate"): OWNER_WRITE,   # starts the background validation (no publication)
+    ("POST", "/api/uploads/{batch_id}/publish"): OWNER_WRITE,    # "Değişiklikleri Yayınla" (explicit publication)
+    ("POST", "/api/uploads/{batch_id}/discard"): OWNER_WRITE,
 }
 
 # Query parameters that make a viewer GET an owner action (value considered set unless false-like).

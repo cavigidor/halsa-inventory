@@ -140,7 +140,9 @@ python -m services.owner_auth status                    # both roles configured?
 | Kredi / Gider-Gelir / Bütçe sections (withheld today) | | ✔ | ✔ |
 | Owner workbook file names, error details, operations summary, system state, known issues, reload | | | ✔ |
 | Source fingerprints / declared dates, context export, AI telemetry | | | ✔ |
-| Any change (refresh / upload, CRM, fairs, actions, AI, data review, settings) | | | ✔ |
+| Upload Center page `/yukleme` (fixed text and controls only; no data) — **new in CP3 (D-065)** | ✔ | ✔ | ✔ |
+| Upload Center content: uploaded file **labels** (the owner's original file names), sizes, fingerprint prefixes, declared report details, recognized sheet names and required-column status, validation errors / warnings (fixed Turkish text, schema labels, counts), VKM preview, gate decisions per section, published selection, upload history — **new in CP3 (D-065)** | | | ✔ |
+| Any change (refresh / upload / publication, CRM, fairs, actions, AI, data review, settings) | | | ✔ |
 | Raw Excel, SQLite, manifests, `.env`, logs | never | never | never |
 
 **Answered by the owner (D-061):** viewer visibility of customer names, CRM / follow-up / fair notes — approved;

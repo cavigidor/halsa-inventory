@@ -231,6 +231,66 @@ def _observe_source(c, key: str, obs: Observation, now: str) -> bool:
     return True
 
 
+PREVIEW_OUTCOMES = ("new", "returns", "still_present", "resolved", "not_checked", "source_missing")
+PREVIEW_TR = {"new": "Yeni sorun (ilk kez görülecek)", "returns": "Daha önce çözülmüştü; yeniden görülecek",
+              "still_present": "Devam ediyor", "resolved": "Bu yüklemede görülmeyecek (kaynakta çözüldü sayılır)",
+              "not_checked": "Bilinmiyor — bu yüklemede denetlenemeyecek (çözülmüş sayılmaz)",
+              "source_missing": "Bilinmiyor — kaynak dosya yok (çözülmüş sayılmaz)"}
+
+
+def preview_delta(observations: Mapping[str, Observation]) -> dict:
+    """M8-CP3 Upload Center preview: what observing these (candidate) observations WOULD do to the issue store —
+    the same rules as `_observe_source` — without writing anything (no transaction is opened for writing, no review
+    history, no observation). Per source: unchanged (same digest as stored) or the list of issues per outcome."""
+    out: dict[str, Any] = {"sources": [], "counts": {k: 0 for k in PREVIEW_OUTCOMES}}
+    with ST._conn() as c:
+        stored = {r["source_key"]: r["digest"] for r in c.execute("SELECT source_key, digest FROM dq_source_state")}
+        rows = {r["issue_id"]: r for r in c.execute("SELECT * FROM dq_issue")}
+    for key in sorted(observations):
+        obs = observations[key]
+        digest = obs.digest(key)
+        src = {"key": key, "label": V.SOURCE_TR.get(key, key), "state": obs.state,
+               "unchanged": stored.get(key) == digest, "issues": []}
+        if not src["unchanged"]:
+            current = {i.issue_id: i for i in obs.all_issues(key)}
+            for iid, issue in current.items():
+                row = rows.get(iid)
+                if row is None:
+                    outcome = "new"
+                elif row["status"] == "cozuldu_kaynakta" or row["presence"] == "absent":
+                    outcome = "returns"
+                else:
+                    outcome = "still_present"
+                t = V.texts(issue.check, issue.source_key, issue.field_name, issue.column)
+                src["issues"].append({"issue_id": iid, "outcome": outcome, "outcome_label": PREVIEW_TR[outcome],
+                                      "title": t["title"], "severity": issue.severity,
+                                      "severity_label": V.SEVERITY_TR.get(issue.severity, issue.severity),
+                                      "status": row["status"] if row is not None else None,
+                                      "counts": [{"key": k, "label": V.COUNT_TR.get(k, k), "value": int(v)}
+                                                 for k, v in sorted(issue.counts.items())]})
+            scopes = obs.scopes()
+            for iid, r in rows.items():
+                if r["source_key"] != key or iid in current or r["presence"] == "absent":
+                    continue
+                if obs.state == "missing":
+                    outcome = "source_missing"
+                elif V.scope_of(r["check_code"], r["field_name"], r["column_letter"]) in scopes:
+                    outcome = "resolved"
+                else:
+                    outcome = "not_checked"
+                t = V.texts(r["check_code"], r["source_key"], r["field_name"], r["column_letter"])
+                src["issues"].append({"issue_id": iid, "outcome": outcome, "outcome_label": PREVIEW_TR[outcome],
+                                      "title": t["title"], "severity": r["severity"],
+                                      "severity_label": V.SEVERITY_TR.get(r["severity"], r["severity"]),
+                                      "status": r["status"], "counts": _counts_view(r["detail_counts"])})
+            order = {k: i for i, k in enumerate(PREVIEW_OUTCOMES)}
+            src["issues"].sort(key=lambda x: (order[x["outcome"]], SEVERITY_ORDER.get(x["severity"], 9), x["issue_id"]))
+            for x in src["issues"]:
+                out["counts"][x["outcome"]] += 1
+        out["sources"].append(src)
+    return out
+
+
 def _counts_json(counts: Mapping[str, int]) -> str:
     return json.dumps({k: int(v) for k, v in sorted(counts.items())}, sort_keys=True)
 

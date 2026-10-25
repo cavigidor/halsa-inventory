@@ -54,6 +54,8 @@ GUARD_HEADER, GUARD_VALUE = "x-stockagent", "1"
 # M7-1 Customer 360: Hedef only from an explicitly configured file (no automatic Feb/June/other selection).
 HEDEF_PATH = os.environ.get("HEDEF_PATH") or None
 HEDEF_SNAPSHOT_DATE = os.environ.get("HEDEF_SNAPSHOT_DATE") or None
+# M8-CP3 (D-065): private folder for uploaded workbooks, batches and previews (never served; gitignored under data/)
+UPLOAD_DIR = os.environ.get("UPLOAD_DIR") or os.path.join(DATA_FOLDER, "uploads")
 MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 # M8-CP1 (D-060): no interactive API documentation, schema dump or debug UI is served (/docs, /redoc, /openapi.json
@@ -272,7 +274,8 @@ from fastapi.exception_handlers import request_validation_exception_handler
 async def _validation_error(request: Request, exc: RequestValidationError):
     # M8-CP1: /api/auth/ is included so a rejected login body (e.g. an over-long password) is never echoed back
     # M8-VKM-1: /api/vkm/ is included so a rejected review note is never echoed back
-    if not request.url.path.startswith(("/api/crm/", "/api/auth/", "/api/vkm/")):
+    # M8-CP3: /api/uploads/ is included so rejected declarations are never echoed back
+    if not request.url.path.startswith(("/api/crm/", "/api/auth/", "/api/vkm/", "/api/uploads/")):
         return await request_validation_exception_handler(request, exc)
     errors = [{"loc": list(e.get("loc", ())), "type": e.get("type"), "msg": e.get("msg")} for e in exc.errors()]
     return JSONResponse(status_code=422, content={"detail": errors})
@@ -299,9 +302,16 @@ def _startup():
     app.state.generations.restore(GEN.manifest_path(DASHBOARD_PATH), DASHBOARD_PATH, DATA_FOLDER)
     # M8-VKM-1 (D-062): every ACCEPTED generation (refresh, restart re-derivation, owner-source load) is observed by the
     # Veri Kontrol Merkezi issue store; the observer only reads the manifest and never affects publication.
-    _owner_cfg = OV.config_from_env()
+    # M8-CP3: owner workbooks published through the Upload Center (data/owner_sources.json) take precedence over the
+    # environment paths for their own source; the VKM observer always reads the owner repository's CURRENT configs.
+    _owner_cfg = OV.config_with_uploads(DATA_FOLDER)
     from services import vkm_store as _VKMS
-    app.state.vkm_owner_paths = lambda: {k: c.path for k, c in _owner_cfg.items()}
+
+    def _owner_paths():
+        owner = getattr(app.state, "owner", None)
+        cfgs = owner.configs() if owner is not None else _owner_cfg
+        return {k: c.path for k, c in cfgs.items()}
+    app.state.vkm_owner_paths = _owner_paths
     app.state.generations.add_observer(_VKMS.make_observer(app.state.vkm_owner_paths))
     app.state.repo = ContextRepository(data_folder=DATA_FOLDER, inflation_rate=INFLATION,
                                        generation_store=app.state.generations,
@@ -313,6 +323,14 @@ def _startup():
     # M7-6 Yönetim: owner sources only from explicit env paths; loaded lazily when the tab is first opened.
     app.state.owner = OV.OwnerRepository(_owner_cfg, background=True,
                                          on_record=lambda k, r: app.state.generations.replace_owner(k, r))
+    # M8-CP3 (D-065): owner-only Excel Upload Center (validation jobs and explicit publication)
+    from services import upload_center as _UPC
+    app.state.uploads = _UPC.UploadCenter(_UPC.Deps(
+        data_folder=DATA_FOLDER, dashboard_path=DASHBOARD_PATH, upload_root=UPLOAD_DIR,
+        generations=lambda: app.state.generations, context_repo=lambda: app.state.repo,
+        owner_repo=lambda: app.state.owner, install=lambda staged: _install_generation(app.state.repo, staged),
+        live_gate=lambda: _build_gate()[2], inflation_rate=INFLATION))
+    app.state.uploads.recover()
     if WARMUP_CONTEXT:
         threading.Thread(target=_warm_up, args=(app.state.repo, app.state.c360), name="context-warmup",
                          daemon=True).start()
@@ -403,7 +421,8 @@ def dashboard():
     if body is None:
         return HTMLResponse(status_code=404, content=_neutral_page(
             "Pano henüz yayımlanmadı.",
-            "Verileri yenileyerek panoyu oluşturun: <code>python -m services.refresh</code> veya panodaki Yenile."))
+            "Raporları <a href=\"/yukleme\">Dosya Yükleme</a> sayfasından (yönetici girişiyle) yükleyip yayınlayın "
+            "veya sunucuda <code>python -m services.refresh</code> çalıştırın."))
     ok, reason, gen_id = _dashboard_authorized(body, m)
     if not ok:
         log.info("dashboard withheld: %s", reason)
@@ -1552,6 +1571,152 @@ def vkm_sync():
         return _deny(503, "vkm_unavailable", "Denetim kaydı şu anda yazılamıyor; daha sonra tekrar deneyin.")
     return {"changed": res.get("changed", []), "sync": VKMS.sync_state(_vkm_expected()),
             "vkm_generation": VKMS.vkm_generation()}
+
+
+# ---------------- M8-CP3 Excel Upload Center (D-065) ----------------
+# Owner only (services/access.py: owner_read / owner_write with session + CSRF + Origin). Select files → declare report
+# details → validate (background job) → preview → explicit publication. No DinamikCRM connection, no AI. The preview
+# never changes live data; publication reuses the generation-bound refresh (services/upload_center.py).
+import urllib.parse as _urlparse
+from services import upload_center as UPC
+from services import upload_files as UF
+
+
+def _upload_error(e) -> JSONResponse:
+    if isinstance(e, UF.UploadRejected):
+        return _deny(413 if e.code == "too_large" else 422, e.code, e.message)
+    return JSONResponse(status_code=e.status, content={"detail": {"error_code": e.code, "message": e.message,
+                                                                  **{k: v for k, v in e.detail.items()
+                                                                     if k in ("slot", "file_id")}}})
+
+
+def _uploads() -> "UPC.UploadCenter":
+    return app.state.uploads
+
+
+def _actor(request: Request) -> str:
+    return getattr(_owner(request), "role", None) or "owner"
+
+
+@app.get("/api/uploads")
+def uploads_overview():
+    """Owner: slot catalogue, limits, the current batch (with its preview), the active job, what is published, history."""
+    return _uploads().overview()
+
+
+@app.post("/api/uploads", status_code=201)
+def uploads_create(request: Request):
+    """Owner: start a new upload batch (any older unpublished batch is superseded: only the newest is publishable)."""
+    try:
+        return _uploads().create_batch(_actor(request))
+    except UPC.UploadError as e:
+        return _upload_error(e)
+
+
+@app.get("/api/uploads/jobs/{job_id}")
+def uploads_job(job_id: str):
+    """Owner: progress of a validation or publication job (poll this; Turkish stage text, step / steps, elapsed)."""
+    try:
+        return _uploads().job(job_id)
+    except UPC.UploadError as e:
+        return _upload_error(e)
+
+
+@app.get("/api/uploads/{batch_id}")
+def uploads_batch(batch_id: str):
+    try:
+        return _uploads().batch(batch_id)
+    except UPC.UploadError as e:
+        return _upload_error(e)
+
+
+@app.post("/api/uploads/{batch_id}/files", status_code=201)
+async def uploads_add_file(batch_id: str, request: Request):
+    """Owner: receive ONE workbook as the raw request body (streamed with a hard size limit, then checked as an
+    .xlsx container: signature, parts, compression ratios, encryption, part names, DTDs). The display name comes from
+    the `X-Upload-Name` header (URL-encoded) and is used only as a label — never as a path, a type or a date."""
+    import tempfile
+    try:
+        declared = int(request.headers.get("content-length") or 0) or None
+    except ValueError:
+        declared = None
+    if declared is not None and declared > UF.MAX_BYTES:
+        return _upload_error(UF.reject("too_large"))
+    label = _urlparse.unquote(request.headers.get("x-upload-name") or "")[:400]
+    center = _uploads()
+    try:
+        await run_in_threadpool(center.check_open, batch_id)          # nothing is read or written for a bad batch
+    except UPC.UploadError as e:
+        return _upload_error(e)
+    os.makedirs(center.blobs.incoming, mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix="rx-", suffix=".part", dir=center.blobs.incoming)
+    size = 0
+    try:
+        with os.fdopen(fd, "wb") as out:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > UF.MAX_BYTES:
+                    return _upload_error(UF.reject("too_large"))
+                out.write(chunk)
+
+        def chunks():
+            with open(tmp, "rb") as fh:
+                for block in iter(lambda: fh.read(1 << 20), b""):
+                    yield block
+        try:
+            return await run_in_threadpool(center.add_file, batch_id, chunks(), length=size, label=label,
+                                           actor=_actor(request))
+        except (UPC.UploadError, UF.UploadRejected) as e:
+            return _upload_error(e)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+@app.post("/api/uploads/{batch_id}/files/{file_id}/remove")
+def uploads_remove_file(batch_id: str, file_id: str, request: Request):
+    try:
+        return _uploads().remove_file(batch_id, file_id, _actor(request))
+    except UPC.UploadError as e:
+        return _upload_error(e)
+
+
+@app.post("/api/uploads/{batch_id}/validate", status_code=202)
+def uploads_validate(batch_id: str, body: S.UploadValidateRequest, request: Request):
+    """Owner: record the declared report types / details and start the background validation. Returns the job to
+    poll. Nothing live changes (stage-only refresh, owner workbook checks without publication, read-only VKM comparison)."""
+    try:
+        return _uploads().start_validation(batch_id, {k: v.model_dump() for k, v in body.assignments.items()},
+                                           _actor(request))
+    except UPC.UploadError as e:
+        return _upload_error(e)
+
+
+@app.post("/api/uploads/{batch_id}/publish", status_code=202)
+def uploads_publish(batch_id: str, body: S.UploadPublishRequest, request: Request):
+    """Owner: "Değişiklikleri Yayınla". Publishes exactly the previewed set (stale / superseded previews refused)."""
+    try:
+        return _uploads().start_publication(batch_id, body.preview_token, _actor(request))
+    except UPC.UploadError as e:
+        return _upload_error(e)
+
+
+@app.post("/api/uploads/{batch_id}/discard")
+def uploads_discard(batch_id: str, request: Request):
+    try:
+        return _uploads().discard(batch_id, _actor(request))
+    except UPC.UploadError as e:
+        return _upload_error(e)
+
+
+@app.get("/yukleme", include_in_schema=False)
+def upload_page():
+    """The Upload Center as a fixed page (also reachable before any dashboard was ever published). It contains no
+    data: everything is loaded from the owner-only API after the page checks the session."""
+    from services import upload_ui as UI
+    return HTMLResponse(content=UI.page(), headers={"Cache-Control": "no-store"})
 
 
 # ---------------- draft message (copy-only; nothing is ever sent) ----------------

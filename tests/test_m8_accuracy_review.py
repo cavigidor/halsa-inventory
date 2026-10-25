@@ -7,6 +7,7 @@ no unverified value on any permitted endpoint. Synthetic data only; no network, 
 import dataclasses
 import datetime as dt
 import json
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -374,15 +375,42 @@ def _walk(obj, path=""):
             yield from _walk(v, f"{path}[{i}]")
 
 
-def _permitted_gets(code, cid, issue_id):
+def _permitted_gets(code, cid, issue_id, batch_id=None, job_id=None):
     out = []
     for (method, path), (kind, _) in ACC.ROUTES.items():
         if method != "GET" or kind == "metric" or path in ("/", "/docs", "/redoc", "/openapi.json",
-                                                          "/docs/oauth2-redirect", "/giris"):   # HTML, no data
+                                                          "/docs/oauth2-redirect", "/giris", "/yukleme"):   # HTML
+            continue
+        if ("{job_id}" in path and job_id is None) or ("{batch_id}" in path and batch_id is None):
             continue
         out.append(path.replace("{customer_code}", code).replace("{campaign_id}", str(cid))
-                   .replace("{issue_id}", issue_id))
+                   .replace("{issue_id}", issue_id).replace("{batch_id}", str(batch_id))
+                   .replace("{job_id}", str(job_id)))
     return out
+
+
+def _seed_upload(client, world):
+    """M8-CP3: one validated upload batch (the synthetic stock export), so the owner's Upload Center reads are swept
+    for unverified values too."""
+    import tempfile
+    import time as _t
+    from services import upload_center as UPC
+    ov = APP.app.dependency_overrides
+    APP.app.state.uploads = UPC.UploadCenter(UPC.Deps(
+        data_folder=world["data"], dashboard_path=os.path.join(tempfile.mkdtemp(), "dash.html"),
+        upload_root=tempfile.mkdtemp(), generations=lambda: APP.app.state.generations,
+        context_repo=ov[APP.get_repo], owner_repo=ov[APP.get_owner], install=lambda staged: None,
+        live_gate=lambda: APP._build_gate()[2], inflation_rate=0.4))
+    bid = client.post("/api/uploads").json()["batch_id"]
+    name = next(n for n in os.listdir(world["data"]) if n.lower().startswith("stok"))
+    with open(os.path.join(world["data"], name), "rb") as fh:
+        fid = client.post(f"/api/uploads/{bid}/files", content=fh.read()).json()["file"]["file_id"]
+    job = client.post(f"/api/uploads/{bid}/validate",
+                      json={"assignments": {fid: {"slot": "stock", "declarations": {}}}}).json()["job_id"]
+    deadline = _t.monotonic() + 60
+    while client.get(f"/api/uploads/jobs/{job}").json()["state"] in ("queued", "running") and _t.monotonic() < deadline:
+        _t.sleep(0.05)
+    return bid, job
 
 
 def _seed_vkm(world):
@@ -398,8 +426,9 @@ def _seed_vkm(world):
 
 def test_permitted_endpoints_expose_no_unverified_values_and_no_ai(client, world):
     code, cid = _seed_operational(client)
-    paths = _permitted_gets(code, cid, _seed_vkm(world)) + ["/api/customer360/search?q=" + FX.P[1][:7],
-                                          "/api/crm/followups?mode=all"]
+    bid, job = _seed_upload(client, world)
+    paths = _permitted_gets(code, cid, _seed_vkm(world), bid, job) + ["/api/customer360/search?q=" + FX.P[1][:7],
+                                                                    "/api/crm/followups?mode=all"]
     seen = {}
     for p in paths:
         r = client.get(p)
