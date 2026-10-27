@@ -3,10 +3,7 @@
 Privacy-safe report: report types, file basenames already recorded in Step 1, SHA-256 prefixes, counts, states and
 issue / check codes only. No amounts, customer / product names or codes, or rows left the owner's Mac.
 
-**Result: every acceptance condition PASSED except one display defect in the validation preview (a required-column
-state that could not be checked was shown as ✓).** Fixed in the correction PR that adds this report
-(`claude/m8-cp3-unknown-column-state`). M8-CP3 real-file UI acceptance is complete once that PR is independently
-reviewed and merged. No metric is VERIFIED; the dashboard is **not** ready for the father.
+**Result: owner-local real Stok/Satış/Cari upload acceptance COMPLETE after correction.** All 25 acceptance conditions were tested; the sole preview display defect (unknown required-column state shown as ✓) was fixed by independently reviewed PR #33 (`6bcfb64`), squash-merged into `main` as `42b2d10` on 2026-10-27 (GitHub Actions `40526354833`: 1783 passed / 7 skipped / 2 xfailed). The original owner-local real-upload run occurred on the pre-fix build; the label fix passed synthetic browser regression tests and did not change validation or publication. No metric is VERIFIED; the dashboard is **not** ready for the father.
 
 ## How it was run
 
