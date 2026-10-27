@@ -1,17 +1,18 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-27 (**M8-CP3 owner-local real Excel upload acceptance on the Mac: all 25 conditions PASS except one preview display defect** — an unknown required-column state was shown as ✓; correction PR `claude/m8-cp3-unknown-column-state` open for independent review. Acceptance completes when that PR is merged. NOT deployed. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False. Report: `docs/m8_cp3_real_upload_acceptance.md`)._
+_Updated 2026-10-27 (**M8-CP3 real Stok/Satış/Cari upload UI acceptance COMPLETE** based on owner-local report, with the only preview-label defect fixed in independently reviewed and squash-merged PR #33 (`42b2d10`; reviewed head `6bcfb64`; GitHub Actions `40526354833`: 1783 passed / 7 skipped / 2 xfailed). **Current:** owner business-source and date reconciliation. NOT deployed; 0 metrics VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False. Report: `docs/m8_cp3_real_upload_acceptance.md`)._
 
 ## Git
-- **`claude/m8-cp3-upload-center`:** M8-CP3 (D-065–D-067), PR #32 independently reviewed at `5b78a25` and squash-merged into `main` as `e2b0e74` (2026-10-25); GitHub Actions `40216919121` PASS. NOT deployed or privately accepted through the upload UI.
+- **`claude/m8-cp3-unknown-column-state`:** PR #33 independently reviewed at `6bcfb64`, squash-merged as `42b2d10` on 2026-10-27; unknown columns now show `? Denetlenemedi` rather than ✓. CI `40526354833` PASS; real-export owner-local workflow accepted, NOT deployed.
+- **`claude/m8-cp3-upload-center`:** M8-CP3 (D-065–D-067), PR #32 independently reviewed at `5b78a25` and squash-merged into `main` as `e2b0e74` (2026-10-25); GitHub Actions `40216919121` PASS. NOT deployed; owner-local real Stok/Satış/Cari upload acceptance reported and recorded after PR #33.
 - **`claude/m8-vkm-1-veri-kontrol-merkezi`:** M8-VKM-1 (D-062–D-064), PR #31 independently reviewed and squash-merged into `main` as `422f3a4` (reviewed head `b2b4639`); NOT deployed or validated against real data.
 - **`claude/m8-cp1-simplified-access`:** PR #30 reviewed at `318491d` and squash-merged to `main` (`a03efbf`, 2026-10-22). Three access levels are implemented and locally tested; **not deployed**.
-- **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), M8 source-evidence PR #28 (`5baa92a`), M8 precise validation PR #29 (`4ad8d8a`), M8-CP1 access PR #30 (`a03efbf`) M8-VKM-1 PR #31 (`422f3a4`) and M8-CP3 PR #32 (`e2b0e74`) merged.
+- **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), M8 source-evidence PR #28 (`5baa92a`), M8 precise validation PR #29 (`4ad8d8a`), M8-CP1 access PR #30 (`a03efbf`) M8-VKM-1 PR #31 (`422f3a4`) M8-CP3 PR #32 (`e2b0e74`) and acceptance correction PR #33 (`42b2d10`) merged.
 - **`claude/m8-accuracy-2-shared-evidence`:** PR #28 merged as technical infrastructure 2026-10-20; all production metrics still withheld and `GENERATION_BOUND_API_EVIDENCE` remains False.
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
 - **Owner's Mac folder:** inspected read-only 2026-10-26/27: `~/Desktop/ME/Projects/StockAgent` is `main` @ `c2a3df5`, clean, NOT pulled (behind `main`); `.env` and `data/` untouched (Step 1 found an AI provider enabled in that `.env`; set `AI_PROVIDER=disabled` before any use with real data); no SQLite state file yet. The upload acceptance ran in a separate isolated folder `~/Desktop/ME/Projects/_halsa_cp3_acceptance` (private data copies — owner to delete after review).
 
-## M8-CP3 — owner-local real Excel upload acceptance (Mac, 2026-10-26/27; correction PR open)
+## M8-CP3 — owner-local real Excel upload acceptance (Mac, 2026-10-26/27; ACCEPTED after PR #33 merge)
 - **Setup:** `main` @ `9c200db` (merged tree = reviewed `5b78a25`) in an isolated folder on the Mac with its own
   Python 3.12.2 environment, data folder, SQLite, uploads and dashboard; AI disabled, no `.env` loaded; server on
   127.0.0.1:8765 only; throwaway owner / financial-viewer passwords from `services.owner_auth hash-password`. The
