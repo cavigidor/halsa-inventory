@@ -171,6 +171,10 @@ def test_owner_uploads_validates_previews_and_publishes_from_the_fixed_page(brow
                   "Değişiklikleri Yayınla"):
             assert t in prev, t
         assert "Gösterilir (doğrulanmış)" not in prev                        # nothing becomes visible
+        oks = page.eval_on_selector_all('#up .up-preview .up-chip[data-found="true"]', "els => els.map(e => e.textContent)")
+        assert oks and all(t.startswith("✓ ") for t in oks)                  # found columns keep their tick
+        assert not page.query_selector_all('#up .up-preview .up-chip[data-found="null"]')
+        assert "sütunlar denetlenemedi" not in prev
         assert not [s for s in SECRETS if s in prev]
         assert _status(base + "/")[0] == 404                                # the preview published nothing
         page.click("#up .up-publish")
@@ -263,6 +267,15 @@ def test_invalid_upload_shows_turkish_errors_and_cannot_be_published(browser, tm
         page.wait_for_selector('#up .up-preview[data-status="invalid"]', timeout=60000)
         prev = page.inner_text("#up .up-preview")
         assert "Hatalar (yayını engeller)" in prev and "yanlış rapor türü" in prev
+        # a source that could not be read as the chosen type: its required columns are UNKNOWN, never ticked
+        # (owner-local acceptance 2026-10-27: a real Cari export chosen as "Stok" showed every column with ✓)
+        unk = page.eval_on_selector_all('#up .up-preview .up-chip[data-found="null"]',
+                                        "els => els.map(e => [e.textContent, e.className, e.title])")
+        assert unk and all(t.startswith("? ") and "unk" in c and "ok" not in c.split() and ti == "Denetlenemedi"
+                           for t, c, ti in unk)
+        assert not page.query_selector_all('#up .up-preview .up-chip[data-found="null"].ok')
+        assert "✓" not in "".join(t for t, _, _ in unk)
+        assert "sütunlar denetlenemedi" in prev
         assert page.query_selector("#up .up-publish") is None
         assert _status(base + "/")[0] == 404
 

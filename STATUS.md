@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-25 (Step 1 real-Excel compatibility acceptance on the owner's Mac ACCEPTED; **M8-CP3 Excel Upload Center** (D-065–D-067) independently reviewed and squash-merged from PR #32 to `main` as `e2b0e74` (reviewed head `5b78a25`, CI `40216919121`: 1783 passed / 7 skipped / 2 xfailed). **Current:** private real-file upload and publish acceptance through `/yukleme` on isolated Mac copy. NOT deployed. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False)._
+_Updated 2026-10-27 (**M8-CP3 owner-local real Excel upload acceptance on the Mac: all 25 conditions PASS except one preview display defect** — an unknown required-column state was shown as ✓; correction PR `claude/m8-cp3-unknown-column-state` open for independent review. Acceptance completes when that PR is merged. NOT deployed. No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False. Report: `docs/m8_cp3_real_upload_acceptance.md`)._
 
 ## Git
 - **`claude/m8-cp3-upload-center`:** M8-CP3 (D-065–D-067), PR #32 independently reviewed at `5b78a25` and squash-merged into `main` as `e2b0e74` (2026-10-25); GitHub Actions `40216919121` PASS. NOT deployed or privately accepted through the upload UI.
@@ -9,7 +9,31 @@ _Updated 2026-10-25 (Step 1 real-Excel compatibility acceptance on the owner's M
 - **`main`:** M7 complete PR #24, readiness PR #25, M8 plan PR #26, M8 safety gate PR #27 (`a28b2b9`), M8 source-evidence PR #28 (`5baa92a`), M8 precise validation PR #29 (`4ad8d8a`), M8-CP1 access PR #30 (`a03efbf`) M8-VKM-1 PR #31 (`422f3a4`) and M8-CP3 PR #32 (`e2b0e74`) merged.
 - **`claude/m8-accuracy-2-shared-evidence`:** PR #28 merged as technical infrastructure 2026-10-20; all production metrics still withheld and `GENERATION_BOUND_API_EVIDENCE` remains False.
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
-- **Owner's Mac folder:** current checkout state was not inspected in this checkpoint. Previous notes reported an older checkout; verify `git status` before pulling, protect private `.env`, data and SQLite, and follow `docs/owner_launch_checklist.md`. Browser/real-data acceptance remains owner-local.
+- **Owner's Mac folder:** inspected read-only 2026-10-26/27: `~/Desktop/ME/Projects/StockAgent` is `main` @ `c2a3df5`, clean, NOT pulled (behind `main`); `.env` and `data/` untouched (Step 1 found an AI provider enabled in that `.env`; set `AI_PROVIDER=disabled` before any use with real data); no SQLite state file yet. The upload acceptance ran in a separate isolated folder `~/Desktop/ME/Projects/_halsa_cp3_acceptance` (private data copies — owner to delete after review).
+
+## M8-CP3 — owner-local real Excel upload acceptance (Mac, 2026-10-26/27; correction PR open)
+- **Setup:** `main` @ `9c200db` (merged tree = reviewed `5b78a25`) in an isolated folder on the Mac with its own
+  Python 3.12.2 environment, data folder, SQLite, uploads and dashboard; AI disabled, no `.env` loaded; server on
+  127.0.0.1:8765 only; throwaway owner / financial-viewer passwords from `services.owner_auth hash-password`. The
+  owner's `StockAgent` checkout (`c2a3df5`, clean), `.env` and data untouched; the three originals byte-identical
+  before and after (Stok `63602ae3e8bf`, Satış `be1d895e426b`, Cari `672fac2f5bf6`).
+- **Real upload through `/yukleme` (built-in browser pane):** Stok, Satış, Cari chosen explicitly (nothing
+  preselected, no date inferred, all declarations unknown) → validation 58 s (0 errors, 0 warnings, sheets / required
+  columns recognised; rows 3,311 / 182,121 / 825) → nothing live changed → **published in 64 s**: `sources.json`
+  selects the content-addressed uploads, dashboard / manifest / served generation agree, CRM / follow-up / fair /
+  action tables unchanged, all earlier Veri Kontrol events kept. **Restart:** same generation, dashboard opens,
+  selection and Veri Kontrol sync intact; owner login works; financial viewer 403 `owner_required` on every upload
+  route.
+- **Counts:** gate 28 `invalid` + 5 `not_verified`, **0 VERIFIED**. Core reconciliation FAIL 7 technical / 24 OPEN
+  on the explicit selection (legacy selection of the same files: 7 / 29 = Step 1; the 5 OPEN difference is exactly the
+  "not explicitly selected" items). Veri Kontrol 21 open after publication (Step 1's 23 core − 3
+  `selection_not_explicit` + `kredi / missing_source`).
+- **Failures:** text-as-xlsx 422 `not_xlsx`, truncated 422 `corrupt`; Cari chosen as Stok + synthetic wrong layout →
+  `invalid`, publish 409 `not_ready`; superseded ready preview with its own token → 409 `not_latest`; accepted
+  dashboard and selection unchanged after every failure.
+- **Defect (fixed in the correction PR):** the preview showed ✓ for required columns whose state is unknown (file
+  unreadable as the chosen type) right under the blocking "columns missing" error; now "?" + "denetlenemedi" note.
+- Not tested: Kredi / Gider-Gelir / Bütçe uploads (no file of record), base-changing stale preview (CI race tests).
 
 ## M8-CP3 — Excel Upload Center "Dosya Yükleme" (D-065–D-067; PR #32 MERGED; NOT deployed)
 - **Independent final review and merge:** PR #32 at head `5b78a25` passed GitHub Actions `40216919121` (**1783 passed / 7 skipped / 2 xfailed**, browser/JS required, AI disabled). Both D-066 rollback defects and D-067 under-lock stale-preview protections independently verified; squash-merged `e2b0e74`. Code acceptance only. **Next CURRENT:** private real-export test through `/yukleme`, including preview, publish, restart, rejection/rollback and CRM/fair/VKM preservation. No business metric VERIFIED or hosting sign-off.

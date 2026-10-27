@@ -98,6 +98,10 @@ The preview changes **nothing** live: dashboard, manifest, context, owner views,
 history are untouched (tested). The preview carries file labels, fingerprint prefixes, schema labels, codes and counts —
 never workbook values, names or amounts.
 
+Required columns in the preview: ✓ found, ✗ missing, **? unknown** — the file could not be read as the chosen type
+(wrong report type, unreadable layout), so its columns were not checked; never shown as ✓ (owner-local acceptance
+2026-10-27).
+
 ## 5. Explicit publication ("Değişiklikleri Yayınla")
 
 `POST /api/uploads/{batch}/publish` with the preview token → a publication job:

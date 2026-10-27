@@ -270,7 +270,9 @@ function drawPreview(b){
     c.append(kv([['Sayfalar',(s.sheets||[]).join(', ')||'—'],['Veri satırı',s.data_rows!=null?num(s.data_rows):(s.counts&&s.counts.installments!=null?num(s.counts.installments)+' taksit':'—')],
       ['Düzen',s.layout_supported===true?'Destekleniyor':(s.layout_supported===false?'DESTEKLENMİYOR':(s.state==='ready'?'Okundu':(s.state==='failed'?'Okunamadı':'—')))],['Parmak izi',s.sha256]]));
     if((s.columns||[]).length){const w=el('p','up-cols'); w.append(el('b',null,'Zorunlu sütunlar: '));
-      s.columns.forEach(col=>{const ch=el('span','up-chip '+(col.found===true?'ok':(col.found===false?'no':'unk')),(col.found===false?'✗ ':'✓ ')+col.name); ch.dataset.found=String(col.found); w.append(ch);}); c.append(w);}
+      s.columns.forEach(col=>{const ch=el('span','up-chip '+(col.found===true?'ok':(col.found===false?'no':'unk')),(col.found===true?'✓ ':(col.found===false?'✗ ':'? '))+col.name); ch.dataset.found=String(col.found); if(col.found!==true&&col.found!==false) ch.title='Denetlenemedi'; w.append(ch);});
+      if(s.columns.some(col=>col.found!==true&&col.found!==false)) w.append(el('span','up-muted up-cols-unk',' — dosya bu rapor türü olarak okunamadığı için sütunlar denetlenemedi'));
+      c.append(w);}
     if(s.template) c.append(el('p','up-muted','Stok şablonu: '+(TMPL[s.template.status]||s.template.status||'—')+(s.template.status==='approved_template'?' (ürün kodu sütunu '+(s.template.identity_column||'A')+')':'')));
     if(s.master_sheet===false) c.append(el('p','up-muted','“liste” (müşteri ana listesi) sayfası bulunamadı.'));
     if((s.issue_codes||[]).length) c.append(el('p','up-muted','İçe aktarma kodları: '+s.issue_codes.join(', ')));
