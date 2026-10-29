@@ -1192,3 +1192,37 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   upload overtaken by B is stale, not "unchanged"; a fresh preview afterwards publishes; the hook runs under the lock
   and a refusal changes nothing. Six of these fail on `f1d4e25` (the obsolete preview publishes over B / reports
   "unchanged").
+
+### D-068 · 2026-10-29 · A Cari row holding only empty text is not an account row (M8-R2 / T1)
+- **Context:** M8-R1 (PR #34) found that the real DinamikCRM Cari export ends with a row without an account code whose
+  only written cells hold the empty string. The formula-aware scanner counted every row with any written cell as a data
+  row, so the Cari showed 825 data rows for 824 accounts and 11 "blank amount" cells (one per month bucket), an OPEN
+  reconciliation item and the Veri Kontrol issue `aging / amount_blank` — none of them a real blank amount. The
+  owner's confirmation that the row is report furniture could not change that evidence (PR #34 review).
+- **Decision:** `source_validation.scan_sheet` gets an opt-in `skip_empty_text_rows`, set per source in `CORE`; only the
+  Cari aging source opts in. With it, a row whose ONLY written cells are literal empty text ("" as a shared, inline or
+  `str` value) is not a data row: it is counted in `empty_text_rows` (in the inspection summary and therefore in the
+  generation manifest; never silent) and none of its cells is counted in any column.
+- **Preserved:** a row with any other written cell stays a data row exactly as before, its empty-text cells included —
+  an account code, an amount, a numeric zero, a formula (also one whose cached result is ""), a missing formula cache,
+  an Excel error, a boolean, a date, whitespace-only or any other text, or an unresolvable shared string (fails closed).
+  Genuine blank amounts and missing account codes are still counted. No code is trimmed, no matching rule changes,
+  no value is substituted.
+- **Not changed:** stock (its row analysis and footer recognition, D-055 – D-059, decide identity-less rows; the scan
+  keeps counting every written row) and sales (no evidence of the pattern). Pre-existing and outside T1: an
+  empty-text cell inside a real row still counts as a present value in its column (for stock and Cari alike) —
+  recorded as an observation, not changed here.
+- **Effect on the 5 Oct exports (owner-local, isolated, counts only):** Cari 824 data rows, 0 blank bucket cells, 1
+  empty-text row; reconciliation 7 FAIL / 23 OPEN (was 24); Veri Kontrol 20 (was 21); gate unchanged (28 invalid,
+  5 not_verified); `receivables.collections` still NOT_VERIFIED for its other reasons. Stock and sales evidence
+  identical.
+- **One-time consequence:** the inspection summary gained the `empty_text_rows` key, so the same workbook bytes produce a
+  different `core_id` than before. A manifest saved by an earlier build is not reproduced at restart
+  (`evidence_mismatch`, nothing binds) until the next controlled refresh / upload publication — the existing
+  fail-closed path; no migration is attempted. The Veri Kontrol issue `aging / amount_blank` resolves in the source at
+  the next observation of a Cari upload.
+- **Unchanged:** release gate, `GENERATION_BOUND_API_EVIDENCE` False, no metric VERIFIED, no business rule, D-003 /
+  D-042 identity rules, DQ-1 – DQ-6.
+- **Tests:** `tests/test_m8_r2_t1_empty_text_rows.py` (inline and shared strings, the real two-row ending, a negative
+  control with the option off, genuine blanks, missing codes, every preserved cell kind, unresolvable shared strings,
+  stock and sales unchanged, generation evidence and gate identical with and without the phantom row).

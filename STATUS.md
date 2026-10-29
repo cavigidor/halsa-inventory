@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-29 (**M8-R1 business-data reconciliation — evidence and diagnosis, docs only, awaiting independent review.** The 5 Oct 2026 Stok / Satış / Cari originals reproduce 7 FAIL / 24 OPEN / 21 Veri Kontrol / 0 VERIFIED exactly; every item explained and classified; reporting dates not established; Turkish decision sheet prepared. NOT deployed; 0 metrics VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False. Previous: M8-CP3 real upload acceptance COMPLETE after PR #33 (`42b2d10`). Reports: `docs/accuracy/m8_r1_reconciliation_report.md`, `docs/m8_cp3_real_upload_acceptance.md`)._
+_Updated 2026-10-29 (**M8-R2 / T1 — Cari scanner empty-row correction (D-068), PR open, awaiting independent review.** Real 5 Oct Cari: 824 data rows (was 825), 0 phantom blank bucket cells (was 11); reconciliation 7 FAIL / 23 OPEN (was 24); Veri Kontrol 20 (was 21); gate unchanged, 0 VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False; NOT deployed. Previous: M8-R1 evidence merged as PR #34 (`9592a97`), report `docs/accuracy/m8_r1_reconciliation_report.md`)._
 
 ## Git
 - **`claude/m8-cp3-unknown-column-state`:** PR #33 independently reviewed at `6bcfb64`, squash-merged as `42b2d10` on 2026-10-27; unknown columns now show `? Denetlenemedi` rather than ✓. CI `40526354833` PASS; real-export owner-local workflow accepted, NOT deployed.
@@ -12,7 +12,45 @@ _Updated 2026-10-29 (**M8-R1 business-data reconciliation — evidence and diagn
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
 - **Owner's Mac folder:** inspected read-only 2026-10-26/27: `~/Desktop/ME/Projects/StockAgent` is `main` @ `c2a3df5`, clean, NOT pulled (behind `main`); `.env` and `data/` untouched (Step 1 found an AI provider enabled in that `.env`; set `AI_PROVIDER=disabled` before any use with real data); no SQLite state file yet. The upload acceptance ran in a separate isolated folder `~/Desktop/ME/Projects/_halsa_cp3_acceptance` (private data copies — owner to delete after review).
 
-## M8-R1 — business-data reconciliation of the 5 Oct exports (2026-10-29; docs only; awaiting review)
+## M8-R2 / T1 — Cari scanner empty-row correction (2026-10-29; D-068; awaiting independent review)
+- **Change (one function + one spec flag):** `source_validation.scan_sheet(skip_empty_text_rows=…)`; `CORE["aging"]` opts
+  in. A row whose only written cells are literal "" (shared / inline / `str`) is not a data row, counted in
+  `empty_text_rows` (inspection summary → manifest). Rows with any identity, amount, zero, formula, error, boolean,
+  date, whitespace or other text, or an unresolvable shared string are unchanged. Stock and sales unchanged.
+- **Synthetic tests:** `tests/test_m8_r2_t1_empty_text_rows.py` — 46 passed. Full standard suite (cloud,
+  `AI_PROVIDER=disabled`, `REQUIRE_JS_TESTS=1`): **1765 passed, 71 skipped, 2 xfailed** (baseline `main` here: 1719 passed; +46 new) (browser tests skipped here — Chromium not downloadable in
+  the cloud workspace; CI runs them).
+- **Owner-local validation (Mac, Claude's isolated workspace, 2026-10-29):** `main` @ `9592a97` (before) and the same
+  tree + this patch (after), one shared Python 3.12 environment (pandas 3.1.0, openpyxl 3.1.5), byte-identical
+  read-only copies of the 5 Oct exports (Stok `63602ae3e8bf`, Satış `be1d895e426b`, Cari `672fac2f5bf6`), explicit
+  selection without declarations, `STOCKAGENT_NO_DOTENV=1`, `AI_PROVIDER=disabled`, no server, no SQLite.
+
+  | | before | after |
+  |---|---|---|
+  | Cari data rows | 825 | **824** (= accounts) |
+  | Cari blank bucket cells | 11 | **0** |
+  | Cari empty-text rows (new count) | — | 1 |
+  | Stock data rows / error cells | 3,311 / 1,178 | 3,311 / 1,178 |
+  | Sales data rows | 182,121 | 182,121 |
+  | `reconcile_sources --core` | FAIL · 7 / 24 OPEN | **FAIL · 7 / 23 OPEN** |
+  | Veri Kontrol (detection, incl. `kredi / missing_source`) | 21 (14 high, 7 medium) | **20** (14 high, 6 medium) |
+  | Gate (33 metrics) | 28 invalid, 5 not_verified | 28 invalid, 5 not_verified |
+  | `receivables.collections` | NOT_VERIFIED, 10 reasons | NOT_VERIFIED, 9 reasons |
+
+  The only differences: the Cari OPEN "Tutar alanlarında boş hücreler var", the Veri Kontrol issue `aging /
+  amount_blank` and the collections reason "Kullanılan tutar alanında boş hücreler var: bucket:*". Every other
+  reconciliation line, every stock / sales / liste problem and all 7 failures are identical. The new tests and
+  `tests/test_m8_accuracy2b.py` also pass on the Mac (95 passed). Originals, the owner's checkout (`c2a3df5`), `.env`
+  and data untouched (fingerprints, sizes and mtimes unchanged). Counts-only results in
+  `~/Desktop/ME/Projects/_halsa_r2_t1_validation` (owner deletes after review).
+- **Still blocking `receivables.collections`:** Cari report date, overdue definition and the 120 / 320 /
+  negative-balance rule (owner / accountant, decision sheet A3 / C1), totals declaration, mapping approval,
+  operational-freshness definition, real-data reconciliation reference — and the open release-gate decision
+  (`release_gate.md` §8.3 vs per-metric eligibility, `docs/accuracy/m8_r1_issue_actions.md` §D).
+- **One-time:** the same bytes now give a new `core_id` (summary key added); an older saved manifest re-derives as
+  `evidence_mismatch` until the next refresh / upload publication (existing fail-closed path).
+
+## M8-R1 — business-data reconciliation of the 5 Oct exports (2026-10-29; docs only; merged PR #34 `9592a97`)
 - **Setup:** `main` @ `2dc55b6`, fresh clone in Claude's isolated Linux workspace on the owner's Mac (Python 3.12.15,
   pandas 3.1.0, openpyxl 3.1.5); read-only byte-identical copies (Stok `63602ae3e8bf`, Satış `be1d895e426b`, Cari
   `672fac2f5bf6`), explicit `sources.json` with no declaration / approval; `STOCKAGENT_NO_DOTENV=1`,
