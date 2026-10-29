@@ -169,6 +169,9 @@ Owner questions are numbered as in `docs/m8_owner_questions_tr.md` (Q#). "Withhe
   master; order customer ↔ invoice account relationships (DQ-5) and the DQ-6 account; supplier-prefix (`320`)
   accounts in the Cari aging export and in the collections list; source authority and business dates; the Kredi
   workbook (not present on the Mac).
+- **M8-R1 (2026-10-29):** the 5 Oct exports were re-reconciled read-only; all counts reproduced and every failure /
+  OPEN item explained in `m8_r1_reconciliation_report.md`, with the action table `m8_r1_issue_actions.md` and the
+  Turkish decision sheet `../m8_r1_babamdan_gereken_kararlar_tr.md`. Nothing here was resolved by it.
 - **Hedef** is not part of the generation manifest yet; outputs that use it stay without evidence.
 - **Owner-source approvals:** core sources can carry a fingerprint-bound approval (§9); owner sources (Kredi,
   Gider/Gelir, Bütçe) have no approval mechanism yet, so their outputs cannot verify.

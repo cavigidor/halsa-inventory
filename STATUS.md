@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-27 (**M8-CP3 real Stok/Satış/Cari upload UI acceptance COMPLETE** based on owner-local report, with the only preview-label defect fixed in independently reviewed and squash-merged PR #33 (`42b2d10`; reviewed head `6bcfb64`; GitHub Actions `40526354833`: 1783 passed / 7 skipped / 2 xfailed). **Current:** owner business-source and date reconciliation. NOT deployed; 0 metrics VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False. Report: `docs/m8_cp3_real_upload_acceptance.md`)._
+_Updated 2026-10-29 (**M8-R1 business-data reconciliation — evidence and diagnosis, docs only, awaiting independent review.** The 5 Oct 2026 Stok / Satış / Cari originals reproduce 7 FAIL / 24 OPEN / 21 Veri Kontrol / 0 VERIFIED exactly; every item explained and classified; reporting dates not established; Turkish decision sheet prepared. NOT deployed; 0 metrics VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False. Previous: M8-CP3 real upload acceptance COMPLETE after PR #33 (`42b2d10`). Reports: `docs/accuracy/m8_r1_reconciliation_report.md`, `docs/m8_cp3_real_upload_acceptance.md`)._
 
 ## Git
 - **`claude/m8-cp3-unknown-column-state`:** PR #33 independently reviewed at `6bcfb64`, squash-merged as `42b2d10` on 2026-10-27; unknown columns now show `? Denetlenemedi` rather than ✓. CI `40526354833` PASS; real-export owner-local workflow accepted, NOT deployed.
@@ -11,6 +11,31 @@ _Updated 2026-10-27 (**M8-CP3 real Stok/Satış/Cari upload UI acceptance COMPLE
 - **`claude/m8-accuracy-2-shared-evidence`:** PR #28 merged as technical infrastructure 2026-10-20; all production metrics still withheld and `GENERATION_BOUND_API_EVIDENCE` remains False.
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
 - **Owner's Mac folder:** inspected read-only 2026-10-26/27: `~/Desktop/ME/Projects/StockAgent` is `main` @ `c2a3df5`, clean, NOT pulled (behind `main`); `.env` and `data/` untouched (Step 1 found an AI provider enabled in that `.env`; set `AI_PROVIDER=disabled` before any use with real data); no SQLite state file yet. The upload acceptance ran in a separate isolated folder `~/Desktop/ME/Projects/_halsa_cp3_acceptance` (private data copies — owner to delete after review).
+
+## M8-R1 — business-data reconciliation of the 5 Oct exports (2026-10-29; docs only; awaiting review)
+- **Setup:** `main` @ `2dc55b6`, fresh clone in Claude's isolated Linux workspace on the owner's Mac (Python 3.12.15,
+  pandas 3.1.0, openpyxl 3.1.5); read-only byte-identical copies (Stok `63602ae3e8bf`, Satış `be1d895e426b`, Cari
+  `672fac2f5bf6`), explicit `sources.json` with no declaration / approval; `STOCKAGENT_NO_DOTENV=1`,
+  `AI_PROVIDER=disabled`; no server, no SQLite. Originals, the owner's checkout (`c2a3df5`), `.env` and data untouched.
+- **Reproduced exactly:** `reconcile_sources --core` FAIL 7 / OPEN 24; Veri Kontrol detection 21 (14 high, 7 medium);
+  gate 28 `invalid` + 5 `not_verified`, 0 VERIFIED. No count differs.
+- **Seven failures** (check code `<source>:evidence`): stock Excel errors (1,178 `#DIV/0!` coverage), stock duplicate
+  (1 code, 2 conflicting rows), stock join (256 sold-not-in-stock + the duplicate), sales duplicates (4 identical pairs,
+  2022, 3 orders, not whole-document repeats), sales join (287 unmatched; 720 ambiguous incl. 712 dealer-invoiced
+  customers — structural, can never pass strictly), master join (30 order codes, 7 conflicting master duplicates), Cari
+  join (45 accounts incl. 27 `320`, + 1 DQ-6).
+- **Findings beyond the counts:** coverage formula `AI = AH / ((T+U+V)/6)` (unit undocumented); 3 negative stock
+  quantities; the Cari "11 blank amount cells" are one trailing empty-text row, not account data — **reproduced
+  synthetically as a scan defect (T1), not fixed here**; `liste` is not formula-inspected (9 OPEN, T2).
+- **Dates:** stock and Cari as-of dates unknown (no date in the data; Cari newest bucket Eylül-2026); sales
+  2020-08-27 … 2026-10-05 (whether the last day is complete is unknown); Excel save times 6 Oct are not export times. All undeclared.
+- **Recommended first scope (not approved):** `receivables.collections`, then `stock.reorder` / `stock.overstock`;
+  sales and customer metrics later (F4, F5, Q3, DQ-5).
+- **Tests (cloud, `main` @ `2dc55b6`, synthetic, AI disabled, `REQUIRE_JS_TESTS=1`):** 1719 passed, 71 skipped,
+  2 xfailed (the 64 extra skips are Playwright browser tests — Chromium not downloadable in the cloud workspace; CI
+  runs them). No code changed.
+- **Private evidence:** `~/Desktop/ME/Projects/_halsa_r1_reconciliation` (codes / rows, 0600; owner deletes after
+  review). The CP3 acceptance folder still awaits deletion too.
 
 ## M8-CP3 — owner-local real Excel upload acceptance (Mac, 2026-10-26/27; ACCEPTED after PR #33 merge)
 - **Setup:** `main` @ `9c200db` (merged tree = reviewed `5b78a25`) in an isolated folder on the Mac with its own
