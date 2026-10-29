@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-_Updated 2026-10-29 (**M8-R2 / T1 — Cari scanner empty-row correction (D-068), PR open, awaiting independent review.** Real 5 Oct Cari: 824 data rows (was 825), 0 phantom blank bucket cells (was 11); reconciliation 7 FAIL / 23 OPEN (was 24); Veri Kontrol 20 (was 21); gate unchanged, 0 VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False; NOT deployed. Previous: M8-R1 evidence merged as PR #34 (`9592a97`), report `docs/accuracy/m8_r1_reconciliation_report.md`)._
+_Updated 2026-10-29 (**M8-R3 — strict vs dependency-scoped metric diagnostics, PR open, awaiting independent review.** Opt-in, read-only `--metric-diagnostics`; strict result and exit code unchanged. Real 5 Oct files: FAIL 7 / 23 OPEN, Veri Kontrol 20, 0 of 33 VERIFIED; no candidate certifiable. Release-gate option A / B explained, not chosen. NOT deployed; `GENERATION_BOUND_API_EVIDENCE` False. Previous: M8-R2 / T1 merged as PR #35 (`cc4a50a`). Report: `docs/accuracy/m8_r3_metric_diagnostics.md`)._
 
 ## Git
 - **`claude/m8-cp3-unknown-column-state`:** PR #33 independently reviewed at `6bcfb64`, squash-merged as `42b2d10` on 2026-10-27; unknown columns now show `? Denetlenemedi` rather than ✓. CI `40526354833` PASS; real-export owner-local workflow accepted, NOT deployed.
@@ -12,7 +12,36 @@ _Updated 2026-10-29 (**M8-R2 / T1 — Cari scanner empty-row correction (D-068),
 - **`claude/m8-accuracy-fail-closed`:** PR #27 merged 2026-10-19. M8-ACCURACY-2 must establish shared generation-bound evidence and validate source/report provenance before any metric can be promoted; authentication follows.
 - **Owner's Mac folder:** inspected read-only 2026-10-26/27: `~/Desktop/ME/Projects/StockAgent` is `main` @ `c2a3df5`, clean, NOT pulled (behind `main`); `.env` and `data/` untouched (Step 1 found an AI provider enabled in that `.env`; set `AI_PROVIDER=disabled` before any use with real data); no SQLite state file yet. The upload acceptance ran in a separate isolated folder `~/Desktop/ME/Projects/_halsa_cp3_acceptance` (private data copies — owner to delete after review).
 
-## M8-R2 / T1 — Cari scanner empty-row correction (2026-10-29; D-068; awaiting independent review)
+## M8-R3 — strict vs dependency-scoped metric diagnostics (2026-10-29; awaiting independent review)
+- **Change:** `services/metric_diagnostics.py` (new, pure) and an opt-in `--metric-diagnostics` in
+  `scripts/reconcile_sources.py` (with `--core`). It reuses the manifest built from the frozen bytes, binds it to an
+  independent SHA-256 of those bytes through `accuracy.current_gate` and reports, for `receivables.collections`,
+  `stock.reorder`, `stock.overstock`, `stock.product_counts`: strict status per source, the gate's state / codes and
+  their breakdown (must recompose to the gate state), strict problems still in the source, release prerequisites
+  (met / not met / not evaluated). No check, register entry, definition, approval, release rule, display, upload,
+  access or operational record changed; nothing written except the opt-in key in an `--evidence-out` file.
+- **Synthetic tests:** `tests/test_m8_r3_metric_diagnostics.py` — 23 passed after the review fix (strict unchanged × 4 scenarios incl.
+  exit code and evidence `results`; states = production gate; unrelated FAIL stays visible and blocks release;
+  own-source failures block; dates / totals / mapping / definitions block; a synthetically gate-VERIFIED metric is
+  still not certifiable; mixed generation and missing evidence refused; nothing written or promoted; no identity /
+  amount leak). Full standard suite (cloud, `AI_PROVIDER=disabled`, `REQUIRE_JS_TESTS=1`): **1788 passed, 71 skipped, 2 xfailed** (`main` baseline here 1765 + 23 new) (browser tests
+  skipped in the cloud workspace; CI runs them).
+- **Owner-local acceptance (Mac, isolated, byte-identical read-only copies, AI disabled):** strict FAIL 7 / 23 OPEN
+  (exit 1), identical with and without the flag (console strict section and evidence `results` / `overall` / counts);
+  Veri Kontrol 20 (14 high, 6 medium); gate 28 invalid + 5 not_verified; Cari 824 rows / 0 phantom blanks; one
+  generation ID matching and core evidence complete and bound (all four core records). Tahsilat `not_verified`; Azalan / Fazla Stok / Stok ürün
+  sayıları `invalid` (duplicate code; coverage `#DIV/0!` for the two lists); certification permitted: none. Output
+  sweep against 60,810 identity strings: 0 hits. Originals, checkout (`c2a3df5`), `.env` unchanged. Counts-only
+  results in `~/Desktop/ME/Projects/_halsa_r3_metric_diagnostics` (owner deletes after review).
+- **Review fixes (PR #36 review at `53d1bcb`; reviewed CI 1848 passed / 7 skipped / 2 xfailed):** R3-1 the summary
+  now reports the generation-ID match and "core evidence complete and bound" separately — an unbound or missing
+  source is never shown as a complete set (+4 regression tests; the per-metric fail-closed gate logic is unchanged);
+  R3-2 Option A is described as the strongest global *detected-failure* prerequisite, not proof that no contradiction
+  exists (OPEN and uninspected / unknown evidence still need review).
+- **Open (owner):** release-gate option A or B (explained in `docs/accuracy/m8_r3_metric_diagnostics.md` §5, not
+  chosen); the business answers, dates and declarations in the blocker matrix (§4).
+
+## M8-R2 / T1 — Cari scanner empty-row correction (2026-10-29; D-068; merged PR #35 `cc4a50a`)
 - **Change (one function + one spec flag):** `source_validation.scan_sheet(skip_empty_text_rows=…)`; `CORE["aging"]` opts
   in. A row whose only written cells are literal "" (shared / inline / `str`) is not a data row, counted in
   `empty_text_rows` (inspection summary → manifest). Rows with any identity, amount, zero, formula, error, boolean,
