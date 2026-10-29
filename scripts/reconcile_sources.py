@@ -4,6 +4,7 @@
     python -m scripts.reconcile_sources --kredi "data/kredi takip(1).xlsx" --show-values        # amounts: local only
     python -m scripts.reconcile_sources --core data                                             # stock / sales / Cari
     python -m scripts.reconcile_sources --kredi FILE --expect-sha256 <hash> --evidence-out     # → data/reconciliation/
+    python -m scripts.reconcile_sources --core data --metric-diagnostics   # + read-only strict vs per-metric view
 
 Guarantees:
 - reads the workbook bytes once and never writes to, repairs or re-saves any workbook;
@@ -21,6 +22,11 @@ Overall result (printed last, and `overall` in the evidence file):
   FAIL = at least one technical check failed.
 Exit code: 0 = PASS, 1 = FAIL, 2 = unreadable input / usage error / refused evidence path, 3 = OPEN,
 4 = the checks ran but the evidence file could not be written (nothing else was written).
+
+`--metric-diagnostics` (M8-R3, opt-in, with `--core`): after the overall result, a READ-ONLY comparison of the strict
+source-wide result with the actual gate decision of each candidate metric (services/metric_diagnostics.py), from the
+same manifest and the same frozen bytes. It adds no check, never changes the overall result or the exit code, promotes
+nothing and writes nothing (with `--evidence-out` the evidence file gains a `metric_diagnostics` section).
 
 Evidence output never touches an input: the path is refused if it is (or links to) the Kredi workbook, the selection
 file or any workbook in the core folder, or if anything already exists there; the file is created exclusively
@@ -139,7 +145,7 @@ def reconcile_kredi(path: str, out: Out, *, today: dt.date, snapshot: dt.date | 
     return {"file": fs.file, "sha256": fs.sha256, "ok": True}
 
 
-def reconcile_core(data_folder: str, out: Out, *, today: dt.date) -> dict:
+def reconcile_core(data_folder: str, out: Out, *, today: dt.date, keep: dict | None = None) -> dict:
     from services import generation as GEN
     from services import refresh as RF
     try:
@@ -156,6 +162,11 @@ def reconcile_core(data_folder: str, out: Out, *, today: dt.date) -> dict:
     if not v["ok"]:
         return {"ok": False}
     m = GEN.build_manifest(frozen, v["frames"], decl, origin, today)
+    if keep is not None:          # M8-R3 diagnostics: this exact manifest + an independent hash of the bytes read
+        served = {k: GEN.sha256_bytes(fs.data) for k, fs in frozen.items()}
+        if "sales" in served:
+            served["liste"] = served["sales"]                   # the master is a sheet of the sales workbook
+        keep.update(manifest=m, served=served)
     for r in m.core:
         out.line(f"{r.key}: {r.file} · SHA-256 {r.sha256}")
         rows = (r.validation or {}).get("rows") if r.key == "stock" else None
@@ -226,6 +237,8 @@ def main(argv=None) -> int:
     ap.add_argument("--snapshot-date", help="declared Kredi snapshot date YYYY-MM-DD (unknown if omitted)")
     ap.add_argument("--expect-sha256", help="fail unless the Kredi workbook has exactly this fingerprint")
     ap.add_argument("--show-values", action="store_true", help="print amount totals to the LOCAL console only")
+    ap.add_argument("--metric-diagnostics", action="store_true",
+                    help="with --core: read-only strict vs per-metric gate comparison (never changes the result)")
     ap.add_argument("--evidence-out", nargs="?", const="", default=None,
                     help="write privacy-safe evidence JSON (fingerprints, counts, results); without a path: "
                          "data/reconciliation/ (git-ignored); inside the repository only under data/")
@@ -258,8 +271,9 @@ def main(argv=None) -> int:
     try:
         if a.kredi:
             summary["kredi"] = reconcile_kredi(a.kredi, out, today=today, snapshot=snap, expect_sha=a.expect_sha256)
+        keep: dict | None = {} if (a.metric_diagnostics and a.core) else None
         if a.core:
-            summary["core"] = reconcile_core(a.core, out, today=today)
+            summary["core"] = reconcile_core(a.core, out, today=today, keep=keep)
     except OSError:
         print("Dosya okunamadı.")
         return 2
@@ -272,6 +286,8 @@ def main(argv=None) -> int:
         "PASS": "tüm teknik kontroller geçti; finansal onay değildir.",
         "OPEN": "teknik hata yok; çözülmemiş iş soruları var (doğrulanmış sayılmaz).",
         "FAIL": "en az bir teknik kontrol başarısız (kaynak doğrulanmadı)."}[overall])
+    if a.metric_diagnostics:
+        summary["metric_diagnostics"] = _metric_diagnostics(keep, out.results, overall, today)
     if evidence_path:
         err = _write_evidence_exclusive(evidence_path, summary, _protected_inputs(a.kredi, a.core))
         if err:
@@ -279,6 +295,22 @@ def main(argv=None) -> int:
             return 4
         out.line(f"Kanıt dosyası yazıldı (değer yok): {_shown(evidence_path)}")
     return {"PASS": 0, "FAIL": 1, "OPEN": 3}[overall]
+
+
+def _metric_diagnostics(keep: dict | None, results: list[dict], overall: str, today: dt.date) -> dict:
+    """M8-R3: printed and returned only; it never touches `results`, so the overall result and exit code are the
+    ones computed above."""
+    from services import metric_diagnostics as MD
+    if not keep or keep.get("manifest") is None:
+        msg = ("METRİK TANILAMA: kullanılamaz — " + ("yalnızca --core ile çalışır." if keep is None else
+               "kaynak doğrulaması tamamlanmadığı için kanıt yok (hiçbir metrik değerlendirilmedi)."))
+        print(msg)
+        return {"schema": "halsa-metric-diagnostics/1", "available": False}
+    d = MD.diagnose(keep["manifest"], keep["served"], today, strict_overall=overall,
+                    strict_sources=MD.strict_by_source(results))
+    for line in MD.render_tr(d):
+        print(line)
+    return {"available": True, **d}
 
 
 # ---------------------------------------------------------------------------------------------
