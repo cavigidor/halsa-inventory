@@ -17,7 +17,13 @@ bilen birinin cevaplaması gereken konular.
 - Cevaplar gelene kadar panel bu konulardaki rakamları **göstermemeye** devam eder.
 
 **İlk hedef:** önce iki ekranı doğrulamak — **Tahsilat (cari bakiyeler)** ve **Azalan / Fazla Stok** listeleri.
-Bunlar için A, B ve C1 yeterli. C2–D, satış ve müşteri ekranları için sonraki adımdır.
+Bu iki ekran için **ilk sorulması gereken** iş soruları A, B ve C1'dir. C2–D, satış ve müşteri ekranları için sonraki
+adımdır.
+
+**Önemli:** A, B ve C1'in cevapları bir ekranı açmak için **tek başına yetmez**. Cevaplardan sonra da sırasıyla şunlar
+gerekir: bizim yapacağımız teknik düzeltmeler ve bunların ayrı ayrı test edilmesi, rakamların bağımsız olarak
+yeniden kontrol edilmesi, kararların yazılı olarak kaydedilmesi ve panelin genel yayın kontrolünden geçmesi. Bu
+adımların hepsi tamamlanmadan panel bir rakamı "doğrulanmış" olarak göstermez.
 
 ---
 

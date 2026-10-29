@@ -67,6 +67,9 @@ permanent business structure, so **F5 can never pass** while that rule applies s
 judged strictly (no `requires` declaration) is therefore INVALID regardless of data quality. Sales metrics can only
 move once (a) their dependencies are declared after code tracing, as 2B did for four stock / Cari metrics, and (b) the
 owner approves the identity rule they use (DQ-5 / Q10). This is the main reason no sales metric is a first candidate.
+Scoping a metric changes only that metric's judgement: the strict F5 in `reconcile_sources` (which always uses the
+unscoped judgement) stays FAIL, and with it the overall `GENEL SONUÇ` that `release_gate.md` §8.3 requires not to be
+FAIL (see §9.5).
 
 ## 4. The 24 OPEN items
 
@@ -240,15 +243,24 @@ PR (see the action table), not fixed here.
 
 Ranked by how few unresolved dependencies each has. "Shown" = what the father would see once VERIFIED.
 
+**Eligibility is not promotion.** The requirements below make a metric *eligible* under the gate's per-metric
+(dependency-scoped) judgement. None of them clears the strict reconciliation failures F1–F7, and none can lead to
+VERIFIED while `release_gate.md` §8.3 requires the overall core reconciliation not to be FAIL. That conflict is open
+(§9.5; action table §C–§D).
+
 ### 9.1 `receivables.collections` — Tahsilat (Cari bakiyeleri) — **first candidate**
 - **Why first:** already `not_verified` (not `invalid`), dependency-scoped (aging account / name / representative /
   buckets, no join), no revenue-basis or DQ-5 dependency; the Cari file has no formulas and no errors.
 - **Remaining requirements:** Cari snapshot date (group A); definition of the buckets and of "vadesi geçen" (are all
   buckets overdue? invoice month vs due month — `OVERDUE-DEF`); 120 / 320 and negative-balance rule; totals
   declaration (the accountant confirms the report total for the same date); mapping approval; operational freshness
-  definition (45-day limit is provisional); T1 fix or the owner's confirmation that the trailing rows are report
-  furniture; a real-data reconciliation reference.
-- **Dependencies:** none on the sales / stock / master findings (the 45-account join is not used by this metric).
+  definition (45-day limit is provisional); **an implemented, independently tested T1 correction** (or an
+  equivalent, narrowly scoped and tested handling) — the owner's confirmation that the trailing rows are report
+  furniture is useful evidence for that change but does not by itself change the runtime evidence: under the current
+  scanner the row still contributes 11 blank bucket cells to the fields this metric reads; a real-data reconciliation
+  reference.
+- **Dependencies:** none on the sales / stock / master findings for its own scoped judgement (the 45-account join is
+  not used by this metric). The strict `aging:evidence` FAIL (F7) and the overall FAIL remain (§9.5).
 - **Independent tests:** a regression test for the approved 120 / 320 and negative-balance rule; a synthetic Cari with
   trailing empty rows; an owner-local reconciliation of the account count and bucket totals against the accountant's
   figure for the declared date (counts committed only).
@@ -260,6 +272,10 @@ Ranked by how few unresolved dependencies each has. "Shown" = what the father wo
   `STOK Kontrol %` vs `minseviye` / `maxseviye`; the duplicate-code answer (`STOCK-REPORT-SCOPE`); for overstock value
   the `Envanter değeri` valuation basis (`INV-VALUE`); totals declaration and mapping approval for the stock file.
 - **Dependencies:** none on sales joins (scoped; the footer of the fields they read reconciles; BA does not count).
+  Scoping does **not** remove two stock problems from their judgement: the duplicate product code is a source-integrity
+  problem (INVALID until it is resolved in the source or by a reviewed code change), and the 1,178 `#DIV/0!` cells are in
+  the AI field they read (INVALID until an approved DQ-4 rule is implemented in the evidence, with tests). Answers to B1–B3
+  are inputs to those changes, not substitutes for them.
   The 3 negative quantities should be explained before the list is shown (they would appear as stock rows).
 - **Independent tests:** regression for the approved DQ-4 rule (separate "kapsam hesaplanamadı" list or other);
   synthetic duplicate-code handling per the decision; owner-local reconciliation of list counts and of a sample of
@@ -283,11 +299,33 @@ Ranked by how few unresolved dependencies each has. "Shown" = what the father wo
 Kredi (file of record, DURUM, snapshot), Gider/Gelir, Bütçe, Hedef, Trodat, detailed collections (M6-4), hosting
 (CP2 / CP5 / KVKK), cross-sell, fairs, CRM, AI.
 
+### 9.5 Open decision — the global release precondition vs the first-metric strategy
+- **The existing rule (unchanged):** `release_gate.md` §8.3 step 2 requires `GENEL SONUÇ` of
+  `reconcile_sources --core` not to be FAIL before `GENERATION_BOUND_API_EVIDENCE` may become True; while it is False,
+  `validate_register(production=True)` refuses every VERIFIED certification. `reconcile_core()` always uses the
+  unscoped judgement, and D-059 states that the source's overall reconciliation stays OPEN / FAIL even where a scoped
+  metric could pass.
+- **The conflict:** 9.1 / 9.2 rely on per-metric scoping. Owner answers and scoping cannot make the strict result
+  non-FAIL: F5 is unreachable under the current check while dealer invoicing exists, and F1, F3 and F7 need source
+  changes or reviewed check-definition changes (action table §C1). So, as written, the first-metric strategy cannot end
+  in a promotion.
+- **Not resolved here.** This PR does not change, weaken or reinterpret §8.3, the flag or any check.
+- **Recommended path** (each step separately and independently reviewed; details in action table §D): owner answers
+  recorded as decisions → tested technical corrections (T1, DQ-4 and duplicate-code handling) → a reporting-only change
+  that prints the scoped decision of each candidate metric beside the unchanged strict verdict → an owner-authorized,
+  independently reviewed release-gate decision (D-xxx) that either keeps §8.3 and lists the source / check changes
+  needed to reach a non-FAIL strict result, or revises §8.3 to a per-metric precondition with explicit safeguards (the
+  strict verdict still computed and shown, never relabelled PASS; every remaining FAIL explained, in Veri Kontrol and
+  owner-reviewed; none in the promoted metric's dependencies; all other metrics withheld, proven by tests) → only then
+  the flag PR and one promotion PR per metric.
+
 ## 10. Tests
 
 Existing standard suite on `main` @ `2dc55b6` (cloud, synthetic, `AI_PROVIDER=disabled`, `REQUIRE_JS_TESTS=1`):
 **1719 passed, 71 skipped, 2 xfailed**. The extra skips versus CI (7) are the Playwright browser tests: Chromium could
 not be downloaded in the cloud workspace; they run in GitHub Actions on the PR. No code changed in this checkpoint.
+GitHub Actions on PR #34 (run `40896420043`, head `ddc28de`, `REQUIRE_BROWSER_TESTS=1`, `REQUIRE_JS_TESTS=1`,
+`AI_PROVIDER=disabled`): **1783 passed, 7 skipped, 2 xfailed** (verified by the independent reviewer).
 
 ## 11. Stop conditions respected
 No merge, no deployment, no ERP change, no metric promoted, `GENERATION_BOUND_API_EVIDENCE` False, AI disabled, no

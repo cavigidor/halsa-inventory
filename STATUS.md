@@ -30,7 +30,11 @@ _Updated 2026-10-29 (**M8-R1 business-data reconciliation — evidence and diagn
 - **Dates:** stock and Cari as-of dates unknown (no date in the data; Cari newest bucket Eylül-2026); sales
   2020-08-27 … 2026-10-05 (whether the last day is complete is unknown); Excel save times 6 Oct are not export times. All undeclared.
 - **Recommended first scope (not approved):** `receivables.collections`, then `stock.reorder` / `stock.overstock`;
-  sales and customer metrics later (F4, F5, Q3, DQ-5).
+  sales and customer metrics later (F4, F5, Q3, DQ-5). **Open conflict (review of PR #34):** per-metric eligibility
+  does not clear the strict failures, and `release_gate.md` §8.3 still requires the overall core reconciliation not to
+  be FAIL before the flag can change; F5 cannot clear under the current check. Unchanged here; resolution path
+  (separate, independently reviewed, owner-authorized release-gate decision) in `docs/accuracy/m8_r1_issue_actions.md`
+  §C–§D.
 - **Tests (cloud, `main` @ `2dc55b6`, synthetic, AI disabled, `REQUIRE_JS_TESTS=1`):** 1719 passed, 71 skipped,
   2 xfailed (the 64 extra skips are Playwright browser tests — Chromium not downloadable in the cloud workspace; CI
   runs them). No code changed.
