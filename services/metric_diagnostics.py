@@ -25,6 +25,8 @@ from typing import Any, Mapping
 from services import accuracy as ACC
 
 CANDIDATES = ("receivables.collections", "stock.reorder", "stock.overstock", "stock.product_counts")
+# the core records every reconciliation run is expected to carry (liste = the customer master sheet of the sales workbook)
+EXPECTED_CORE = ("aging", "liste", "sales", "stock")
 
 # what kind of work removes a blocker (one or more; the first is what has to happen first)
 BUSINESS = "business_answer"                 # an owner / accountant answer, recorded as a D-xxx decision
@@ -116,12 +118,21 @@ def diagnose(manifest, served: Mapping[str, str | None], today: dt.date, *, stri
     gate = ACC.current_gate(today, snap, expected)
     reg, defs = gate.register, gate.definitions
     generation_ok = snap.generation_id is not None and snap.generation_id == expected
+    # R3-1: a matching generation ID does NOT mean every source is usable — a record can be unbound (its bytes are not
+    # the recorded ones) or carry no evidence. Completeness is reported separately and never implied by the ID.
+    bound = set(snap.evidence) if generation_ok else set()
+    unbound = sorted(set(snap.unbound) | ({k for k in EXPECTED_CORE if k in snap.evidence} if not generation_ok
+                                            else set()))
+    missing = sorted(k for k in EXPECTED_CORE if k not in snap.evidence and k not in snap.unbound)
+    complete = generation_ok and not unbound and not missing and all(k in bound for k in EXPECTED_CORE)
     out: dict[str, Any] = {
         "schema": "halsa-metric-diagnostics/1",
         "read_only": True,
         "generation": {"generation_id": (snap.generation_id or "")[:16], "expected": (expected or "")[:16],
-                       "consistent": generation_ok, "bound_sources": sorted(snap.evidence),
-                       "unbound_sources": sorted(snap.unbound)},
+                       "generation_id_matches": generation_ok,
+                       "core_evidence_complete_and_bound": complete,
+                       "bound_sources": sorted(bound), "unbound_sources": unbound,
+                       "missing_evidence_sources": missing},
         "strict": {"overall": strict_overall, "sources": dict(strict_sources or {})},
         "generation_bound_api_evidence": ACC.GENERATION_BOUND_API_EVIDENCE,
         "metrics": {},
@@ -212,9 +223,12 @@ def render_tr(diag: Mapping[str, Any]) -> list[str]:
     st = {"verified": "DOĞRULANDI", "not_verified": "DOĞRULANMADI", "invalid": "GEÇERSİZ"}
     g = diag["generation"]
     lines = ["", "METRİK TANILAMA (salt okunur; yukarıdaki GENEL SONUÇ'u ve çıkış kodunu değiştirmez)",
-             f"  Üretim: {g['generation_id']} · beklenen: {g['expected']} · tutarlı: {'evet' if g['consistent'] else 'HAYIR'}"
+             f"  Üretim: {g['generation_id']} · beklenen: {g['expected']} · üretim kimliği eşleşiyor: "
+             f"{'evet' if g['generation_id_matches'] else 'HAYIR'} · çekirdek kaynak kanıtı eksiksiz ve bağlı: "
+             f"{'evet' if g['core_evidence_complete_and_bound'] else 'HAYIR'}"
              f" · bağlı kaynaklar: {', '.join(g['bound_sources']) or '-'}"
-             + (f" · BAĞLANAMAYAN: {', '.join(g['unbound_sources'])}" if g['unbound_sources'] else ""),
+             + (f" · BAĞLANAMAYAN: {', '.join(g['unbound_sources'])}" if g['unbound_sources'] else "")
+             + (f" · KANITI EKSİK: {', '.join(g['missing_evidence_sources'])}" if g['missing_evidence_sources'] else ""),
              f"  Katı (kaynak geneli) sonuç: {diag['strict']['overall']} · kaynaklar: "
              + ", ".join(f"{k}={v}" for k, v in sorted(diag['strict']['sources'].items())),
              f"  GENERATION_BOUND_API_EVIDENCE: {diag['generation_bound_api_evidence']}"]

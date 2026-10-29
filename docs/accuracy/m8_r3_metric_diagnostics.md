@@ -26,7 +26,9 @@ python -m scripts.reconcile_sources --core data --metric-diagnostics [--evidence
 - **One generation.** It reuses the manifest the command just built from the frozen bytes and binds it to an
   independent SHA-256 of those same bytes, through `accuracy.current_gate` — exactly as the API binds evidence. Evidence
   of another generation, unbound bytes or a missing record are reported as unavailable (`EVIDENCE-GENERATION` /
-  `NO-EVIDENCE`) and never pass.
+  `NO-EVIDENCE`) and never pass. The summary reports two separate facts: whether the **generation ID matches**, and
+  whether the **core evidence is complete and bound** (aging, liste, sales, stock all present with evidence and bound
+  to the bytes read); a matching ID with an unbound or missing source is shown as incomplete, with the sources named.
 - **Per candidate** (`receivables.collections`, `stock.reorder`, `stock.overstock`, `stock.product_counts`): the
   strict status of each source it reads; the gate's state and codes; the parts of that decision (certified ceiling,
   open blockers, unapproved definitions, source problems as the gate judges them for this metric, time rules,
@@ -54,7 +56,7 @@ against all 60,810 identity strings of the three workbooks found none.
 | Veri Kontrol (detection incl. `kredi / missing_source`) | 20 | **20** (14 high, 6 medium) |
 | Gate (33 metrics) | 0 VERIFIED | **0 VERIFIED** — 28 invalid, 5 not_verified |
 | Cari data rows / phantom blank cells | 824 / 0 | **824 / 0** |
-| Generation | — | consistent; aging, liste, sales, stock bound; none unbound |
+| Generation | — | generation ID matches; core evidence complete and bound (aging, liste, sales, stock); none unbound or missing |
 | Strict per source | — | aging FAIL, liste FAIL, sales FAIL, stock FAIL |
 
 ## 4. Blocker matrix for the candidate metrics (real files)
@@ -95,7 +97,12 @@ all-source result not to be FAIL before the flag may change. The diagnostic show
   duplicates, master duplicates), or separately reviewed check changes where the data are legitimate (F5 dealer
   invoicing is structural; F1 and F7 need an approved rule and a changed check; F3 needs a full product list or a
   changed check).
-- Strongest guarantee that nothing contradictory exists anywhere in the core sources before any figure is shown.
+- What it guarantees, precisely: the strongest **global detected-failure** prerequisite available — before the flag
+  may change, none of the implemented strict checks reports an INVALID problem in any core source. It does **not**
+  prove that no contradiction exists. A non-FAIL result can still be OPEN: business questions, undeclared dates,
+  totals and mappings, and evidence that was never inspected or is unknown (for example the nine `liste` checks the
+  formula-aware scan does not run, R1 T2) — each of those still needs its own review. And no check can detect what
+  the source does not show.
 - Cost: no first-release metric can be certified until all core sources are clean or re-specified, including sources
   the candidate metrics never read (sales, customer master).
 
@@ -112,4 +119,6 @@ all-source result not to be FAIL before the flag may change. The diagnostic show
   before use.
 
 Neither option changes any business rule or makes a candidate certifiable on its own: under either, every row of §4
-other than the strict-FAIL row still blocks all four metrics.
+other than the strict-FAIL row still blocks all four metrics. Neither can certify business facts the exports do not
+show or that are not documented — those rest on the owner's / accountant's recorded answers and the independent
+real-data reconciliation.

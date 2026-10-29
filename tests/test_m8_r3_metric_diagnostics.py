@@ -249,8 +249,9 @@ def test_evidence_of_another_generation_is_refused(tmp_path, promoted):  # noqa:
         for s in dm["source_judgement"].values():
             assert s["available"] is False and s["reason"] == "EVIDENCE-GENERATION"
         assert dm["gate_state"] != "verified" and dm["certification_permitted"] is False
-    assert MD.diagnose(ma, sa, TODAY, strict_overall="OPEN", expected_generation=mb.generation_id)[
-        "generation"]["consistent"] is False
+    g = MD.diagnose(ma, sa, TODAY, strict_overall="OPEN", expected_generation=mb.generation_id)["generation"]
+    assert g["generation_id_matches"] is False and g["core_evidence_complete_and_bound"] is False
+    assert g["bound_sources"] == [] and g["unbound_sources"] == ["aging", "liste", "sales", "stock"]
 
 
 def test_missing_evidence_is_unavailable_never_passing(tmp_path, promoted):  # noqa: F811
@@ -265,6 +266,70 @@ def test_missing_evidence_is_unavailable_never_passing(tmp_path, promoted):  # n
         assert s["available"] is False and s["reason"] == "NO-EVIDENCE"
         assert diag["metrics"][k]["gate_state"] == "not_verified"
         assert MD.UNAVAILABLE in s["problems"][0]["categories"]
+
+
+# ---------------------------------------------------------------------------------------------
+# 6b. R3-1: a matching generation ID is never reported as a complete, fully bound source set
+# ---------------------------------------------------------------------------------------------
+def _summary_line(diag):
+    return next(x for x in MD.render_tr(diag) if x.startswith("  Üretim:"))
+
+
+def _gate_unchanged(m, served, diag):
+    gate = ACC.current_gate(TODAY, m.bound_snapshot(served), m.generation_id)
+    for k in KEYS:
+        assert diag["metrics"][k]["gate_state"] == gate.decide(k).state.value
+        assert diag["metrics"][k]["gate_codes"] == list(gate.decide(k).codes)
+
+
+def test_clean_generation_is_complete_and_bound(tmp_path):
+    m, served, diag = diag_of(folder_clean(tmp_path))
+    g = diag["generation"]
+    assert g["generation_id_matches"] is True and g["core_evidence_complete_and_bound"] is True
+    assert g["bound_sources"] == ["aging", "liste", "sales", "stock"]
+    assert g["unbound_sources"] == [] and g["missing_evidence_sources"] == []
+    assert "eksiksiz ve bağlı: evet" in _summary_line(diag)
+
+
+def test_unbound_source_with_matching_generation_id_is_not_complete(tmp_path, promoted):  # noqa: F811
+    a = folder_clean(tmp_path, "a")
+    selection(a)
+    ma, _ = manifest_of(a)
+    _, sb = manifest_of(folder_stock_broken(tmp_path))                 # the stock bytes of another export
+    diag = MD.diagnose(ma, sb, TODAY, strict_overall="OPEN")
+    g = diag["generation"]
+    assert g["generation_id_matches"] is True                          # the ID alone still matches …
+    assert g["core_evidence_complete_and_bound"] is False              # … but the source set is not complete
+    assert g["unbound_sources"] == ["stock"] and "stock" not in g["bound_sources"]
+    line = _summary_line(diag)
+    assert "eksiksiz ve bağlı: HAYIR" in line and "BAĞLANAMAYAN: stock" in line
+    assert "eksiksiz ve bağlı: evet" not in line and "tutarlı: evet" not in line
+    _gate_unchanged(ma, sb, diag)                                      # per-metric fail-closed logic unchanged
+    for k in ("stock.reorder", "stock.overstock", "stock.product_counts"):
+        assert diag["metrics"][k]["source_judgement"]["stock"]["available"] is False
+        assert diag["metrics"][k]["gate_state"] != "verified"
+
+
+@pytest.mark.parametrize("how", ["evidence_none", "record_absent"])
+def test_missing_source_evidence_with_matching_generation_id_is_not_complete(tmp_path, promoted, how):  # noqa: F811
+    d = folder_clean(tmp_path)
+    selection(d)
+    m, served = manifest_of(d)
+    core = (tuple(dataclasses.replace(r, evidence=None) if r.key == "stock" else r for r in m.core)
+            if how == "evidence_none" else tuple(r for r in m.core if r.key != "stock"))
+    m2 = dataclasses.replace(m, core=core)
+    diag = MD.diagnose(m2, served, TODAY, strict_overall="OPEN")
+    g = diag["generation"]
+    assert g["generation_id_matches"] is True and g["core_evidence_complete_and_bound"] is False
+    assert g["missing_evidence_sources"] == ["stock"] and g["unbound_sources"] == []
+    line = _summary_line(diag)
+    assert "eksiksiz ve bağlı: HAYIR" in line and "KANITI EKSİK: stock" in line
+    assert "eksiksiz ve bağlı: evet" not in line
+    _gate_unchanged(m2, served, diag)
+    for k in ("stock.reorder", "stock.overstock", "stock.product_counts"):
+        s = diag["metrics"][k]["source_judgement"]["stock"]
+        assert s["available"] is False and s["reason"] == "NO-EVIDENCE"
+        assert diag["metrics"][k]["gate_state"] != "verified"
 
 
 # ---------------------------------------------------------------------------------------------

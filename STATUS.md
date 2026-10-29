@@ -20,19 +20,24 @@ _Updated 2026-10-29 (**M8-R3 — strict vs dependency-scoped metric diagnostics,
   their breakdown (must recompose to the gate state), strict problems still in the source, release prerequisites
   (met / not met / not evaluated). No check, register entry, definition, approval, release rule, display, upload,
   access or operational record changed; nothing written except the opt-in key in an `--evidence-out` file.
-- **Synthetic tests:** `tests/test_m8_r3_metric_diagnostics.py` — 19 passed (strict unchanged × 4 scenarios incl.
+- **Synthetic tests:** `tests/test_m8_r3_metric_diagnostics.py` — 23 passed after the review fix (strict unchanged × 4 scenarios incl.
   exit code and evidence `results`; states = production gate; unrelated FAIL stays visible and blocks release;
   own-source failures block; dates / totals / mapping / definitions block; a synthetically gate-VERIFIED metric is
   still not certifiable; mixed generation and missing evidence refused; nothing written or promoted; no identity /
-  amount leak). Full standard suite (cloud, `AI_PROVIDER=disabled`, `REQUIRE_JS_TESTS=1`): **1784 passed, 71 skipped, 2 xfailed** (`main` baseline here 1765 + 19 new) (browser tests
+  amount leak). Full standard suite (cloud, `AI_PROVIDER=disabled`, `REQUIRE_JS_TESTS=1`): **1788 passed, 71 skipped, 2 xfailed** (`main` baseline here 1765 + 23 new) (browser tests
   skipped in the cloud workspace; CI runs them).
 - **Owner-local acceptance (Mac, isolated, byte-identical read-only copies, AI disabled):** strict FAIL 7 / 23 OPEN
   (exit 1), identical with and without the flag (console strict section and evidence `results` / `overall` / counts);
   Veri Kontrol 20 (14 high, 6 medium); gate 28 invalid + 5 not_verified; Cari 824 rows / 0 phantom blanks; one
-  consistent generation, all four core records bound. Tahsilat `not_verified`; Azalan / Fazla Stok / Stok ürün
+  generation ID matching and core evidence complete and bound (all four core records). Tahsilat `not_verified`; Azalan / Fazla Stok / Stok ürün
   sayıları `invalid` (duplicate code; coverage `#DIV/0!` for the two lists); certification permitted: none. Output
   sweep against 60,810 identity strings: 0 hits. Originals, checkout (`c2a3df5`), `.env` unchanged. Counts-only
   results in `~/Desktop/ME/Projects/_halsa_r3_metric_diagnostics` (owner deletes after review).
+- **Review fixes (PR #36 review at `53d1bcb`; reviewed CI 1848 passed / 7 skipped / 2 xfailed):** R3-1 the summary
+  now reports the generation-ID match and "core evidence complete and bound" separately — an unbound or missing
+  source is never shown as a complete set (+4 regression tests; the per-metric fail-closed gate logic is unchanged);
+  R3-2 Option A is described as the strongest global *detected-failure* prerequisite, not proof that no contradiction
+  exists (OPEN and uninspected / unknown evidence still need review).
 - **Open (owner):** release-gate option A or B (explained in `docs/accuracy/m8_r3_metric_diagnostics.md` §5, not
   chosen); the business answers, dates and declarations in the blocker matrix (§4).
 
