@@ -80,6 +80,7 @@ class SheetScan:
     external_links: int
     ok: bool = True
     failure: str | None = None
+    empty_text_rows: int = 0                # rows whose ONLY written cells are empty text ("") — not data rows (T1)
 
 
 def _shared_strings(z: zipfile.ZipFile) -> list[str]:
@@ -104,6 +105,13 @@ def _sheet_part(z: zipfile.ZipFile, index: int) -> str:
     raise KeyError("sheet part")
 
 
+def _is_empty_text(f, t, raw, text_val) -> bool:
+    """A literal text cell whose text is exactly "" (empty shared string, empty inline string, empty `str` value).
+    It carries no identity, amount, zero, formula, error or text. Whitespace-only text is NOT treated as empty and an
+    unresolvable shared-string index (text unknown) is not either: both keep counting (fail closed)."""
+    return f is None and t in ("s", "inlineStr", "str") and text_val == ""
+
+
 def _is_date_text(text: str) -> bool:
     t = text.strip()
     for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%d.%m.%Y", "%d/%m/%Y", "%d.%m.%Y %H:%M:%S"):
@@ -117,11 +125,18 @@ def _is_date_text(text: str) -> bool:
 
 def scan_sheet(content: bytes, *, sheet_index: int = 0, header_row: int = 1, wanted: tuple[str, ...] = (),
                date_columns: tuple[str, ...] = (), keep_numbers: tuple[str, ...] = (),
-               strip_headers: bool = False, header_match=None, exclude_rows: frozenset[int] = frozenset()) -> SheetScan:
+               strip_headers: bool = False, header_match=None, exclude_rows: frozenset[int] = frozenset(),
+               skip_empty_text_rows: bool = False) -> SheetScan:
     """One streaming pass. `wanted` headers are matched exactly (or stripped when `strip_headers`), first occurrence —
     the occurrence pandas uses — and a duplicated wanted header is reported. `header_match(label)` may select extra
     columns (e.g. aging buckets). `exclude_rows` (Excel row numbers) are RECOGNIZED report-control rows
-    (`analyze_stock_rows`): they are not data rows and are reported separately, never silently."""
+    (`analyze_stock_rows`): they are not data rows and are reported separately, never silently.
+
+    M8-R2 / T1 (`skip_empty_text_rows`, opted into per source in `CORE`): a row whose only written cells are empty
+    text ("") is not a data row (DinamikCRM's Cari export ends with such a row). It is counted in `empty_text_rows`,
+    and none of its cells is counted in any column. A row with ANY other cell — an identity, an amount, a numeric zero,
+    a formula, an error, a boolean, a date or non-empty text (whitespace included) — stays a data row exactly as
+    before, its empty-text cells included. Without the option every written cell makes a data row (unchanged)."""
     with zipfile.ZipFile(io.BytesIO(content)) as z:
         strings = _shared_strings(z)
         part = _sheet_part(z, sheet_index)
@@ -129,12 +144,15 @@ def scan_sheet(content: bytes, *, sheet_index: int = 0, header_row: int = 1, wan
         headers: dict[int, str] = {}
         by_col: dict[int, ColumnScan] = {}
         data_rows_seen: set[int] = set()
+        empty_text_rows = 0
         with z.open(part) as fh:
             for _, el in ET.iterparse(fh, events=("end",)):
                 if el.tag != f"{_NS}row":
                     continue
                 r = int(el.get("r") or 0)
                 pos = 0
+                pending: list[tuple] = []          # this row's cells, counted only once the row is a data row
+                written = meaningful = False
                 for c in el.findall(f"{_NS}c"):
                     pos += 1
                     ref = c.get("r")
@@ -165,10 +183,17 @@ def scan_sheet(content: bytes, *, sheet_index: int = 0, header_row: int = 1, wan
                         continue
                     if f is None and raw is None and is_ is None:
                         continue                                   # an empty cell element
-                    data_rows_seen.add(r)
+                    written = True
+                    meaningful = meaningful or not _is_empty_text(f, t, raw, text_val)
                     s_ = by_col.get(col)
                     if s_ is not None:
+                        pending.append((s_, f, t, raw, text_val))
+                if meaningful or (written and not skip_empty_text_rows):
+                    data_rows_seen.add(r)
+                    for s_, f, t, raw, text_val in pending:
                         _count(s_, f, t, raw, text_val, date_columns, keep_numbers)
+                elif written:
+                    empty_text_rows += 1                           # only "" cells: reported, not a data row
                 el.clear()
                 if r == header_row:
                     by_col = _select(headers, wanted, header_match)
@@ -178,7 +203,7 @@ def scan_sheet(content: bytes, *, sheet_index: int = 0, header_row: int = 1, wan
         n = sum(1 for h in headers.values() if h == name)
         if n > 1 and (name in wanted or (header_match and header_match(name))):
             dups[name] = n
-    return SheetScan(headers, dups, cols, len(data_rows_seen), links)
+    return SheetScan(headers, dups, cols, len(data_rows_seen), links, empty_text_rows=empty_text_rows)
 
 
 def _select(headers: dict[int, str], wanted, header_match) -> dict[int, ColumnScan]:
@@ -694,7 +719,11 @@ CORE = {
               "amounts": ("Nettutar", "miktar"), "dates": ("Tarih",)},
     "aging": {"header_row": 1, "strip": True,
               "required": ("Hesap kodu", "Hesap adı", "Temsilci kodu"), "identity": ("Hesap kodu",),
-              "nonblank": ("Hesap kodu",), "amounts": (), "dates": (), "buckets": True},
+              "nonblank": ("Hesap kodu",), "amounts": (), "dates": (), "buckets": True,
+              # M8-R2 / T1: the real Cari export ends with a row holding only empty text; it is not an account row.
+              # Stock keeps every written row (its row analysis, D-055, is the authority on identity-less rows);
+              # sales is unchanged until a real export shows the need.
+              "skip_empty_text_rows": True},
 }
 
 
@@ -723,6 +752,7 @@ class CoreInspection:
     columns: dict[str, dict[str, int]] = field(default_factory=dict)
     duplicate_headers: tuple[str, ...] = ()
     rows: StockRowAnalysis | None = None             # stock: product / footer / identity row analysis (2B)
+    empty_text_rows: int = 0                         # rows with only empty-text cells, not data rows (T1)
 
     def fields(self) -> dict[str, dict[str, Any]]:
         """Field-level evidence (M8-ACCURACY-2B): per inspected column, so a metric is judged by the fields it USES.
@@ -757,7 +787,7 @@ class CoreInspection:
         d = {k: getattr(self, k) for k in ("ok", "failure", "layout_supported", "data_rows", "error_cells",
                                            "missing_cached_formulas", "missing_required_values", "blank_amount_cells",
                                            "zero_amount_cells", "invalid_dates", "external_links",
-                                           "external_references", "ambiguous_headers")}
+                                           "external_references", "ambiguous_headers", "empty_text_rows")}
         d["missing_headers"] = list(self.missing_headers)
         d["latest_bucket"] = list(self.latest_bucket) if self.latest_bucket else None
         d["duplicate_headers"] = list(self.duplicate_headers)
@@ -775,7 +805,8 @@ def inspect_core(key: str, content: bytes) -> CoreInspection:
     try:
         scan = scan_sheet(content, header_row=spec["header_row"], wanted=spec["required"],
                           date_columns=spec["dates"], strip_headers=spec["strip"],
-                          header_match=_is_bucket if spec.get("buckets") else None, exclude_rows=exclude)
+                          header_match=_is_bucket if spec.get("buckets") else None, exclude_rows=exclude,
+                          skip_empty_text_rows=bool(spec.get("skip_empty_text_rows")))
     except Exception as e:                                    # unreadable package / XML: fail closed
         return CoreInspection(key, False, f"scan:{type(e).__name__}", None)
     missing = tuple(h for h in spec["required"] if h not in scan.columns)
@@ -786,7 +817,7 @@ def inspect_core(key: str, content: bytes) -> CoreInspection:
     out = CoreInspection(key, True, None, layout_supported=not missing and not refused and
                          (bool(buckets) or not spec.get("buckets")),
                          data_rows=n, missing_headers=missing, duplicate_headers=tuple(sorted(scan.duplicate_headers)),
-                         rows=rows)
+                         rows=rows, empty_text_rows=scan.empty_text_rows)
     out.error_cells = sum(s.error + s.formula_error for s in inspected)
     out.missing_cached_formulas = sum(s.formula_missing_cache for s in inspected)
     out.external_links = scan.external_links
