@@ -59,9 +59,14 @@ def folder_aging_unmatched(tmp_path):
     return d
 
 
-def folder_stock_broken(tmp_path):
+def folder_stock_broken(tmp_path, *, unchanged_from=None):
     """The candidates' OWN source fails: a duplicated product code and an Excel error in the coverage field."""
     d = clean_folder(tmp_path / "stockbad")
+    if unchanged_from is not None:
+        # Fingerprints identify exact XLSX bytes, including ZIP/core-property timestamps.
+        # Rewriting identical cells is not an unchanged export; retain the original synthetic bytes.
+        for name in (SE.SALES_FILE, SE.AGING_FILE):
+            (Path(d) / name).write_bytes((Path(unchanged_from) / name).read_bytes())
     rows = stock_rows()
     rows[0][3] = E("#DIV/0!")
     rows.append(list(rows[1]))
@@ -236,11 +241,11 @@ def test_full_declarations_still_leave_definitions_blockers_and_release_open(tmp
 def test_evidence_of_another_generation_is_refused(tmp_path, promoted):  # noqa: F811
     a = folder_clean(tmp_path, "a")
     selection(a)
-    b = folder_stock_broken(tmp_path)
+    b = folder_stock_broken(tmp_path, unchanged_from=a)
     ma, sa = manifest_of(a)
     mb, sb = manifest_of(b)
-    # (a) the record of A judged against the bytes of B: every source whose bytes differ binds nothing (the Cari is
-    #     byte-identical in A and B and stays bound — correctly)
+    assert {k for k in sa if sa[k] != sb[k]} == {"stock"}
+    # (a) only Stock was replaced; the other synthetic source files were preserved byte-for-byte.
     diag = MD.diagnose(ma, sb, TODAY, strict_overall="OPEN")
     assert diag["generation"]["unbound_sources"] == ["stock"]
     for k in ("stock.reorder", "stock.overstock", "stock.product_counts"):
@@ -301,8 +306,9 @@ def test_clean_generation_is_complete_and_bound(tmp_path):
 def test_unbound_source_with_matching_generation_id_is_not_complete(tmp_path, promoted):  # noqa: F811
     a = folder_clean(tmp_path, "a")
     selection(a)
-    ma, _ = manifest_of(a)
-    _, sb = manifest_of(folder_stock_broken(tmp_path))                 # the stock bytes of another export
+    ma, sa = manifest_of(a)
+    _, sb = manifest_of(folder_stock_broken(tmp_path, unchanged_from=a))
+    assert {k for k in sa if sa[k] != sb[k]} == {"stock"}
     diag = MD.diagnose(ma, sb, TODAY, strict_overall="OPEN")
     g = diag["generation"]
     assert g["generation_id_matches"] is True                          # the ID alone still matches …

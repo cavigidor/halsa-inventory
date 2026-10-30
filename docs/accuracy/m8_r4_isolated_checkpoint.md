@@ -29,6 +29,16 @@ were copied. All workbooks used here were generated from synthetic fixtures in t
 - Update the stale assertion to require the remaining flag/app blockers and positively assert clean Stock source
   readiness and absence of unrelated Kredi. Add tests for fully declared Stock despite strict Sales FAIL, unused
   Stock field errors versus used field errors, a withheld metric dependency, and Kredi's own prerequisite.
+- First pushed checkpoint `226cecb`: PR run
+  [41093877358](https://github.com/cavigidor/halsa-inventory/actions/runs/41093877358) passed **1860 / 7 skipped /
+  2 xfailed**, but push run [41093869371](https://github.com/cavigidor/halsa-inventory/actions/runs/41093869371)
+  found another pre-existing R3 fixture flake: **1 failed, 1859 passed, 7 skipped, 2 xfailed**.
+  `test_unbound_source_with_matching_generation_id_is_not_complete` assumed that independently rewritten Sales/Cari
+  workbooks had identical bytes. A delayed synthetic replay proved all hashes differ: ZIP timestamps and
+  `docProps/core.xml` change even when worksheet cells do not. The production generation guard correctly refused
+  those different bytes; this is a fixture defect, not a binding regression. The two tests modeling Stock-only
+  replacement now preserve the other synthetic files byte-for-byte and explicitly assert that only Stock's hash
+  changed. Exact unbound-source assertions and all mixed-generation rejection checks remain intact.
 
 ## Independent code review: actual production effect
 
@@ -77,7 +87,8 @@ the existing M8-R5 task; no new milestone is started.
 
 ## Verification and handoff
 
-Final test counts and remote CI evidence are recorded in `STATUS.md`. Local full-suite execution requires both
+Completed local test counts and the first CI results are recorded in `STATUS.md`; final-head rerun results are
+recorded in PR #37 and the checkpoint handoff. Local full-suite execution requires both
 `REQUIRE_BROWSER_TESTS=1` and `REQUIRE_JS_TESTS=1`, with AI disabled. Private-data skips and expected failures must
 be reported separately; passing algorithm-harness tests are not production certification evidence.
 

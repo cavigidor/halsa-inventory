@@ -19,6 +19,14 @@ Gate already evaluates declared metric dependencies. No new production display b
   Seven skips require absent private ERP exports; the two existing strict expected failures cover missing-cost
   margin handling and invoice-account allocation (DQ-6). Browser and JavaScript tests ran, not skipped.
   New remote CI must validate the exact pushed head; its result is recorded in PR #37 checks and the final handoff.
+- First pushed head `226cecb`: PR CI `41093877358` passed **1860 / 7 skipped / 2 xfailed** (525.38s); push CI
+  `41093869371` failed **1 / 1859 passed / 7 skipped / 2 xfailed** (636.57s). The failure exposed an R3 fixture
+  assumption: separately rewritten XLSX files with identical cells need not have identical hashes (ZIP timestamps
+  and core metadata). A delayed synthetic replay reproduced all four sources becoming unbound. Corrected the two
+  Stock-only replacement tests to preserve original synthetic Sales/Cari bytes and assert only Stock's hash changes;
+  production binding remains unchanged. Corrected focused suite: **39 passed in 46.34s**; a delayed replay across
+  the timestamp boundary confirms only Stock changes/is unbound. Full rerun and exact-head remote CI results are
+  tracked in PR #37 and the final handoff.
 - Strict reconciliation, Veri Kontrol, business calculations, register, generation binding and evidence flag unchanged;
   **0 production metrics VERIFIED**. No test disabled, timeout relaxed or authentication bypass added.
 - Father answers received; their business-rule changes are **M8-R5, not started here**. Remaining: agreement-based
