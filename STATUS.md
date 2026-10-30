@@ -1,5 +1,7 @@
 # STATUS.md — current checkpoint
 
+**M8-R4 (D-069) working branch, not accepted:** Owner approved Option B 2026-10-29. Changed only metric diagnostic prerequisites and release policy, with synthetic regression tests. Strict reconciliation remains unchanged; Kredi is a prerequisite only for Kredi metrics. Open: CI, independent review, owner-local tests, per-row inventory isolation and father business answers. No source workbooks committed, no data promoted, `GENERATION_BOUND_API_EVIDENCE` stays False. Supersedes the stale M8-R3 header below, retained as history.
+
 _Updated 2026-10-29 (**M8-R3 — strict vs dependency-scoped metric diagnostics, PR open, awaiting independent review.** Opt-in, read-only `--metric-diagnostics`; strict result and exit code unchanged. Real 5 Oct files: FAIL 7 / 23 OPEN, Veri Kontrol 20, 0 of 33 VERIFIED; no candidate certifiable. Release-gate option A / B explained, not chosen. NOT deployed; `GENERATION_BOUND_API_EVIDENCE` False. Previous: M8-R2 / T1 merged as PR #35 (`cc4a50a`). Report: `docs/accuracy/m8_r3_metric_diagnostics.md`)._
 
 ## Git
