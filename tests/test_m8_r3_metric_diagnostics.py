@@ -154,7 +154,7 @@ def test_a_gate_verified_synthetic_metric_is_still_not_certifiable(tmp_path, pro
 # ---------------------------------------------------------------------------------------------
 # 3. an unrelated source's failure is never treated as resolved
 # ---------------------------------------------------------------------------------------------
-def test_unrelated_strict_failure_stays_visible_and_blocks_release(tmp_path, capsys):
+def test_unrelated_strict_failure_stays_visible_but_does_not_block_unaffected_metric(tmp_path, capsys):
     d = folder_sales_duplicate(tmp_path)
     code, out = run_cli(d, "--metric-diagnostics", capsys=capsys)
     assert code == 1 and "GENEL SONUÇ: FAIL" in out
@@ -162,7 +162,7 @@ def test_unrelated_strict_failure_stays_visible_and_blocks_release(tmp_path, cap
     diag = MD.diagnose(m, served, TODAY, strict_overall="FAIL", strict_sources={"sales": "FAIL"})
     for k in KEYS:
         pre = {p["code"]: p["met"] for p in diag["metrics"][k]["release_prerequisites"]}
-        assert pre["strict_core_reconciliation_not_fail"] is False
+        assert pre["metric_source_dependencies_clear"] is True
     assert "sales=FAIL" in "\n".join(MD.render_tr(diag))
     assert "sales=FAIL" in out.split("METRİK TANILAMA")[1]
 
@@ -376,3 +376,37 @@ def test_no_identity_transaction_or_amount_leaks(tmp_path, capsys):
                       for h in spec["required"])
     leaked = sorted(s for s in secrets if s and len(s) >= 4 and s in diag_text and s not in schema)
     assert leaked == []
+
+
+# M8-R4 D-069: Option B never erases strict findings and never certifies an ambiguous own source.
+def test_option_b_own_source_error_and_missing_declarations_still_block(tmp_path):
+    _, _, diag = diag_of(folder_stock_broken(tmp_path))
+    for key in ("stock.reorder", "stock.overstock", "stock.product_counts"):
+        pre = {p["code"]: p["met"] for p in diag["metrics"][key]["release_prerequisites"]}
+        assert pre["metric_source_dependencies_clear"] is False
+        assert diag["metrics"][key]["certification_permitted"] is False
+    _, _, clean = diag_of(folder_clean(tmp_path))
+    for key in KEYS:
+        pre = {p["code"]: p["met"] for p in clean["metrics"][key]["release_prerequisites"]}
+        assert pre["metric_source_dependencies_clear"] is False  # no approved date / totals / mapping
+
+
+def test_option_b_unrelated_kredi_does_not_gate_stock_or_collections(tmp_path):
+    _, _, diag = diag_of(folder_sales_duplicate(tmp_path))
+    for key in KEYS:
+        codes = {p["code"] for p in diag["metrics"][key]["release_prerequisites"]}
+        assert "kredi_reconciliation_not_fail" not in codes
+        assert "strict_core_reconciliation_not_fail" not in codes
+        assert diag["metrics"][key]["certification_permitted"] is False
+    assert diag["strict"]["overall"] == "OPEN"  # passed to this read-only helper
+
+
+def test_option_b_generation_mismatch_never_clears_prerequisite(tmp_path):
+    folder = folder_clean(tmp_path)
+    manifest, served = manifest_of(folder)
+    diag = MD.diagnose(manifest, served, TODAY, strict_overall="FAIL",
+                       expected_generation="wrong-generation")
+    for key in KEYS:
+        pre = {p["code"]: p["met"] for p in diag["metrics"][key]["release_prerequisites"]}
+        assert pre["metric_source_dependencies_clear"] is False
+        assert diag["metrics"][key]["certification_permitted"] is False
