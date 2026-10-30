@@ -232,6 +232,10 @@ def actions_packet(actions, ctx=None):
     p = EvidencePacket("daily_actions", as_of=(ctx or {}).get("as_of_data_date"))
     _common(p, ctx)
     for i, a in enumerate(actions, start=1):
+        if a.get("category") == "overstock":
+            from services.stock_policy import RETIREMENT_REASON
+            p.warn("stock_thresholds_retired", RETIREMENT_REASON)
+            continue  # keep original reference numbers for the other actions in a mixed request
         ref = f"A{i:02d}"
         fids = []
         for s in a.get("facts", []):
@@ -310,24 +314,23 @@ def customer_packet(cust, ctx=None, memory=None):
 
 
 def product_packet(prod, ctx=None, max_buyers=5):
+    from services.stock_policy import RETIREMENT_REASON, BALANCE_NOTE
     pr = prod or {}
     p = EvidencePacket("product_analysis", as_of=(ctx or {}).get("as_of_data_date"),
                        entity={"type": "product", "id": pr.get("product_code"), "name": pr.get("name")})
     _common(p, ctx)
     p.fact("Ürün", pr.get("name"), "text")
-    status = pr.get("status")
-    p.classify("stock_status", status or "unknown")
-    p.fact("Stok miktarı", pr.get("stock"), "count")
-    p.fact("Fazla stok (envanter) değeri", pr.get("inventory_value"), "money")
-    p.fact("Kapsama", pr.get("coverage"), "decimal")
-    p.fact("Min seviye", pr.get("min_level"), "decimal")
+    p.classify("stock_status", "unknown")
+    p.warn("stock_thresholds_retired", RETIREMENT_REASON)
+    p.warn("signed_erp_balance", BALANCE_NOTE)
+    p.fact("İşaretli ERP bakiyesi (kullanılabilir stok değildir)", pr.get("stock"), "decimal")
     p.fact("Geçmiş alıcı sayısı (2024–2026)", pr.get("historical_buyer_count"), "count")
     for i, b in enumerate((pr.get("ranked_buyers") or [])[:max_buyers], start=1):
-        p.fact(f"Aday alıcı {i}", b.get("name"), "buyer", "Python puanlamasıyla sıralanmış aday alıcı")
-        p.fact(f"Aday alıcı {i} — bu ürüne geçmiş harcama", b.get("spend"), "money")
-        p.fact(f"Aday alıcı {i} — son alım yılı", b.get("last"), "year")
+        p.fact(f"Geçmiş alıcı {i}", b.get("name"), "buyer", "Geçmiş işlem; satın alma veya stok eritme önerisi değildir")
+        p.fact(f"Geçmiş alıcı {i} — bu ürüne geçmiş harcama", b.get("spend"), "money")
+        p.fact(f"Geçmiş alıcı {i} — son alım yılı", b.get("last"), "year")
         if b.get("has_overdue"):
-            p.fact(f"Aday alıcı {i} — vadesi geçen borcu var", True, "bool")
+            p.fact(f"Geçmiş alıcı {i} — vadesi geçen borcu var", True, "bool")
     return p
 
 

@@ -21,7 +21,7 @@ from services import generation as GEN
 from services import refresh as RF
 from tests.test_m8_accuracy2 import (SE, TODAY, promoted, refresh, selection, stock_rows, world,  # noqa: F401
                                      write_stock)
-from tests.test_m8_accuracy2_review2 import (NEW_ROW, close, data_of, live_client, reorder_rows,  # noqa: F401
+from tests.test_m8_accuracy2_review2 import (NEW_ROW, close, data_of, live_client, displayed_stock_count,  # noqa: F401
                                              restart)
 
 pytestmark = pytest.mark.production_gate
@@ -61,7 +61,7 @@ def metric_published(world, promoted, monkeypatch):
     assert refresh(world.folder, world.dash, install=world.install)["ok"]
     monkeypatch.setattr(APP, "DASHBOARD_PATH", world.dash)
     body = Path(world.dash).read_bytes()
-    assert GEN.dashboard_markers(body)[1] and reorder_rows(body.decode())
+    assert GEN.dashboard_markers(body)[1] and displayed_stock_count(body.decode())
     return body
 
 
@@ -166,13 +166,13 @@ def test_valid_authorized_synthetic_metric_is_served(world, metric_published, mo
     c = live_client(world)
     try:
         r = c.get("/")
-        assert r.status_code == 200 and r.content == metric_published and reorder_rows(r.text)
+        assert r.status_code == 200 and r.content == metric_published and displayed_stock_count(r.text)
     finally:
         close(c)
     c = restart(world, monkeypatch)
     try:
         r = c.get("/")
-        assert r.status_code == 200 and reorder_rows(r.text) == reorder_rows(metric_published.decode())
+        assert r.status_code == 200 and displayed_stock_count(r.text) == displayed_stock_count(metric_published.decode())
     finally:
         close(c)
 
@@ -197,7 +197,7 @@ def test_tampered_markers_are_refused(world, metric_published, edit, reason):
     try:
         r = c.get("/")
         assert r.status_code == 503 and r.headers["X-Halsa-Dashboard"] == reason
-        assert reorder_rows(r.text) == [] and data_of(r.text) is None
+        assert displayed_stock_count(r.text) is None and data_of(r.text) is None
     finally:
         close(c)
 

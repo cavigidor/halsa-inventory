@@ -180,9 +180,9 @@ def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sour
         "company": {
             "products_scanned": total,
             "working_capital": {
-                "overstock_value": round(sum(o["inv"] for o in over)),
+                "overstock_value": None,  # D-070: withdrawn classification, not a zero-valued measurement
                 "overdue_total": round(sum(r["overdue"] for r in coll)),
-                "low_stock_count": len(low),
+                "low_stock_count": None,
                 "lapsed_count": len(lap),
                 "shrinking_real_count": (len(shrink_real_neg) if infl is not None else None),
                 "fx_exposure": {"available": False, "reason": "no_supplier_currency_data"},

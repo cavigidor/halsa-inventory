@@ -29,7 +29,7 @@ def test_context_reconciles_overdue(ctx):
 
 def test_context_reconciles_overstock(ctx):
     _, over, _ = db.m_stock(db._latest(DATA, db.is_stock))
-    assert ctx["company"]["working_capital"]["overstock_value"] == round(sum(o["inv"] for o in over))
+    assert over == [] and ctx["company"]["working_capital"]["overstock_value"] is None
 
 def test_context_topn_respected(ctx):
     assert len(ctx["collections"]) <= C.MAX_CONTEXT_ITEMS_PER_CATEGORY

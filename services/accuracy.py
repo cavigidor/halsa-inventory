@@ -43,6 +43,7 @@ import re
 import types
 from dataclasses import dataclass, field
 from typing import Iterable, Mapping
+from services.stock_policy import RETIREMENT_CODE, RETIREMENT_REASON
 
 # ---------------------------------------------------------------------------------------------
 # states and user-facing text
@@ -51,7 +52,7 @@ WITHHELD_MESSAGE = "Bu analiz henüz doğrulanmadığı için gösterilmiyor."
 WITHHELD_CODE = "accuracy_withheld"
 WITHHELD_HTTP_STATUS = 409          # the resource exists; its verification state conflicts with displaying it
 MAX_REASONS_SHOWN = 4               # keep the father-facing notice short
-POLICY_VERSION = "m8-accuracy-1"    # embedded in every gated dashboard build (served `/` checks it)
+POLICY_VERSION = "m8-r5a-stock-retirement"  # old generated pages/manifests must be refreshed under D-070
 DEFAULT_OPERATIONAL_MAX_AGE_DAYS = 45      # PROVISIONAL engineering default, not an owner-approved policy
 TEMPORAL_KINDS = ("operational", "historical")
 # M8-ACCURACY-2: the generation-bound evidence mechanism (services/generation.py) is implemented and shared by the
@@ -189,10 +190,10 @@ B_DQ6 = Blocker("DQ-6", INV, "Vadesi geçen borç, sipariş müşterisi kodu ile
                 "eşleniyor; borç sıfır görünebilir (DQ-6).",
                 "dashboard_builder.m_lapsed owed.get(order-source code) over a map keyed by Cari 'Hesap kodu' "
                 "(invoice account); tests/test_m8_accuracy.py::test_dq6_winback_overdue_identity_mismatch.")
-B_DQ4 = Blocker("DQ-4", NV, "Kapsamı hesaplanamayan (#DIV/0!) ürünler listeye girmiyor; liste eksik (DQ-4).",
-                "dashboard_builder.m_stock requires STOK Kontrol % (num() coerces #DIV/0! to NaN); "
-                "docs/m6_source_inventory.md §12 (1,178 of the 3,311 product rows on the 5 Oct 2026 export; the "
-                "export's 3 trailing rows are report totals, M8-ACCURACY-2B).")
+B_DQ4 = Blocker("DQ-4", NV, "Kaynak stok kontrol alanının tanımı ve hata değerleri doğrulanmadı (DQ-4).",
+                "Historical STOK Kontrol % source findings remain; the old decision rule was withdrawn by D-070. "
+                "Source inspection and Veri Kontrol observations are not removed by retiring recommendations.")
+B_STOCK_RETIRED = Blocker(RETIREMENT_CODE, INV, RETIREMENT_REASON, "D-070; services/stock_policy.py")
 B_STOCK_DATE = Blocker("STOCK-DATE", NV, "Stok raporunun tarihi doğrulanmıyor.",
                        "dashboard_builder.select_sources picks the newest file by mtime; no report date is read.")
 # STOCK-CODE-AUTHORITY (2A/2B) is resolved by the owner's column-identity decision D-056 (2026-10-21): column A is
@@ -268,15 +269,16 @@ _M = Metric
 REGISTER: dict[str, Metric] = {m.key: m for m in (
     # ---- static dashboard modules (dashboard_builder.build) ----
     _M("stock.reorder", "Azalan Stok", ("dashboard:reorder", "dashboard:stat:min_alti", "api:/api/context"),
-       ("stock",), ("stock_coverage_rule",), blockers=(B_DQ4, B_STOCK_DATE, B_STOCK_SCOPE, B_REAL),
-       # traced: dashboard_builder.m_stock `low` (code, name, quantity, coverage, min, max, DURUM); no join
+       ("stock",), ("stock_coverage_rule",), blockers=(B_STOCK_RETIRED, B_DQ4, B_STOCK_DATE, B_STOCK_SCOPE, B_REAL),
+       # D-070: retired, no recommendation calculated. Legacy evidence scopes retained conservatively;
+       # these declarations are not approval of the old fields or a replacement purchasing model.
        requires=(Requirement("stock", ("Stok_Kodu", "Stok_Adı", "TOPLAM STOK MİKTAR ", "STOK Kontrol %", "minseviye",
                                         "maxseviye", "DURUM")),)),
     _M("stock.overstock", "Fazla Stok", ("dashboard:overstock", "dashboard:stat:maks_ustu",
                                          "dashboard:stat:fazla_stok_degeri"),
        ("stock",), ("stock_coverage_rule", "inventory_valuation"),
-       blockers=(B_DQ4, B_STOCK_DATE, B_INV_VALUE, B_STOCK_SCOPE, B_REAL),
-       # traced: m_stock `over` (code, name, quantity, coverage, max, inventory value, DURUM); no join
+       blockers=(B_STOCK_RETIRED, B_DQ4, B_STOCK_DATE, B_INV_VALUE, B_STOCK_SCOPE, B_REAL),
+       # D-070: retired. Keep the legacy source checks; do not silently narrow source validation.
        requires=(Requirement("stock", ("Stok_Kodu", "Stok_Adı", "TOPLAM STOK MİKTAR ", "STOK Kontrol %", "maxseviye",
                                         "Envanter değeri", "DURUM")),)),
     _M("stock.product_counts", "Stok ürün sayıları", ("dashboard:header:urun_sayisi", "refresh:products"),
@@ -313,7 +315,7 @@ REGISTER: dict[str, Metric] = {m.key: m for m in (
        ("inflation_source", "revenue_basis"), ("customers.momentum",), blockers=(B_INFLATION, B_REVENUE)),
     _M("actions.queue", "AI Aksiyon Merkezi — günlük aksiyon listesi", ("panel:ai", "api:/api/agent/actions"),
        definitions=("priority_thresholds",),
-       depends_on=("receivables.collections", "stock.clearance_buyers", "customers.winback", "actions.real_decline"),
+       depends_on=("receivables.collections", "customers.winback", "actions.real_decline"),
        blockers=(B_PRIORITY,)),
     _M("ai.interpretation", "Yapay zekâ yorumu ve önerisi", ("api:/api/agent/actions/enrich",
                                                               "api:/api/agent/customer/{customer_code}/analyze",
@@ -324,9 +326,9 @@ REGISTER: dict[str, Metric] = {m.key: m for m in (
     _M("agent.customer_facts", "Müşteri bilgi kartı (aksiyon çekmecesi)", ("api:/api/agent/customer/{customer_code}",),
        depends_on=("customers.winback", "receivables.collections", "customers.momentum", "receivables.risk")),
     _M("agent.product_facts", "Ürün bilgi kartı", ("api:/api/agent/product/{product_code}",),
-       depends_on=("stock.overstock", "stock.reorder", "stock.clearance_buyers")),
+       depends_on=("stock.overstock", "stock.reorder", "stock.clearance_buyers"), blockers=(B_STOCK_RETIRED,)),
     _M("context.full", "Tüm analiz bağlamı", ("api:/api/context",),
-       depends_on=("stock.reorder", "stock.overstock", "stock.clearance_buyers", "customers.winback",
+       depends_on=("stock.product_counts", "customers.winback",
                    "receivables.collections", "receivables.risk", "actions.queue")),
     _M("opportunities.cross_sell", "Çapraz satış fırsatları", ("panel:opp", "api:/api/opportunities/summary"),
        ("sales",), ("cross_sell_thresholds", "active_customer_window", "customer_identity"),

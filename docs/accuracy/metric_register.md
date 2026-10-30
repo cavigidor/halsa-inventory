@@ -134,6 +134,10 @@ Field legend: **UI** · **API** · **Source** (workbook / sheet / columns) · **
 · **Known problems** · **State** · **Shown**.
 
 ### `stock.reorder` — Azalan Stok
+**D-070 / M8-R5A:** this and `stock.overstock`/`stock.clearance_buyers` are retired recommendation paths. The old
+formulas below are historical, not active algorithms. See `m8_r5a_stock_retirement.md`: no replacement model,
+unchanged certified ceilings, explicit retirement blocker and unavailable totals. Raw source requirements stay.
+
 - **UI:** dashboard tab `reorder`; overview stat "min altı". **API:** inside `/api/context` (`low_stock`).
 - **Source:** stock export `STOK <date>.xlsx`, header row 4; `Stok_Kodu`, `Stok_Adı`, `TOPLAM STOK MİKTAR `,
   `STOK Kontrol %` (cached ERP formula), `minseviye`, `maxseviye`, `DURUM`.

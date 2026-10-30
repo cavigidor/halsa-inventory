@@ -1226,3 +1226,24 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **Tests:** `tests/test_m8_r2_t1_empty_text_rows.py` (inline and shared strings, the real two-row ending, a negative
   control with the option off, genuine blanks, missing codes, every preserved cell kind, unresolvable shared strings,
   stock and sales unchanged, generation evidence and gate identical with and without the phantom row).
+
+### D-070 · 2026-10-30 · Retire obsolete Stock thresholds (M8-R5A)
+- **Authority:** the owner relayed his father's business answers and explicitly requested this Stock-only checkpoint.
+  `minseviye`/`maxseviye` are old purchasing settings retained solely for export compatibility; they are not current
+  targets. There is no separate discontinued indicator. Signed negative ERP balances can reflect component removals
+  and sales. One accidentally retained row in a specific workbook does not justify a generic duplicate-row rule.
+- **Decision:** withdraw reorder/overstock classifications, threshold-based critical alerts, clearance actions and
+  dependent product commentary/cards. `STOK Kontrol %` is not reinterpreted as an independent purchasing model.
+  No new target, forecast, quantity normalization, duplicate sum/drop or no-sales-to-discontinued inference.
+- **Preserve:** original Excel bytes/formulas and import schema, signed balances and blanks, every duplicate row,
+  source traceability, strict inspection/reconciliation, Veri Kontrol detection/history, unrelated financial rules.
+  Unsupported recommendation totals become unavailable, not zero. Product AI refuses before any provider call;
+  stale overstock actions never enter AI evidence. No independent raw Stock catalog is invented.
+- **Gate:** certified ceilings, approval records and GENERATION_BOUND_API_EVIDENCE=False unchanged; no metric
+  VERIFIED. Add an explicit retirement blocker; keep legacy source checks conservatively. New policy marker
+  invalidates old generated HTML/manifest acceptance through the existing refresh/restart mechanism.
+- **Dependencies:** the remaining customer action queue no longer depends on retired stock clearance; the full
+  context retains the existing stock product-count dependency rather than obsolete recommendations. All remaining
+  customer dependencies and source checks stay; the product-card metric has an explicit retirement blocker.
+- **Boundary:** separate branch from main; unmerged Option B PR #37 untouched. No private workbook acceptance,
+  merge/deploy, Cari/supplier/customer-liability/overdue work or next milestone. Planner independent review pending.

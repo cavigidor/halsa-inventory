@@ -83,13 +83,12 @@ def test_context_reconciles_with_dashboard_on_synthetic_data(synthetic_dir, synt
     _, over, _ = db.m_stock(db._latest(synthetic_dir, db.is_stock))
     wc = synthetic_ctx["company"]["working_capital"]
     assert wc["overdue_total"] == round(sum(r["overdue"] for r in frames["coll"]))
-    assert wc["overstock_value"] == round(sum(o["inv"] for o in over))
+    assert over == [] and wc["overstock_value"] is None
 
 
-def test_stock_low_excludes_discontinued_and_overstock_flags_it(synthetic_dir):
+def test_obsolete_stock_thresholds_produce_no_reorder_overstock_or_discontinued_classification(synthetic_dir):
     low, over, total = db.m_stock(db._latest(synthetic_dir, db.is_stock))
-    assert [r["code"] for r in low] == ["SP-001"]
-    assert {r["code"]: r["disc"] for r in over} == {"SP-002": False, "SP-003": True}
+    assert low == over == []  # D-070: no valid current thresholds or discontinued indicator
     assert total == 5
 
 

@@ -59,9 +59,13 @@ def folder_aging_unmatched(tmp_path):
     return d
 
 
-def folder_stock_broken(tmp_path):
+def folder_stock_broken(tmp_path, *, unchanged_from=None):
     """The candidates' OWN source fails: a duplicated product code and an Excel error in the coverage field."""
     d = clean_folder(tmp_path / "stockbad")
+    if unchanged_from is not None:
+        # Equal cell contents do not imply equal XLSX bytes (ZIP/core timestamps can differ).
+        for name in (SE.SALES_FILE, SE.AGING_FILE):
+            (Path(d) / name).write_bytes((Path(unchanged_from) / name).read_bytes())
     rows = stock_rows()
     rows[0][3] = E("#DIV/0!")
     rows.append(list(rows[1]))
@@ -220,7 +224,8 @@ def test_full_declarations_still_leave_definitions_blockers_and_release_open(tmp
     assert "Kaynak raporun tarihi bilinmiyor." not in texts and "Kaynak eşlemesinin onayı bilinmiyor." not in texts
     assert {b["code"] for b in dm["open_blockers"]} >= {"DQ-4", "STOCK-DATE", "STOCK-REPORT-SCOPE", "REAL-DATA"}
     assert {x["key"] for x in dm["unapproved_definitions"]} == {"stock_coverage_rule", "operational_freshness"}
-    assert dm["gate_state"] == "not_verified" and dm["certification_permitted"] is False
+    assert dm["gate_state"] == "invalid" and dm["certification_permitted"] is False
+    assert "STOCK-THRESHOLDS-RETIRED" in dm["gate_codes"]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -229,11 +234,11 @@ def test_full_declarations_still_leave_definitions_blockers_and_release_open(tmp
 def test_evidence_of_another_generation_is_refused(tmp_path, promoted):  # noqa: F811
     a = folder_clean(tmp_path, "a")
     selection(a)
-    b = folder_stock_broken(tmp_path)
+    b = folder_stock_broken(tmp_path, unchanged_from=a)
     ma, sa = manifest_of(a)
     mb, sb = manifest_of(b)
-    # (a) the record of A judged against the bytes of B: every source whose bytes differ binds nothing (the Cari is
-    #     byte-identical in A and B and stays bound — correctly)
+    assert {k for k in sa if sa[k] != sb[k]} == {"stock"}
+    # (a) only Stock was replaced; preserve the other synthetic source bytes explicitly.
     diag = MD.diagnose(ma, sb, TODAY, strict_overall="OPEN")
     assert diag["generation"]["unbound_sources"] == ["stock"]
     for k in ("stock.reorder", "stock.overstock", "stock.product_counts"):
@@ -264,7 +269,7 @@ def test_missing_evidence_is_unavailable_never_passing(tmp_path, promoted):  # n
     for k in ("stock.reorder", "stock.overstock", "stock.product_counts"):
         s = diag["metrics"][k]["source_judgement"]["stock"]
         assert s["available"] is False and s["reason"] == "NO-EVIDENCE"
-        assert diag["metrics"][k]["gate_state"] == "not_verified"
+        assert diag["metrics"][k]["gate_state"] == ("invalid" if k == "stock.overstock" else "not_verified")
         assert MD.UNAVAILABLE in s["problems"][0]["categories"]
 
 
@@ -294,8 +299,9 @@ def test_clean_generation_is_complete_and_bound(tmp_path):
 def test_unbound_source_with_matching_generation_id_is_not_complete(tmp_path, promoted):  # noqa: F811
     a = folder_clean(tmp_path, "a")
     selection(a)
-    ma, _ = manifest_of(a)
-    _, sb = manifest_of(folder_stock_broken(tmp_path))                 # the stock bytes of another export
+    ma, sa = manifest_of(a)
+    _, sb = manifest_of(folder_stock_broken(tmp_path, unchanged_from=a))
+    assert {k for k in sa if sa[k] != sb[k]} == {"stock"}
     diag = MD.diagnose(ma, sb, TODAY, strict_overall="OPEN")
     g = diag["generation"]
     assert g["generation_id_matches"] is True                          # the ID alone still matches …

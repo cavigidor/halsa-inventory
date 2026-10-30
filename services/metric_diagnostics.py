@@ -45,6 +45,7 @@ CATEGORY_TR = {BUSINESS: "iş kararı (sahip / muhasebe)", DATE: "yetkili rapor 
                UNAVAILABLE: "kanıt yok / başka üretime ait", UNCLASSIFIED: "sınıflandırılmadı"}
 
 _BLOCKER_CATEGORY = {
+    "STOCK-THRESHOLDS-RETIRED": (BUSINESS,),
     "DQ-4": (BUSINESS, TECHNICAL), "STOCK-REPORT-SCOPE": (BUSINESS, TECHNICAL), "INV-VALUE": (BUSINESS,),
     "OVERDUE-DEF": (BUSINESS,), "STOCK-DATE": (DATE,), "AGING-DATE": (DATE,), "REAL-DATA": (RECONCILIATION,),
 }

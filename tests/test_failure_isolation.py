@@ -87,10 +87,13 @@ def test_total_provider_failure_leaves_analytics_identical(make_client, syntheti
     assert e["failed"] == ids and all(a["interpretation"] is None for a in e["actions"])
     assert _deterministic_snapshot(failing) == baseline              # still identical after the failure
     code = synthetic_ctx["winback"][0]["code"]
-    for path in (f"/api/agent/customer/{code}", f"/api/agent/product/{synthetic_ctx['overstock'][0]['code']}"):
+    for path in (f"/api/agent/customer/{code}",):
         assert failing.get(path).status_code == 200                      # deterministic GET, no AI
         r = failing.post(path + "/analyze")
         assert r.status_code == 200 and r.json()["reason"] and r.json()["ai_error_category"]
+    assert synthetic_ctx['overstock'] == []
+    assert failing.get('/api/agent/product/SP-002').status_code == 404
+    assert failing.post('/api/agent/product/SP-002/analyze').status_code == 404
     r = failing.post("/api/agent/draft-message", json={"customer_code": code, "message_type": "email"})
     assert r.status_code == 200 and r.json()["available"] is False
 
@@ -135,12 +138,12 @@ def test_provider_input_is_a_small_evidence_packet(make_client, synthetic_ctx):
     c.post("/api/agent/actions/enrich", json={"action_ids": ids})
     code = synthetic_ctx["winback"][0]["code"]
     c.get(f"/api/agent/customer/{code}")
-    c.get(f"/api/agent/product/{synthetic_ctx['overstock'][0]['code']}")
+    assert c.get('/api/agent/product/SP-002').status_code == 404
     assert len(spy.payloads) == 1                                    # GETs never reach the provider
     c.post(f"/api/agent/customer/{code}/analyze")
-    c.post(f"/api/agent/product/{synthetic_ctx['overstock'][0]['code']}/analyze")
+    assert c.post('/api/agent/product/SP-002/analyze').status_code == 404
     c.post("/api/agent/draft-message", json={"customer_code": code, "channel": "email", "purpose": "winback"})
-    assert len(spy.payloads) >= 4
+    assert len(spy.payloads) >= 3  # product retirement makes no provider call; customer/draft paths still do
     for p in spy.payloads:
         assert {"schema_version", "task", "facts", "warnings"} <= set(p)
         for node in _walk(p):

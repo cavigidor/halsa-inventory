@@ -157,6 +157,10 @@ class BusinessActionAgent:
             return {"ai_available": True, "reason": None, "category": None, "by_ref": {}, "refs": refs,
                     "warnings": []}
         packet = EV.actions_packet(actions, ctx)
+        if not packet.items:
+            from services.stock_policy import RETIREMENT_REASON
+            return {"ai_available": True, "reason": RETIREMENT_REASON, "category": "stock_thresholds_retired",
+                    "by_ref": {}, "refs": refs, "warnings": []}
         r = self.run("daily_actions", packet, S.AIActionsOut)
         if not r["ok"]:
             return {"ai_available": True, "reason": r["reason"], "category": r["category"],
@@ -186,14 +190,10 @@ class BusinessActionAgent:
         return data, r
 
     def analyze_product(self, facts, ctx=None):
-        packet = EV.product_packet(facts, ctx)
-        r = self.run("product_analysis", packet, S.ProductAnalysisAI)
-        if not r["ok"]:
-            return None, r
-        data = dict(r["data"])
-        data["best_buyers"] = [packet.by_id[i]["display_value"] for i in data.get("best_buyer_fact_ids", [])]
-        data["evidence"] = G.evidence_for(r.get("raw_ids"), packet)
-        return data, r
+        # D-070: the product view was entirely based on retired stock recommendations.
+        # Refuse before a provider call, including callers supplying an old context directly.
+        from services.stock_policy import RETIREMENT_REASON
+        return None, {"ok": False, "reason": RETIREMENT_REASON, "category": "stock_thresholds_retired"}
 
     def draft_message(self, channel, purpose, customer_facts, product_facts=None, instruction=None, ctx=None):
         """Copy-only draft (D-018, D-030). Channel and purpose come from the request, never from the model."""
