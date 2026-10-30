@@ -160,9 +160,13 @@ def test_unrelated_strict_failure_stays_visible_but_does_not_block_unaffected_me
     assert code == 1 and "GENEL SONUÇ: FAIL" in out
     m, served = manifest_of(d)
     diag = MD.diagnose(m, served, TODAY, strict_overall="FAIL", strict_sources={"sales": "FAIL"})
+    baseline = diag_of(folder_clean(tmp_path))[2]
     for k in KEYS:
         pre = {p["code"]: p["met"] for p in diag["metrics"][k]["release_prerequisites"]}
-        assert pre["metric_source_dependencies_clear"] is True
+        base_pre = {p["code"]: p["met"] for p in baseline["metrics"][k]["release_prerequisites"]}
+        # Both still have missing date/totals/owner declarations; unrelated sales FAIL adds no new metric blocker.
+        assert pre["metric_source_dependencies_clear"] == base_pre["metric_source_dependencies_clear"]
+        assert "strict_core_reconciliation_not_fail" not in pre
     assert "sales=FAIL" in "\n".join(MD.render_tr(diag))
     assert "sales=FAIL" in out.split("METRİK TANILAMA")[1]
 
