@@ -135,6 +135,29 @@ def choose(page, label, slot):
     page.wait_for_selector(row(page, label) + '[data-ok="1"]')
 
 
+def test_reused_server_address_gets_a_fresh_owner_session(browser, tmp_path, monkeypatch):
+    # OS-selected ports can be reused across tests, but each server has a new session database.
+    # Exercise the real login and UI twice at the SAME address, without retries or bypassing auth.
+    port = _free_port()
+    monkeypatch.setattr(sys.modules[__name__], "_free_port", lambda: port)
+    tokens = []
+    for name in ("first", "replacement"):
+        folder = tmp_path / name
+        folder.mkdir()
+        with upload_server(folder) as srv:
+            token, _ = BA.login(srv["base"])
+            tokens.append(token)
+            code, body = _status(srv["base"] + "/api/auth/session",
+                                 headers={"Cookie": f"{AUTH.COOKIE_NAME}={token}"})
+            assert code == 200 and json.loads(body).get("role") == "owner", body
+            page = owner_page(browser, srv["base"])
+            page.goto(srv["base"] + "/yukleme")
+            page.wait_for_selector('#up[data-access="owner"] .up-owner:not([hidden])')
+            assert page.errors == []
+            page.context.close()
+    assert tokens[0] != tokens[1]
+
+
 def test_owner_uploads_validates_previews_and_publishes_from_the_fixed_page(browser, tmp_path):
     with upload_server(tmp_path) as srv:
         base = srv["base"]

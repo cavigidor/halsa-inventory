@@ -3,8 +3,8 @@
 Established on synthetic data:
 1. the strict result (checks, counts, overall, exit code, evidence results) is identical with or without diagnostics;
 2. every diagnostic gate state is exactly the production gate's decision, and the breakdown recomposes to it;
-3. a failure in a source a metric does not read is still reported (strict FAIL, "outside scope, still in source",
-   unmet release prerequisite) — never as resolved;
+3. a failure in a source a metric does not read is still reported (strict FAIL, "outside scope, still in source")
+   without blocking that metric's source prerequisite (D-069) — never as resolved;
 4. failures in a metric's own source / fields still block it;
 5. missing dates, totals, mappings and definitions stay blocking; full declarations still leave definitions,
    blockers and release prerequisites open;
@@ -138,7 +138,7 @@ def test_states_match_the_production_gate(tmp_path, make):
 
 def test_a_gate_verified_synthetic_metric_is_still_not_certifiable(tmp_path, promoted):  # noqa: F811
     # a SYNTHETIC register copy certifies stock.reorder; with full declarations its gate decision may be VERIFIED —
-    # the release prerequisites (flag off, strict result, Kredi, app checks) still refuse certification
+    # the release prerequisites (flag off and app checks) still refuse certification under Option B
     d = folder_clean(tmp_path)
     selection(d)
     m, served, diag = diag_of(d)
@@ -147,7 +147,10 @@ def test_a_gate_verified_synthetic_metric_is_still_not_certifiable(tmp_path, pro
         "stock.reorder").state.value
     assert dm["certification_permitted"] is False
     unmet = {p["code"] for p in dm["release_prerequisites"] if p["met"] is not True}
-    assert {"generation_bound_api_evidence", "kredi_reconciliation_not_fail", "app_refresh_and_restart_binding"} <= unmet
+    assert {"generation_bound_api_evidence", "app_refresh_and_restart_binding"} <= unmet
+    prereq = {p["code"]: p["met"] for p in dm["release_prerequisites"]}
+    assert "kredi_reconciliation_not_fail" not in prereq
+    assert prereq["metric_source_dependencies_clear"] is True
     assert "EVET" not in "\n".join(MD.render_tr(diag))
 
 
@@ -414,3 +417,60 @@ def test_option_b_generation_mismatch_never_clears_prerequisite(tmp_path):
         pre = {p["code"]: p["met"] for p in diag["metrics"][key]["release_prerequisites"]}
         assert pre["metric_source_dependencies_clear"] is False
         assert diag["metrics"][key]["certification_permitted"] is False
+
+
+def test_option_b_clean_stock_is_ready_despite_unrelated_sales_fail(tmp_path, promoted):  # noqa: F811
+    folder = folder_sales_duplicate(tmp_path)
+    selection(folder)
+    manifest, served = manifest_of(folder)
+    diag = MD.diagnose(manifest, served, TODAY, strict_overall="FAIL", strict_sources={"sales": "FAIL"})
+    metric = diag["metrics"]["stock.reorder"]
+    prereq = {p["code"]: p["met"] for p in metric["release_prerequisites"]}
+    assert prereq["metric_source_dependencies_clear"] is True
+    assert metric["gate_state"] == "verified"  # synthetic register only; production register is never promoted
+    assert metric["certification_permitted"] is False
+    assert diag["strict"] == {"overall": "FAIL", "sources": {"sales": "FAIL"}}
+
+
+def test_option_b_unused_stock_field_failure_does_not_block_used_fields(tmp_path):
+    folder = folder_clean(tmp_path)
+    rows = stock_rows()
+    rows[0][6] = E("#REF!")  # inventory value is used by overstock, but not reorder or product counts
+    write_stock(folder, rows)
+    selection(folder)
+    manifest, served = manifest_of(folder)
+    diag = MD.diagnose(manifest, served, TODAY, strict_overall="FAIL", strict_sources={"stock": "FAIL"})
+    for key in ("stock.reorder", "stock.product_counts"):
+        metric = diag["metrics"][key]
+        prereq = {p["code"]: p["met"] for p in metric["release_prerequisites"]}
+        assert prereq["metric_source_dependencies_clear"] is True
+        assert metric["source_judgement"]["stock"]["strict_only_still_in_source"]
+    metric = diag["metrics"]["stock.overstock"]
+    assert metric["gate_state"] == "invalid"
+    assert next(p["met"] for p in metric["release_prerequisites"]
+                if p["code"] == "metric_source_dependencies_clear") is False
+    assert all(not m["certification_permitted"] for m in diag["metrics"].values())
+
+
+def test_option_b_withheld_metric_dependency_blocks_readiness(tmp_path, promoted, monkeypatch):  # noqa: F811
+    folder = folder_clean(tmp_path)
+    selection(folder)
+    reg = dict(promoted)
+    reg["stock.reorder"] = dataclasses.replace(reg["stock.reorder"], depends_on=("stock.overstock",))
+    monkeypatch.setattr(ACC, "REGISTER", reg)
+    metric = diag_of(folder)[2]["metrics"]["stock.reorder"]
+    assert metric["source_evidence_state_for_this_metric"] == "verified"
+    assert metric["dependencies_withheld"] == [{"key": "stock.overstock", "state": "not_verified"}]
+    assert next(p["met"] for p in metric["release_prerequisites"]
+                if p["code"] == "metric_source_dependencies_clear") is False
+    assert metric["certification_permitted"] is False
+
+
+def test_option_b_kredi_metric_retains_its_own_reconciliation_prerequisite(tmp_path):
+    manifest, served = manifest_of(folder_clean(tmp_path))
+    metric = MD.diagnose(manifest, served, TODAY, strict_overall="FAIL", keys=("owner.kredi",))[
+        "metrics"]["owner.kredi"]
+    prereq = {p["code"]: p["met"] for p in metric["release_prerequisites"]}
+    assert prereq["kredi_reconciliation_not_fail"] is None  # absent Kredi evidence is never a pass
+    assert prereq["metric_source_dependencies_clear"] is False
+    assert metric["certification_permitted"] is False

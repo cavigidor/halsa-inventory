@@ -25,6 +25,9 @@ def server_env() -> dict:
 
 def register(base: str) -> None:
     """Called by each browser-test server once it is ready: owner pages opened next belong to this server."""
+    # A replacement subprocess can reuse the same port but has a fresh SQLite session database.
+    # URL equality does not make a cookie from the previous server valid in this one.
+    _sessions.pop(base, None)
     _current["base"] = base
 
 
