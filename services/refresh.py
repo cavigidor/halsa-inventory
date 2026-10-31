@@ -268,7 +268,8 @@ def verify(ctx, stats, html_path, expected_as_of, previous_context=None, drop=PL
         errors.append("Bağlam ve pano farklı veri tarihleri üretti.")
     # context ↔ dashboard reconciliation (both from the same dashboard_builder results)
     pairs = [("vadesi geçen toplam", wc.get("overdue_total"), round(stats.get("overdue_total", 0))),
-             ("fazla stok değeri", wc.get("overstock_value"), round(stats.get("overstock_value", 0))),
+             ("fazla stok değeri", wc.get("overstock_value"),
+              None if stats.get("overstock_value") is None else round(stats["overstock_value"])),
              ("kayıp müşteri sayısı", wc.get("lapsed_count"), stats.get("lapsed")),
              ("azalan stok sayısı", wc.get("low_stock_count"), stats.get("low")),
              ("ürün sayısı", ctx["company"].get("products_scanned"), stats.get("products"))]

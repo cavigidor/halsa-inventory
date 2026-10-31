@@ -130,6 +130,7 @@ python -m services.owner_auth status                    # both roles configured?
 | Information | Public | Financial viewer | Owner |
 |---|:-:|:-:|:-:|
 | Dashboard shell, tab names, data date, source **file names** in the header, withheld notices | ✔ | ✔ | ✔ |
+| D-070 Stock retirement notice and signed-ERP-balance caveat (fixed policy text; no new source values) | ✔ | ✔ | ✔ |
 | Analytical tables, action queue, drawer facts, Günlük Satış, Customer 360 profile, Fırsatlar, fair history | notice today; ✔ once VERIFIED | same | same |
 | Customer directory (code + recorded name) — **approved** | ✔ | ✔ | ✔ |
 | CRM follow-ups, contacts, **notes, owner labels, legacy memory text** — **approved** | ✔ | ✔ | ✔ |

@@ -711,10 +711,11 @@ KNOWN_ISSUES = (
      "Panodaki marj hesabı eksik maliyeti 0 kabul ediyor; Yönetim bu marjı kullanmaz. Düzeltme sahip onayı bekliyor.",
      "open"),
     ("dq2_stok_eritme_kapali", "DQ-2 · Stok Eritme listesinde KAPALI müşteriler",
-     "Panonun Stok Eritme alıcı listesi KAPALI müşterileri içerebilir. Değişiklik sahip onayı bekliyor.", "open"),
-    ("dq4_stock_coverage", "DQ-4 · Stok kapsamı #DIV/0! kör noktası",
-     "Stok kapsamı hesaplanamayan ürünler Azalan / Fazla Stok listelerine girmez; düşük/yüksek stok olarak "
-     "sınıflanmaz. Kural sahip onayı bekliyor.", "open"),
+     "Eski Stok Eritme yolunun KAPALI müşteri bulgusu tarihsel kayıttır; öneri yolu D-070 ile kaldırıldı. "
+     "Bu kayıt kaynak veya müşteri bilgisini değiştirmez.", "open"),
+    ("dq4_stock_coverage", "DQ-4 · Kaynak stok kontrol alanında #DIV/0!",
+     "Kaynak formül bulgusu korunur. Eski min/max ve STOK Kontrol % güncel stok hedefleri değildir; "
+     "satın alma ve fazla stok önerileri kaldırıldı (D-070).", "open"),
     ("dq5_m5_attributes", "DQ-5 · M5 müşteri özellikleri fatura hesabından",
      "Eski M5 ekranlarında Temsilci / Açık-Kapalı / Sektör fatura hesabı aramasından gelir. Yeni M7 ekranları "
      "Müşteri 360'ın ana kayıt mimarisini kullanır. M5 davranışı değiştirilmedi.", "open"),

@@ -147,15 +147,8 @@ class ContextRepository:
             if str(code) in cust:
                 cust[str(code)]["closed"] = True
         prod = {}
-        for r in ctx.get("low_stock", []):
-            prod[str(r["code"])] = {"product_code": str(r["code"]), "name": r["name"],
-                                    "status": "low_stock", "stock": r.get("stock"),
-                                    "coverage": r.get("cov"), "min_level": r.get("min")}
-        for r in ctx.get("overstock", []):
-            d = prod.setdefault(str(r["code"]), {"product_code": str(r["code"]), "name": r["name"]})
-            d.update({"status": "overstock", "stock": r.get("stock"),
-                      "inventory_value": r.get("inv"), "historical_buyer_count": r.get("buyers"),
-                      "ranked_buyers": r.get("top_buyers", [])})
+        # D-070: the old product index existed only for threshold-derived recommendations.
+        # Do not reinterpret old context rows as a validated catalog or physically available stock.
         return cust, prod
 
     @staticmethod

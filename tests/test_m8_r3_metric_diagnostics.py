@@ -232,7 +232,8 @@ def test_full_declarations_still_leave_definitions_blockers_and_release_open(tmp
     assert "Kaynak raporun tarihi bilinmiyor." not in texts and "Kaynak eşlemesinin onayı bilinmiyor." not in texts
     assert {b["code"] for b in dm["open_blockers"]} >= {"DQ-4", "STOCK-DATE", "STOCK-REPORT-SCOPE", "REAL-DATA"}
     assert {x["key"] for x in dm["unapproved_definitions"]} == {"stock_coverage_rule", "operational_freshness"}
-    assert dm["gate_state"] == "not_verified" and dm["certification_permitted"] is False
+    assert dm["gate_state"] == "invalid" and dm["certification_permitted"] is False
+    assert "STOCK-THRESHOLDS-RETIRED" in dm["gate_codes"]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -276,7 +277,7 @@ def test_missing_evidence_is_unavailable_never_passing(tmp_path, promoted):  # n
     for k in ("stock.reorder", "stock.overstock", "stock.product_counts"):
         s = diag["metrics"][k]["source_judgement"]["stock"]
         assert s["available"] is False and s["reason"] == "NO-EVIDENCE"
-        assert diag["metrics"][k]["gate_state"] == "not_verified"
+        assert diag["metrics"][k]["gate_state"] == ("invalid" if k == "stock.overstock" else "not_verified")
         assert MD.UNAVAILABLE in s["problems"][0]["categories"]
 
 
@@ -464,9 +465,15 @@ def test_option_b_withheld_metric_dependency_blocks_readiness(tmp_path, promoted
     reg = dict(promoted)
     reg["stock.reorder"] = dataclasses.replace(reg["stock.reorder"], depends_on=("stock.overstock",))
     monkeypatch.setattr(ACC, "REGISTER", reg)
-    metric = diag_of(folder)[2]["metrics"]["stock.reorder"]
+    m, served, diag = diag_of(folder)
+    metric = diag["metrics"]["stock.reorder"]
     assert metric["source_evidence_state_for_this_metric"] == "verified"
-    assert metric["dependencies_withheld"] == [{"key": "stock.overstock", "state": "not_verified"}]
+    # Integration of PR #37 with PR #38 (D-070): the withheld dependency's exact state is the production gate's own
+    # decision — INVALID since `stock.overstock` carries the STOCK-THRESHOLDS-RETIRED blocker (it was NOT_VERIFIED
+    # before D-070). Either way it is withheld and must block readiness.
+    dep = ACC.current_gate(TODAY, m.bound_snapshot(served), m.generation_id).decide("stock.overstock")
+    assert dep.state == ACC.State.INVALID and "STOCK-THRESHOLDS-RETIRED" in dep.codes
+    assert metric["dependencies_withheld"] == [{"key": "stock.overstock", "state": dep.state.value}]
     assert next(p["met"] for p in metric["release_prerequisites"]
                 if p["code"] == "metric_source_dependencies_clear") is False
     assert metric["certification_permitted"] is False

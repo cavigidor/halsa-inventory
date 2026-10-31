@@ -1,9 +1,10 @@
 """İnteraktif pano oluşturucu — sayfaları hesaplar ve tek bir HTML dosyası üretir."""
 import os, glob, json, html, datetime as dt, warnings
 import pandas as pd, numpy as np
+from services.stock_policy import RETIREMENT_REASON
 warnings.filterwarnings('ignore')
 
-STOCK_HEADER_ROW=3; DISCONTINUED='ÜRETİMDEN KALKTI'
+STOCK_HEADER_ROW=3
 YEAR_THR=10000; MIN_TOTAL=30000; QUAL_YEARS=[2021,2022,2023,2024,2025]; LAPSED_YEAR=2026; T3_YEARS=[2024,2025]
 SC={'code':'Stok_Kodu','name':'Stok_Adı','stock':'TOPLAM STOK MİKTAR ','cov':'STOK Kontrol %',
     'min':'minseviye','max':'maxseviye','inv':'Envanter değeri','status':'DURUM'}
@@ -40,19 +41,12 @@ def _money(x):
 
 # ---------- sayfalar ----------
 def m_stock(path,df=None):
-    df=read_stock(path) if df is None else df.copy()
-    for k in ['stock','cov','min','max','inv']: df[SC[k]]=num(df[SC[k]])
-    band=df[SC['max']]>0; hc=df[SC['cov']].notna(); ins=df[SC['stock']].fillna(0)!=0
-    disc=df[SC['status']].astype(str).str.contains(DISCONTINUED,na=False)
-    low=df[band&hc&(df[SC['cov']]<df[SC['min']])&~disc].copy()
-    low['_u']=low[SC['cov']]/low[SC['min']].replace(0,np.nan); low=low.sort_values('_u',na_position='first')
-    over=df[band&hc&(df[SC['cov']]>df[SC['max']])&ins].copy()
-    over['_d']=disc[over.index]; over=over.sort_values(SC['inv'],ascending=False)
-    low_rows=[{'code':str(r[SC['code']]),'name':str(r[SC['name']]),'stock':_n(r[SC['stock']]),
-               'cov':_n(r[SC['cov']],2),'min':_n(r[SC['min']],2),'crit':bool(r[SC['cov']]<0)} for _,r in low.iterrows()]
-    over_rows=[{'code':str(r[SC['code']]),'name':str(r[SC['name']]),'stock':_n(r[SC['stock']]),
-                'cov':_n(r[SC['cov']],2),'inv':_n(r[SC['inv']]),'disc':bool(r['_d'])} for _,r in over.iterrows()]
-    return low_rows,over_rows,stock_row_counts(df)['code_rows']
+    """D-070: no current purchasing policy exists. Preserve raw rows; do not classify from obsolete fields.
+    Empty recommendation lists mean withdrawn, not zero products needing attention (totals are unavailable).
+    Signed quantities, blanks, duplicates and Excel formulas are left exactly as read; no physical-stock inference.
+    """
+    df=read_stock(path) if df is None else df
+    return [],[],stock_row_counts(df)['code_rows']
 
 def stock_row_counts(df):
     """M8-ACCURACY-2B: stock row diagnostics from the frame as read (counts only, nothing dropped or deduplicated).
@@ -194,17 +188,8 @@ def m_ordersize(df,attr):
     return rows
 
 def m_overstock_move(df,over_rows):
-    ov={r['code']:r for r in over_rows}
-    sub=df[df['sto_kod'].astype(str).isin(set(ov))&df['_yr'].isin([2024,2025,2026])]
-    g=sub.groupby([sub['sto_kod'].astype(str),'_cust']).agg(qty=('miktar','sum'),last=('_yr','max'),spend=('Nettutar','sum'))
-    names=df.groupby('_cust')['_cname'].first(); buyers={}
-    for (code,cust),r in g.iterrows():
-        buyers.setdefault(code,[]).append({'name':str(names.get(cust,'')),'qty':_n(r['qty']),'last':int(r['last']),'spend':_n(r['spend'])})
-    rows=[]
-    for code,bl in buyers.items():
-        o=ov[code]; bl=sorted(bl,key=lambda x:-x['qty'])
-        rows.append({'code':code,'name':o['name'],'stock':o['stock'],'inv':o['inv'],'buyers':len(bl),'detail':{'buyers':bl[:12]}})
-    rows.sort(key=lambda r:-r['inv']); return rows
+    """D-070: no clearance recommendation, including from a caller's old threshold-derived rows."""
+    return []
 
 def m_risk(df,owed_map,closed_inv,attr):
     rec=df[df['_yr'].isin([2025,2026])]; g=rec.groupby('_inv')['Nettutar'].sum()
@@ -277,7 +262,7 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     osmove=m_overstock_move(sdf,over) if sdf is not None else []
     risk=m_risk(sdf,owed,cinv,attr) if (sdf is not None and owed) else []
     tier_counts={t:sum(1 for r in lap if r['tier']==t) for t in (1,2,3)}
-    over_val=sum(r['inv'] for r in over); overdue_total=sum(r['overdue'] for r in coll)
+    over_val=None; overdue_total=sum(r['overdue'] for r in coll)
     lap_owe=sum(1 for r in lap if r['overdue']>0); has_aging=bool(ap)
 
     wb_cols=[{'k':'tier','l':'Kademe'},{'k':'name','l':'Müşteri','sub':'code'},{'k':'rep','l':'Temsilci'},
@@ -288,15 +273,15 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
       'reorder':{'title':'Azalan Stok','rows':low,
         'cols':[{'k':'code','l':'Kod'},{'k':'name','l':'Ürün'},{'k':'stock','l':'Stok','n':1},
                 {'k':'cov','l':'Kapsama','n':1},{'k':'min','l':'Min','n':1}],
-        'note':'Kapsama minseviye altında, en acil önce. Negatif kapsama = fazla satılmış.'},
+        'note':RETIREMENT_REASON},
       'overstock':{'title':'Fazla Stok','rows':over,
         'cols':[{'k':'code','l':'Kod'},{'k':'name','l':'Ürün'},{'k':'stock','l':'Stok','n':1},
                 {'k':'cov','l':'Kapsama','n':1},{'k':'inv','l':'Envanter Değeri','money':1}],
-        'note':'Kapsama maxseviye üstünde, en çok bağlı sermaye önce.'},
+        'note':RETIREMENT_REASON},
       'osmove':{'title':'Stok Eritme','rows':osmove,'expand':True,
         'cols':[{'k':'code','l':'Kod'},{'k':'name','l':'Ürün'},{'k':'stock','l':'Stok','n':1},
                 {'k':'inv','l':'Envanter Değeri','money':1},{'k':'buyers','l':'Alıcı Sayısı','n':1}],
-        'note':'Fazla stoktaki ürünler + bunları daha önce alan müşteriler. Aramak için ürüne tıklayın — hazır çağrı listesi.'},
+        'note':RETIREMENT_REASON},
       'winback':{'title':'Geri Kazanım','rows':lap,'cols':wb_cols,'expand':True,'filter':'rep',
         'note':('Geçmişte çok alışveriş yaptı, 2026\'da hiç almadı. Sarı = hâlâ borcu var, kovalamadan önce tahsil edin. Detay için müşteriye tıklayın. Kapalı firmalar çıkarıldı.'
                 if has_aging else 'Geçmişte çok alışveriş yaptı, 2026\'da hiç almadı. Önce Kademe 1, sonra harcamaya göre sıralı. Detay için müşteriye tıklayın. Kapalı firmalar çıkarıldı.')},
@@ -325,7 +310,7 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
           'cols':[{'k':'name','l':'Müşteri'},{'k':'rep','l':'Temsilci'},{'k':'overdue','l':'Vadesi Geçen','money':1},
                   {'k':'oldest','l':'En Eski Borç'}],
           'note':'Vadesi geçen alacaklar, en büyük önce. Listenin başındakileri kovalayın.'}
-    stats=[('min altı',f"{len(low):,}"),('maks üstü',f"{len(over):,}"),
+    stats=[('min altı','—'),('maks üstü','—'),
            ('fazla stok değeri',_money(over_val)),('kayıp müşteri',f"{len(lap):,}")]
     if has_aging:
         stats+=[('vadesi geçen toplam',_money(overdue_total)),('borçlu kayıp müşteri',f"{lap_owe}")]
@@ -359,12 +344,12 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     if stats_out is not None:
         # Internal build totals for the refresh's context ↔ dashboard reconciliation (never displayed as such).
         stats_out.update({'asof':meta['asof'],'overdue_total':overdue_total,'overstock_value':over_val,
-                          'tabs':list(modules.keys()),'products':total,'lapsed':len(lap),'low':len(low),
-                          'over':len(over),'coll':len(coll),'sources':{k:(os.path.basename(v) if v else None) for k,v in src.items()},
+                          'tabs':list(modules.keys()),'products':total,'lapsed':len(lap),'low':None,
+                          'over':None,'coll':len(coll),'sources':{k:(os.path.basename(v) if v else None) for k,v in src.items()},
                           'accuracy':{k:d.state.value for k,d in decisions.items()},'generation':core_gen or None})
-    return out_path,{'low':len(low),'over':len(over),'lapsed':len(lap),'coll':len(coll),
+    return out_path,{'low':None,'over':None,'lapsed':len(lap),'coll':len(coll),
                      'momentum':len(momentum),'margin':len(margin),'ordersize':len(ordersize),
-                     'osmove':len(osmove),'risk':len(risk)}
+                     'osmove':None,'risk':len(risk)}
 
 # ---------------- M5-2: AI Aksiyon Merkezi tab (read-only) ----------------
 # One tab button + one panel, added next to the existing dashboard without touching its tables.

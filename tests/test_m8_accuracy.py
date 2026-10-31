@@ -112,7 +112,10 @@ def test_known_invalid_outputs_are_classified_invalid():
                       ("owner.butce", "BUTCE-ERRORS")):
         d = g.decide(key)
         assert d.state == INV and code in d.codes, key
-    for key in ("stock.reorder", "stock.overstock", "receivables.collections", "owner.kredi",
+    for key in ("stock.reorder", "stock.overstock"):
+        d = g.decide(key)
+        assert d.state == INV and "STOCK-THRESHOLDS-RETIRED" in d.codes
+    for key in ("receivables.collections", "owner.kredi",
                 "opportunities.cross_sell", "fairs.history", "crm.active_customers"):
         assert g.decide(key).state == NV, key
 
@@ -342,7 +345,7 @@ def test_production_dashboard_embeds_no_withheld_rows(tmp_path):
     stats = {}
     _, counts = db.build(data, out, today=TODAY, stats_out=stats)
     html = open(out, encoding="utf-8").read()
-    assert counts["low"] and counts["lapsed"] and counts["margin"]          # the algorithms still ran (preserved)
+    assert counts["low"] is None and counts["lapsed"] and counts["margin"]  # Stock retired; unrelated algorithms ran
     blob = _data_blob(html)
     assert set(blob) == set(ACC.MODULE_METRIC)
     for k, m in blob.items():

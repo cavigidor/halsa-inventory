@@ -234,10 +234,9 @@ CHECKS: dict[str, Check] = {
         "Excel'de raporun son satırlarını kontrol edin; şablon dışı bir satır eklenmiş olabilir."),
     "stock_coverage_undefined": Check(
         "undefined_stock_coverage", "orta", "Stok kapsamı hesaplanamıyor (#DIV/0!)",
-        "Bu ürünlerde stok kontrol yüzdesi #DIV/0! (sıfıra bölme) gösteriyor. Kapsam sıfır veya sonsuz sayılmaz; "
-        "bu ürünler için kural sahip kararı bekliyor (DQ-4).",
-        "Kural (ör. ayrı bir 'kapsam yok' listesi) için sahip kararı gerekir. DinamikCRM'de bu ürünlerin kontrol "
-        "yüzdesi formülünün girdilerini inceleyebilirsiniz."),
+        "Kaynak STOK Kontrol % alanı #DIV/0! (sıfıra bölme) gösteriyor. Değer sıfır veya sonsuz sayılmaz. "
+        "Eski stok eşikleri ve bu alan güncel satın alma veya fazla stok kararlarında kullanılmaz (D-070).",
+        "Kaynak formülünü inceleyebilirsiniz; bu bulgu korunur, formül düzeltilse bile eski eşikler güncel hedef olmaz."),
     "stock_coverage_error": Check(
         "confirmed_error", "kritik", "Stok kapsamında Excel hatası (#DIV/0! dışı)",
         "Stok kontrol yüzdesi sütununda sıfıra bölme dışında Excel hata değerleri var.",
