@@ -24,8 +24,14 @@ import datetime as dt
 from typing import Any, Mapping
 
 from services import accuracy as ACC
+from services.stock_policy import RETIREMENT_CODE
 
+# The metrics this diagnostic reports. Identifiers and order are kept stable so earlier diagnostic results stay
+# comparable; `stock.reorder` / `stock.overstock` are RETIRED by D-070 (no longer release candidates) and stay listed
+# only for historical diagnostic visibility, labelled RETIRED — D-070 (`retired_by`).
 CANDIDATES = ("receivables.collections", "stock.reorder", "stock.overstock", "stock.product_counts")
+# a register blocker with this code means the metric's output was withdrawn by an implemented decision
+RETIRED_BY = {RETIREMENT_CODE: "D-070"}
 # the core records every reconciliation run is expected to carry (liste = the customer master sheet of the sales workbook)
 EXPECTED_CORE = ("aging", "liste", "sales", "stock")
 
@@ -37,16 +43,18 @@ TECHNICAL = "technical_fix"                  # a reviewed code change with tests
 RECONCILIATION = "independent_reconciliation"  # real-data reconciliation evidence (reconciliation_ref)
 RELEASE = "release_prerequisite"             # release_gate.md §2 / §8.3, validate_register
 UNAVAILABLE = "evidence_unavailable"         # no evidence bound to this generation
+RETIREMENT = "retirement_decided"            # an implemented retirement decision (D-070), not an open question
 UNCLASSIFIED = "unclassified"
 
 CATEGORY_TR = {BUSINESS: "iş kararı (sahip / muhasebe)", DATE: "yetkili rapor tarihi / dönem",
+               RETIREMENT: "uygulanmış kaldırma kararı (D-070; bekleyen soru değil)",
                DECLARATION: "dosyaya bağlı sahip beyanı (seçim, toplam, eşleme)",
                TECHNICAL: "teknik düzeltme veya kaynak düzeltmesi (ayrı inceleme + test)",
                RECONCILIATION: "bağımsız gerçek veri mutabakatı", RELEASE: "yayın ön koşulu (release_gate)",
                UNAVAILABLE: "kanıt yok / başka üretime ait", UNCLASSIFIED: "sınıflandırılmadı"}
 
 _BLOCKER_CATEGORY = {
-    "STOCK-THRESHOLDS-RETIRED": (BUSINESS,),
+    RETIREMENT_CODE: (RETIREMENT,),          # presentation only: the blocker code and its INVALID state are unchanged
     "DQ-4": (BUSINESS, TECHNICAL), "STOCK-REPORT-SCOPE": (BUSINESS, TECHNICAL), "INV-VALUE": (BUSINESS,),
     "OVERDUE-DEF": (BUSINESS,), "STOCK-DATE": (DATE,), "AGING-DATE": (DATE,), "REAL-DATA": (RECONCILIATION,),
 }
@@ -192,8 +200,10 @@ def _metric(key, reg, defs, gate, snap, generation_ok, today, strict_overall, st
     scoped_ready = (generation_ok and all(src in snap.evidence and src not in snap.unbound for src in m.sources)
                     and not evidence_states and not deps)
     prereq = _prerequisites(m, d, defs, scoped_ready)
+    retired = sorted({RETIRED_BY[b.code] for b in m.blockers if b.code in RETIRED_BY})
     return {
-        "title": m.title_tr, "sources": list(m.sources), "gate_state": d.state.value, "gate_codes": list(d.codes),
+        "title": m.title_tr, "retired_by": retired[0] if retired else None,
+        "sources": list(m.sources), "gate_state": d.state.value, "gate_codes": list(d.codes),
         "breakdown_matches_gate": recomposed == d.state,
         "certified_ceiling": m.certified.value, "open_blockers": blockers, "unapproved_definitions": unapproved,
         "source_evidence_state_for_this_metric": evidence_state, "source_judgement": sources,
@@ -242,7 +252,9 @@ def render_tr(diag: Mapping[str, Any]) -> list[str]:
              f"  GENERATION_BOUND_API_EVIDENCE: {diag['generation_bound_api_evidence']}"]
     for key, m in diag["metrics"].items():
         lines.append("")
-        lines.append(f"  ▸ {key} — {m['title']}: kapı kararı {st.get(m['gate_state'], m['gate_state'])}"
+        retired = (f" [RETIRED — {m['retired_by']}: kaldırıldı, yayın adayı değil; yalnızca geçmiş tanılama]"
+                   if m.get("retired_by") else "")
+        lines.append(f"  ▸ {key} — {m['title']}{retired}: kapı kararı {st.get(m['gate_state'], m['gate_state'])}"
                      f" · sertifika izni: {'EVET' if m['certification_permitted'] else 'HAYIR'}"
                      + ("" if m.get("breakdown_matches_gate", True) else " · UYARI: döküm kapı kararıyla uyuşmuyor"))
         if m.get("unregistered"):
@@ -272,4 +284,4 @@ def render_tr(diag: Mapping[str, Any]) -> list[str]:
     return lines
 
 
-__all__ = ["CANDIDATES", "diagnose", "render_tr", "strict_by_source", "categorize_text", "CATEGORY_TR"]
+__all__ = ["CANDIDATES", "RETIRED_BY", "diagnose", "render_tr", "strict_by_source", "categorize_text", "CATEGORY_TR"]

@@ -10,7 +10,9 @@ Established on synthetic data:
    blockers and release prerequisites open;
 6. evidence from another generation, unbound or missing evidence is refused (reported unavailable);
 7. nothing is promoted or written; the register, definitions and GENERATION_BOUND_API_EVIDENCE are unchanged;
-8. no customer / product identity, transaction or amount appears in the diagnostic output.
+8. no customer / product identity, transaction or amount appears in the diagnostic output;
+9. the D-070 retired stock metrics keep their identifiers but are labelled RETIRED — D-070, and the retirement blocker
+   is presented as an implemented decision, not an open business question (presentation only).
 Synthetic workbooks only. No AI, no network.
 """
 import dataclasses
@@ -412,7 +414,10 @@ def test_option_b_unrelated_kredi_does_not_gate_stock_or_collections(tmp_path):
         assert "kredi_reconciliation_not_fail" not in codes
         assert "strict_core_reconciliation_not_fail" not in codes
         assert diag["metrics"][key]["certification_permitted"] is False
-    assert diag["strict"]["overall"] == "OPEN"  # passed to this read-only helper
+    # The scenario itself is a strict FAIL: the real CLI reports this duplicate sales line as FAIL with exit code 1
+    # (`test_sales_duplicate_scenario_is_a_strict_cli_fail`). `diag_of` hands the read-only helper a fixed "OPEN"; this
+    # only checks that the helper echoes the strict value it was given and never recomputes it.
+    assert diag["strict"]["overall"] == "OPEN"
 
 
 def test_option_b_generation_mismatch_never_clears_prerequisite(tmp_path):
@@ -487,3 +492,56 @@ def test_option_b_kredi_metric_retains_its_own_reconciliation_prerequisite(tmp_p
     assert prereq["kredi_reconciliation_not_fail"] is None  # absent Kredi evidence is never a pass
     assert prereq["metric_source_dependencies_clear"] is False
     assert metric["certification_permitted"] is False
+
+
+# ---------------------------------------------------------------------------------------------
+# 9. D-070 retirement labelling (presentation only)
+# ---------------------------------------------------------------------------------------------
+RETIRED = ("stock.reorder", "stock.overstock")
+
+
+def test_retired_stock_metrics_keep_identifiers_and_are_labelled_retired(tmp_path):
+    assert KEYS == ("receivables.collections", "stock.reorder", "stock.overstock", "stock.product_counts")
+    d = folder_clean(tmp_path)
+    selection(d)
+    m, served, diag = diag_of(d)
+    gate = ACC.current_gate(TODAY, m.bound_snapshot(served), m.generation_id)
+    for key in KEYS:
+        dm = diag["metrics"][key]
+        assert dm["retired_by"] == ("D-070" if key in RETIRED else None)
+        assert dm["gate_state"] == gate.decide(key).state.value and dm["breakdown_matches_gate"] is True
+        assert dm["gate_state"] != "verified" and dm["certification_permitted"] is False
+    for key in RETIRED:
+        dm = diag["metrics"][key]
+        assert dm["gate_state"] == "invalid" and "STOCK-THRESHOLDS-RETIRED" in dm["gate_codes"]
+        b = next(x for x in dm["open_blockers"] if x["code"] == "STOCK-THRESHOLDS-RETIRED")
+        # an implemented decision, not an outstanding owner / accountant answer; code and INVALID state unchanged
+        assert b["categories"] == [MD.RETIREMENT] and MD.BUSINESS not in b["categories"]
+        assert b["state"] == "invalid"
+        # the other open blockers keep their categories (DQ-4 still needs a business answer, then a technical fix)
+        assert next(x for x in dm["open_blockers"] if x["code"] == "DQ-4")["categories"] == [MD.BUSINESS,
+                                                                                               MD.TECHNICAL]
+    reg_blocker = next(b for b in ACC.REGISTER["stock.reorder"].blockers if b.code == "STOCK-THRESHOLDS-RETIRED")
+    assert reg_blocker.state == ACC.State.INVALID                                     # the register is untouched
+
+
+def test_retired_label_and_category_in_cli_output(tmp_path, capsys):
+    d = folder_clean(tmp_path)
+    code, out = run_cli(d, "--metric-diagnostics", capsys=capsys)
+    assert code == 3                                                   # strict OPEN, as without diagnostics
+    lines = out.splitlines()
+    head = {k: next(x for x in lines if x.startswith(f"  ▸ {k} — ")) for k in KEYS}
+    for key in KEYS:
+        assert ("[RETIRED — D-070: kaldırıldı, yayın adayı değil; yalnızca geçmiş tanılama]" in head[key]) == (
+            key in RETIRED)
+    retire = [x for x in lines if x.startswith("      engel STOCK-THRESHOLDS-RETIRED:")]
+    assert len(retire) == len(RETIRED)
+    assert all(x.endswith("→ uygulanmış kaldırma kararı (D-070; bekleyen soru değil)") for x in retire)
+    assert not any("STOCK-THRESHOLDS-RETIRED" in x and MD.CATEGORY_TR[MD.BUSINESS] in x for x in lines)
+
+
+def test_sales_duplicate_scenario_is_a_strict_cli_fail(tmp_path, capsys):
+    d = folder_sales_duplicate(tmp_path)
+    for extra in ((), ("--metric-diagnostics",)):
+        code, out = run_cli(d, *extra, capsys=capsys)
+        assert code == 1 and "GENEL SONUÇ: FAIL" in out

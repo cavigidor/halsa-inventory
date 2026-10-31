@@ -130,7 +130,8 @@ Further work:
 4. An owner-local, privacy-safe reconciliation script that records counts-only evidence for `reconciliation_ref`.
 5. With owner answers to Q3, Q7–Q11, Q15: fix DQ-6, DQ-2, DQ-1 and the zero substitution for amounts per the approved
    rules, then promote the first candidates (likely `receivables.collections`, `stock.reorder` / `stock.overstock`
-   with the DQ-4 rule) — each only if §2 is fully met.
+   with the DQ-4 rule) — each only if §2 is fully met. _(2026-10-31: `stock.reorder` / `stock.overstock` were since
+   retired by D-070 and are no longer candidates.)_
 M8-CP1 (authentication) does not display numbers and can follow this PR; the release gate above still applies.
 
 ## 7. Correction pass after the independent review of PR #27 (2026-10-18)

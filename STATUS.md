@@ -1,6 +1,24 @@
 # STATUS.md — current checkpoint
 
-**2026-10-31 — PR #37 (M8-R4, D-069) MERGED; PR #38 (M8-R5A, D-070) updated, NOT merged (draft).**
+**2026-10-31 — PR #38 (M8-R5A, D-070) MERGED as `ac191d7`; post-merge diagnostics cleanup in a draft PR (NOT merged).**
+- PR #38 squash-merged into `main` as `ac191d7` (planner-approved, code only; tree identical to the reviewed head
+  `a6332c5`); `main` CI (push run `41236053439`) passed. Not deployed.
+- Cleanup (branch `m8-diagnostics-retired-stock-cleanup`, findings 4 and 5 of `docs/accuracy/m8_r4_r5a_integration.md`),
+  presentation and documentation only:
+  - `services/metric_diagnostics.py`: the diagnosed metric identifiers are unchanged; `stock.reorder` / `stock.overstock`
+    carry `retired_by: "D-070"` and the console line `[RETIRED — D-070: kaldırıldı, yayın adayı değil; yalnızca geçmiş
+    tanılama]`; the `STOCK-THRESHOLDS-RETIRED` blocker's category is now `retirement_decided` ("uygulanmış kaldırma
+    kararı (D-070; bekleyen soru değil)") instead of `business_answer`. Blocker code, INVALID gate state, register,
+    gate decisions, strict results and exit codes unchanged (before/after comparison on 4 synthetic scenarios).
+  - `tests/test_m8_r3_metric_diagnostics.py`: the comment in
+    `test_option_b_unrelated_kredi_does_not_gate_stock_or_collections` now separates the real CLI strict FAIL (exit 1)
+    from the "OPEN" handed to the helper; 3 focused tests added (retirement labels and category, CLI wording, the
+    sales-duplicate scenario is a strict CLI FAIL with exit 1 with and without diagnostics).
+- Local full suite (browser + JS required, AI disabled): **1893 passed, 7 skipped, 2 xfailed** (1,902 collected = `main` 1,899 + 3 new). Register: 33 metrics, 28 NOT_VERIFIED / 5 INVALID /
+  0 VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False.
+- PR #39 (temporary) untouched; its cleanup needs separate authorization.
+
+**2026-10-31 — PR #37 (M8-R4, D-069) MERGED; PR #38 (M8-R5A, D-070) updated (history: merged later as `ac191d7`, see above).**
 - PR #37 squash-merged into `main` as `52522b1` (planner-approved, code only); tree identical to the reviewed head
   `c430e0e`. No deployment, no certification, `GENERATION_BOUND_API_EVIDENCE` False.
 - PR #38: `main` merged into the branch without rebase (`e2f0d69`, tree identical to the reviewed integration merge
