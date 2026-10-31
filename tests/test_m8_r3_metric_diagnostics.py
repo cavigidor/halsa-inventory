@@ -465,9 +465,15 @@ def test_option_b_withheld_metric_dependency_blocks_readiness(tmp_path, promoted
     reg = dict(promoted)
     reg["stock.reorder"] = dataclasses.replace(reg["stock.reorder"], depends_on=("stock.overstock",))
     monkeypatch.setattr(ACC, "REGISTER", reg)
-    metric = diag_of(folder)[2]["metrics"]["stock.reorder"]
+    m, served, diag = diag_of(folder)
+    metric = diag["metrics"]["stock.reorder"]
     assert metric["source_evidence_state_for_this_metric"] == "verified"
-    assert metric["dependencies_withheld"] == [{"key": "stock.overstock", "state": "not_verified"}]
+    # Integration of PR #37 with PR #38 (D-070): the withheld dependency's exact state is the production gate's own
+    # decision — INVALID since `stock.overstock` carries the STOCK-THRESHOLDS-RETIRED blocker (it was NOT_VERIFIED
+    # before D-070). Either way it is withheld and must block readiness.
+    dep = ACC.current_gate(TODAY, m.bound_snapshot(served), m.generation_id).decide("stock.overstock")
+    assert dep.state == ACC.State.INVALID and "STOCK-THRESHOLDS-RETIRED" in dep.codes
+    assert metric["dependencies_withheld"] == [{"key": "stock.overstock", "state": dep.state.value}]
     assert next(p["met"] for p in metric["release_prerequisites"]
                 if p["code"] == "metric_source_dependencies_clear") is False
     assert metric["certification_permitted"] is False
