@@ -1,8 +1,9 @@
-"""M8-R3 — read-only diagnostics: strict source-wide reconciliation vs each candidate metric's existing gate decision.
+"""M8-R3/R4 — read-only strict reconciliation and owner-approved per-metric Option B prerequisites.
 
-Evidence for a FUTURE release-gate decision (docs/accuracy/m8_r1_issue_actions.md §C–§D). It decides nothing and changes
-nothing: it never modifies `SourceEvidence.problems()` / `_scoped_problems()`, the register, a definition, an approval,
-`GENERATION_BOUND_API_EVIDENCE`, the strict reconciliation result or its exit code, and it writes nothing.
+M8-R4 (D-069) replaces the global non-FAIL prerequisite in this diagnostic with a per-metric, generation-bound
+source-dependency check. This tool still decides no certification: it never modifies `SourceEvidence.problems()` /
+`_scoped_problems()`, the register, an approval, `GENERATION_BOUND_API_EVIDENCE`, the strict reconciliation result
+or its exit code, and it writes nothing.
 
 For each named metric it reports, from ONE manifest built from the exact frozen bytes of this run:
 1. the strict, source-wide result of each source the metric reads (as `reconcile_sources` printed it);
@@ -12,7 +13,7 @@ For each named metric it reports, from ONE manifest built from the exact frozen 
    declares `requires`, strict otherwise), time rules and dependencies; plus every strict problem of those sources
    that does not appear in that judgement with the same text — listed as still present in the source (re-judged for
    the fields / joins the metric reads, or not applied to it), never as resolved;
-3. whether the existing release prerequisites (release_gate.md §2 and §8.3, `validate_register`) permit certification.
+3. whether the Option B release prerequisites (release_gate.md §2 and §8.3, D-069, `validate_register`) permit certification.
 
 Evidence that is missing, unbound to the served bytes or from another generation is reported as unavailable and never
 passes. Output: codes, fixed Turkish reason texts, schema labels (column headers), counts and states only.
@@ -185,7 +186,12 @@ def _metric(key, reg, defs, gate, snap, generation_ok, today, strict_overall, st
     if m.certified != ACC.State.VERIFIED and recomposed == ACC.State.VERIFIED:
         recomposed = m.certified
     evidence_state = (ACC.worst(*evidence_states).value if evidence_states else ACC.State.VERIFIED.value)
-    prereq = _prerequisites(m, d, defs, strict_overall)
+    # Option B: verify ONLY the fields and joins this metric uses, plus its actual metric dependencies.
+    # An unrelated strict FAIL is still printed and reported in Veri Kontrol, but is not this metric's prerequisite.
+    # Unbound or missing evidence, UNKNOWN / OPEN on a used field, or an affected downstream metric never passes.
+    scoped_ready = (generation_ok and all(src in snap.evidence and src not in snap.unbound for src in m.sources)
+                    and not evidence_states and not deps)
+    prereq = _prerequisites(m, d, defs, scoped_ready)
     return {
         "title": m.title_tr, "sources": list(m.sources), "gate_state": d.state.value, "gate_codes": list(d.codes),
         "breakdown_matches_gate": recomposed == d.state,
@@ -197,9 +203,9 @@ def _metric(key, reg, defs, gate, snap, generation_ok, today, strict_overall, st
     }
 
 
-def _prerequisites(m, d, defs, strict_overall) -> list[dict]:
-    """release_gate.md §2 (per metric) and §8.3 (before GENERATION_BOUND_API_EVIDENCE may change). `met` is True,
-    False or None (= not evaluated by this command; never counts as met)."""
+def _prerequisites(m, d, defs, scoped_ready) -> list[dict]:
+    """D-069 Option B: own generation-bound source/field/join/time evidence and metric dependencies,
+    not the global strict result. `met` is True, False or None (unevaluated; never passes)."""
     return [
         {"code": "gate_state_verified", "met": d.state == ACC.State.VERIFIED, "ref": "release_gate.md §2"},
         {"code": "register_certified_verified", "met": m.certified == ACC.State.VERIFIED, "ref": "release_gate.md §2"},
@@ -209,10 +215,11 @@ def _prerequisites(m, d, defs, strict_overall) -> list[dict]:
         {"code": "approval_refs", "met": bool(m.approval_refs), "ref": "validate_register"},
         {"code": "regression_tests", "met": bool(m.regression_tests), "ref": "release_gate.md §2.4"},
         {"code": "real_data_reconciliation_ref", "met": bool(m.reconciliation_ref), "ref": "release_gate.md §2.3"},
-        {"code": "strict_core_reconciliation_not_fail", "met": (None if strict_overall is None
-                                                                 else strict_overall != "FAIL"),
-         "ref": "release_gate.md §8.3 step 2"},
-        {"code": "kredi_reconciliation_not_fail", "met": None, "ref": "release_gate.md §8.3 step 3"},
+        {"code": "metric_source_dependencies_clear", "met": scoped_ready,
+         "ref": "release_gate.md §8.3 step 2; D-069"},
+        # Kredi needs its own independent reconciliation. Missing Kredi is not a prerequisite for Stock or Cari.
+        *([{"code": "kredi_reconciliation_not_fail", "met": None,
+            "ref": "release_gate.md §8.3 step 3"}] if "kredi" in m.sources else []),
         {"code": "app_refresh_and_restart_binding", "met": None, "ref": "release_gate.md §8.3 steps 4–5"},
         {"code": "generation_bound_api_evidence", "met": ACC.GENERATION_BOUND_API_EVIDENCE is True,
          "ref": "release_gate.md §8.3 step 6; validate_register"},

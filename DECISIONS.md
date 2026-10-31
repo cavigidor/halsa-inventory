@@ -1227,6 +1227,14 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   control with the option off, genuine blanks, missing codes, every preserved cell kind, unresolvable shared strings,
   stock and sales unchanged, generation evidence and gate identical with and without the phantom row).
 
+### D-069 · 2026-10-29 · Owner-approved Option B: per-metric release prerequisite, strict diagnostic preserved (M8-R4)
+- **Owner decision:** the uploaded Excel files and explicitly documented company facts are authoritative inputs; unrelated anomalies in one workbook must not globally suppress independently supported calculations from another. Neither questionably negative stock nor duplicate inventory is silently corrected, summed or interpreted.
+- **Release prerequisite:** replace the global non-FAIL condition of `docs/accuracy/release_gate.md` §8.3 step 2 with a generation-bound assessment of each proposed metric's actual source, field, join, time and downstream metric dependencies. Uninspected dependencies are NOT_VERIFIED, not passing. Strict source-wide reconciliation and its exit status are unchanged and must remain visible; the anomalies persist in Veri Kontrol.
+- **Kredi isolation:** Kredi reconciliation is a prerequisite for Kredi-dependent metrics only; missing/ambiguous Kredi must not hold back independent Stock/Cari metrics.
+- **No shortcut to VERIFIED:** the unchanged production `Gate`, registered blockers, definition approvals, declared dates, certified ceiling, independent real-data reconciliation and named regression tests still apply. A source-wide duplicate currently remains a source-integrity blocker for every metric reading that source: row-scoped exclusion needs its own proved implementation, not an assumption that other SKUs are safe. Do not use an unreviewed diagnostic to present any business figures.
+- **Acceptance:** synthetic strict-failure isolation tests; corrupted own-source and mixed-generation rejection; unchanged `GENEL SONUÇ` and exit code; independent review, owner-local acceptance and separate per-metric certification PR before any VERIFIED promotion. `GENERATION_BOUND_API_EVIDENCE` remains False.
+- **Supersedes:** global non-FAIL prerequisite in §8.3 step 2 and the Option A/B undecided wording in M8-R3; does not alter D-049/055 source-bound evidence or any financial calculation.
+
 ### D-070 · 2026-10-30 · Retire obsolete Stock thresholds (M8-R5A)
 - **Authority:** the owner relayed his father's business answers and explicitly requested this Stock-only checkpoint.
   `minseviye`/`maxseviye` are old purchasing settings retained solely for export compatibility; they are not current

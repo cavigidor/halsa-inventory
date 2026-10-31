@@ -196,9 +196,9 @@ data date (max sales date), file names and data-quality counts (e.g. DQ-4) remai
 
 ### 8.3 Owner real-data acceptance (owner-local; required before E)
 1. Write `data/sources.json` (§9) naming the stock, sales and aging files and their declared business dates.
-2. `python -m scripts.reconcile_sources --core data --evidence-out` → `GENEL SONUÇ` must not be FAIL; review each OPEN.
-3. `python -m scripts.reconcile_sources --kredi "data/kredi takip(1).xlsx" --today <YYYY-MM-DD> --evidence-out` →
-   not FAIL; each OPEN answered by the owner / accountant (§8.4). `--show-values` only on the local console.
+2. **D-069 (Option B, owner-approved 2026-10-29):** run `python -m scripts.reconcile_sources --core data --evidence-out --metric-diagnostics` and preserve `GENEL SONUÇ` and every strict FAIL/OPEN exactly as reported. A global strict FAIL does not automatically disqualify an unrelated metric. Each proposed metric must independently have no FAIL, OPEN, unknown or absent evidence in its **own source/field/join/temporal dependencies**, including its downstream metric dependencies. Unaudited dependency declarations remain strict; source-integrity errors (including duplicate records) still block every metric using that source until a separately tested row-level rule can isolate the affected result. Retain source issues in Veri Kontrol. Owner review and real-data reconciliation still required for each promotion.
+3. **Only when certifying a Kredi-dependent metric:** `python -m scripts.reconcile_sources --kredi "data/kredi takip(1).xlsx" --today <YYYY-MM-DD> --evidence-out` →
+   not FAIL; each OPEN answered by the owner / accountant (§8.4). Kredi findings must not gate unrelated Stock/Cari metrics. `--show-values` only on the local console.
    Evidence files go to the git-ignored `data/reconciliation/` (an explicit path inside the repository is refused
    unless it is under `data/`; a path that is, or links to, any input or any existing file is refused). Exit codes:
    0 PASS, 1 FAIL, 2 unreadable / usage / refused evidence path, 3 OPEN, 4 evidence file could not be written.
@@ -486,3 +486,16 @@ unchanged. Regression tests: `tests/test_m8_accuracy2b_review2.py` (pipeline-bui
 **Effect on the real export:** none on any production decision — every stock metric is still withheld by its own
 problems (coverage errors, the duplicated code, dates, approvals). No metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE`
 False.
+
+
+### M8-R4 Option B implementation status (D-069, 2026-10-29)
+The source-wide reconciliation still reports FAIL/OPEN with unchanged exit code; it remains the canonical diagnostic.
+The opt-in per-metric diagnostic now evaluates `metric_source_dependencies_clear` (bound generation, inspected
+source/field/join/temporal inputs and downstream dependencies) rather than global strict non-FAIL. Kredi
+reconciliation is required only for a metric which consumes the Kredi source. This changes **no** certified
+register entries, customer/stock aggregation, financial formulas, source observations, declared dates, owner
+passwords or production exposure. `GENERATION_BOUND_API_EVIDENCE` remains False and zero metrics are VERIFIED.
+
+**Deferred:** row-level isolation of negative/duplicate SKUs, explicit source dates and father accounting definitions,
+review of each metric's exact dependencies, owner-local acceptance, independent PR review, and the separately
+approved future certification PR. Do not infer a passing specific stock SKU from this diagnostic alone.
