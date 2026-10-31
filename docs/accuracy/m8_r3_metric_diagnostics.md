@@ -33,7 +33,9 @@ python -m scripts.reconcile_sources --core data --metric-diagnostics [--evidence
   `NO-EVIDENCE`) and never pass. The summary reports two separate facts: whether the **generation ID matches**, and
   whether the **core evidence is complete and bound** (aging, liste, sales, stock all present with evidence and bound
   to the bytes read); a matching ID with an unbound or missing source is shown as incomplete, with the sources named.
-- **Per candidate** (`receivables.collections`, `stock.reorder`, `stock.overstock`, `stock.product_counts`): the
+- **Per diagnosed metric** (`receivables.collections`, `stock.reorder`, `stock.overstock`, `stock.product_counts`;
+  since D-070 `stock.reorder` and `stock.overstock` are **RETIRED — D-070**: no longer release candidates, kept under
+  the same identifiers for historical diagnostic visibility and labelled so in the output, `retired_by: "D-070"`): the
   strict status of each source it reads; the gate's state and codes; the parts of that decision (certified ceiling,
   open blockers, unapproved definitions, source problems as the gate judges them for this metric, time rules,
   dependencies) — the breakdown must recompose to the gate's state; every strict problem of those sources that does
@@ -41,8 +43,10 @@ python -m scripts.reconcile_sources --core data --metric-diagnostics [--evidence
   as met / not met / not evaluated by this command (never counted as met).
 - **Category of each blocker:** business answer · authoritative date · fingerprint-bound owner declaration
   (selection, totals, mapping) · technical or source fix · independent real-data reconciliation · release
-  prerequisite · evidence unavailable. Where two apply, the first must happen first (e.g. DQ-4: business answer, then
-  an implemented, tested rule).
+  prerequisite · evidence unavailable · implemented retirement decision (`retirement_decided`: only
+  `STOCK-THRESHOLDS-RETIRED`, D-070 — the owner has answered; it is not an open question. Presentation only: the
+  blocker code and its INVALID gate state are unchanged). Where two apply, the first must happen first (e.g. DQ-4:
+  business answer, then an implemented, tested rule).
 - Code: `services/metric_diagnostics.py`; tests: `tests/test_m8_r3_metric_diagnostics.py`.
 
 ## 3. Owner-local acceptance on the 5 October exports (2026-10-29)
