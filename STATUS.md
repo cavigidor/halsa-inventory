@@ -1,5 +1,13 @@
 # STATUS.md — current checkpoint
 
+**Integration check M8-R4 + M8-R5A, 2026-10-31 (temporary branch `integration/m8-r4-r5a`; NOT merged / deployed).**
+PR #37 (`c430e0e`) and PR #38 (`ecce773`) merged with `--no-ff` onto `main` `ffa2c81`; D-069 and D-070 both kept;
+one integration-only test adjustment (a withheld dependency's state is now taken from the gate: INVALID after D-070).
+Full suite with browser + JS required, AI disabled: **1885 passed / 7 skipped / 2 xfailed** (1,894 collected =
+main 1,861 + 8 + 25). Certified ceilings identical to `main` (0 VERIFIED); only `stock.reorder` / `stock.overstock`
+became stricter (invalid). Old-policy pages / manifests refused live and after restart (ad-hoc check). Findings and
+merge recommendation: `docs/accuracy/m8_r4_r5a_integration.md`.
+
 **M8-R4 (D-069), isolated checkpoint 2026-10-30 — NOT accepted/merged/deployed.** Working only in the independent
 `~/Documents/Halsa-Codex-R4` clone on PR #37's `m8-r4-option-b-scoped-release`, starting at
 `410ee070da3178985ee20148ec090d2abf7bd1a8` (matched GitHub; initially clean). Original Claude-held checkout untouched;
