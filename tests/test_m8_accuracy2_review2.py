@@ -183,9 +183,10 @@ def data_of(text):
     return json.loads(m.group(1).replace("<\\/", "</")) if m else None
 
 
-def reorder_rows(text):
-    d = data_of(text)
-    return (d or {}).get("reorder", {}).get("rows") or []
+def displayed_stock_count(text):
+    # Real rendered data independent of the retired reorder algorithm.
+    match = re.search(r" · ([0-9,]+) ürün</div>", text)
+    return int(match.group(1).replace(",", "")) if match else None
 
 
 def live_client(w):
@@ -223,13 +224,13 @@ def published(world, promoted, monkeypatch):
     assert refresh(world.folder, world.dash, install=world.install)["ok"]
     monkeypatch.setattr(APP, "DASHBOARD_PATH", world.dash)
     body = Path(world.dash).read_bytes()
-    assert reorder_rows(body.decode()), "synthetic VERIFIED metric is embedded"
+    assert displayed_stock_count(body.decode()), "synthetic VERIFIED metric is embedded"
     return {"body": body, "m": world.store.current()}
 
 
 def assert_withheld(r):
     assert r.status_code == 503
-    assert reorder_rows(r.text) == [] and data_of(r.text) is None
+    assert displayed_stock_count(r.text) is None and data_of(r.text) is None
     assert "Sentetik" not in r.text
 
 
@@ -239,7 +240,7 @@ def test_published_dashboard_is_served_with_its_generation(world, published):
         r = c.get("/")
         assert r.status_code == 200 and r.content == published["body"]
         assert r.headers["X-Halsa-Generation"] == published["m"].generation_id
-        assert reorder_rows(r.text)
+        assert displayed_stock_count(r.text)
         assert c.get("/api/agent/actions").status_code in (200, ACC.WITHHELD_HTTP_STATUS)   # API still gated
     finally:
         close(c)
@@ -274,7 +275,7 @@ def test_pending_revalidation_then_successful_restore(world, published, monkeypa
         # served: the dashboard RE-BUILT by this process from the re-derived evidence (never the pre-restart file)
         assert r.status_code == 200 and GEN.sha256_bytes(r.content) == m.dashboard_sha256
         assert r.content == Path(world.dash).read_bytes()
-        assert reorder_rows(r.text) == reorder_rows(published["body"].decode())
+        assert displayed_stock_count(r.text) == displayed_stock_count(published["body"].decode())
         assert r.headers["X-Halsa-Generation"] == m.generation_id and m.core_id == published["m"].core_id
     finally:
         close(c)
@@ -398,7 +399,7 @@ def test_display_authorization_is_re_evaluated_when_served(world, promoted, monk
     built = TODAY - dt.timedelta(days=10)
     selection(world.folder, stock_date=TODAY - dt.timedelta(days=50))
     assert refresh(world.folder, world.dash, install=world.install, today=built)["ok"]
-    assert reorder_rows(Path(world.dash).read_text(encoding="utf-8"))          # displayed at build time (40 days)
+    assert displayed_stock_count(Path(world.dash).read_text(encoding="utf-8"))          # displayed at build time (40 days)
     monkeypatch.setattr(APP, "DASHBOARD_PATH", world.dash)
     c = live_client(world)
     try:
@@ -436,7 +437,7 @@ def test_get_root_waits_for_publication_and_serves_one_consistent_generation(wor
         new = world.store.current()
         assert r.content == Path(world.dash).read_bytes() and new.dashboard_sha256 == GEN.sha256_bytes(r.content)
         assert r.status_code == 200 and r.headers["X-Halsa-Generation"] == new.generation_id
-        assert reorder_rows(r.text) == []        # B's approval is missing → B's HTML embeds no reorder rows
+        assert displayed_stock_count(r.text) is None        # B's approval is missing → B's HTML embeds no reorder rows
     finally:
         close(c)
 

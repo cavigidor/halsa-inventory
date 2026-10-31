@@ -182,13 +182,16 @@ def test_product_best_buyers_must_be_buyer_facts():
             "ranked_buyers": [{"name": "Sentetik Aktif", "spend": 90000, "last": 2026}]}
     pkt = EV.product_packet(prod)
     buyer = next(f["fact_id"] for f in pkt.facts if f["kind"] == "buyer")
-    stock = next(f["fact_id"] for f in pkt.facts if f["label"] == "Stok miktarı")
+    stock = next(f["fact_id"] for f in pkt.facts if f["label"].startswith("İşaretli ERP bakiyesi"))
     base = {"status": "Fazla stok.", "risk": "Orta.", "opportunity": "Var.", "recommendation": "Ara.",
             "evidence_fact_ids": [], "warnings": [], "confidence": "medium"}
-    data, _ = BusinessActionAgent(Scripted([{**base, "best_buyer_fact_ids": [buyer]}])).analyze_product(prod)
-    assert data["best_buyers"] == ["Sentetik Aktif"]
-    data, r = BusinessActionAgent(Scripted([{**base, "best_buyer_fact_ids": [stock]}] * 2)).analyze_product(prod)
-    assert data is None and r["category"] == "fact_reference"
+    # Keep the numeric/kind grounding check independently of the retired product-analysis entry point.
+    result = BusinessActionAgent(Scripted([{**base, "best_buyer_fact_ids": [buyer]}])).run(
+        "product_analysis", pkt, S.ProductAnalysisAI)
+    assert result["ok"]
+    result = BusinessActionAgent(Scripted([{**base, "best_buyer_fact_ids": [stock]}] * 2)).run(
+        "product_analysis", pkt, S.ProductAnalysisAI)
+    assert not result["ok"] and result["category"] == "fact_reference"
 
 
 # ---------------- false-positive regressions from the first live run (2026-10-09) ----------------

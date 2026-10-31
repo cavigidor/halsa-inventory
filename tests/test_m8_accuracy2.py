@@ -81,11 +81,16 @@ def selection(folder, *, stock_date=SNAP, complete=True, approve=True, extra=Non
 
 @pytest.fixture
 def promoted(monkeypatch):
-    """A SYNTHETIC register copy in which `stock.reorder` is certified (only its source evidence can now decide)."""
+    """SYNTHETIC ceilings for source/generation tests; no production metric is promoted.
+    Product count supplies an independent rendered value now that reorder calculation is retired.
+    """
     reg = dict(ACC.REGISTER)
     reg["stock.reorder"] = dataclasses.replace(reg["stock.reorder"], blockers=(), definitions=(), certified=S,
                                                approval_refs=("D-999",), regression_tests=("tests/test_m8_accuracy2.py",),
                                                reconciliation_ref="synthetic")
+    reg["stock.product_counts"] = dataclasses.replace(reg["stock.product_counts"], blockers=(), definitions=(),
+        certified=S, approval_refs=("D-999",), regression_tests=("tests/test_m8_accuracy2.py",),
+        reconciliation_ref="synthetic")
     ACC.validate_register(reg, production=False)
     with pytest.raises(ACC.RegisterError):
         ACC.validate_register(reg, production=True)             # the production rules still refuse it
@@ -161,7 +166,8 @@ def test_unverified_to_verified_and_dashboard_api_agree(world, promoted):
     assert stock.observed["approval_status"] == "applied"
     assert stock.evidence.problems() == []
     rows = blob(world.dash)["reorder"]
-    assert rows["rows"] and "withheld" not in rows                       # VERIFIED → displayed in the HTML
+    assert rows["rows"] == [] and "withheld" not in rows
+    assert f" · {len(stock_rows()):,} ürün</div>" in Path(world.dash).read_text()
     st, j = api_state(world)
     assert st["state"] == "verified", st
     assert j["generation_id"] == m.generation_id      # …and the API agrees

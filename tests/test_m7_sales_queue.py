@@ -13,6 +13,7 @@ import sqlite3
 import threading
 
 import pandas as pd
+from contextlib import contextmanager
 import pytest
 from fastapi.testclient import TestClient
 
@@ -40,9 +41,25 @@ def data_dir(tmp_path_factory):
     return Q.write_all(str(tmp_path_factory.mktemp("queue_data")))
 
 
+@contextmanager
+def synthetic_product_source():
+    # Independent test producer stresses the top-15 cut without reviving retired stock recommendations.
+    category = A.Category('test_queue_product', 'Sentetik ürün', '#123456', 'product', 'test_queue_fill')
+    def fill(_):
+        return [A.make_action(source='test_queue_fill', category=category.key, entity_type='product',
+            entity_id=f'SYN-FILL-{i}', title='Sentetik sıra testi', reason='Test sıralaması', facts=['Sentetik'],
+            drivers={}, score=99, confidence='high') for i in range(16)]
+    A.register(A.ActionSource('test_queue_fill', (category,), fill))
+    try:
+        yield
+    finally:
+        A.unregister('test_queue_fill')
+
+
 @pytest.fixture(scope="module")
 def ctx(data_dir):
-    return CTX.build_context(data_dir, inflation_rate=0.40)
+    with synthetic_product_source():
+        return CTX.build_context(data_dir, inflation_rate=0.40)
 
 
 @pytest.fixture(scope="module")
@@ -151,7 +168,8 @@ def test_05_private_candidates_not_in_public_context(ctx, data_dir, tmp_path):
     blob = json.dumps(ctx, ensure_ascii=False, default=str)
     assert "sales_queue" not in blob and not any(i in blob for i in ids)
     assert set(ctx.keys()) == set(json.loads(blob).keys())
-    out, written = CTX.write_context(data_dir, str(tmp_path / "agent_context.json"), inflation_rate=0.40)
+    with synthetic_product_source():
+        out, written = CTX.write_context(data_dir, str(tmp_path / "agent_context.json"), inflation_rate=0.40)
     txt = open(out, encoding="utf-8").read()
     assert "sales_queue" not in txt and not any(i in txt for i in _private_ids(written))
     repo = ContextRepository(data_folder=data_dir, context=ctx)
@@ -476,7 +494,7 @@ def test_state_for_reason_outside_m5_top15(ctx, snap, data_dir):
         assert cl.post(f"/api/actions/{aid}/reopen", headers=h).status_code == 200
         assert card(cl.get("/api/sales-queue").json(), Q2) is not None
     APP.app.dependency_overrides.clear()
-    assert ctx["actions"][0]["category"] == "overstock"                                # M5 list untouched
+    assert ctx["actions"][0]["category"] == "test_queue_product"                     # M5 list untouched
 
 
 # =============================================================================================

@@ -1,5 +1,9 @@
 # M8-R3 — Strict vs dependency-scoped accuracy diagnostics
 
+**Historical R3 report.** D-069 in PR #37 supersedes the global strict/Kredi release prerequisite and the undecided
+Option A/B discussion below. See [the M8-R4 checkpoint](m8_r4_isolated_checkpoint.md) and `release_gate.md` §8.3
+for current scope and limits. R3's recorded private observations are historical, not a new acceptance run.
+
 _2026-10-29. Read-only diagnostic and evidence for a future release-gate decision. It decides nothing: no check,
 register entry, definition, approval, release-gate rule, displayed value or `GENERATION_BOUND_API_EVIDENCE` (False) is
 changed, and no metric is promoted. Counts, codes, fixed reason texts and schema labels only._

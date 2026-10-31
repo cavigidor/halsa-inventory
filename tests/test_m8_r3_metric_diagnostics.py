@@ -3,8 +3,8 @@
 Established on synthetic data:
 1. the strict result (checks, counts, overall, exit code, evidence results) is identical with or without diagnostics;
 2. every diagnostic gate state is exactly the production gate's decision, and the breakdown recomposes to it;
-3. a failure in a source a metric does not read is still reported (strict FAIL, "outside scope, still in source",
-   unmet release prerequisite) — never as resolved;
+3. a failure in a source a metric does not read is still reported (strict FAIL, "outside scope, still in source")
+   without blocking that metric's source prerequisite (D-069) — never as resolved;
 4. failures in a metric's own source / fields still block it;
 5. missing dates, totals, mappings and definitions stay blocking; full declarations still leave definitions,
    blockers and release prerequisites open;
@@ -59,9 +59,14 @@ def folder_aging_unmatched(tmp_path):
     return d
 
 
-def folder_stock_broken(tmp_path):
+def folder_stock_broken(tmp_path, *, unchanged_from=None):
     """The candidates' OWN source fails: a duplicated product code and an Excel error in the coverage field."""
     d = clean_folder(tmp_path / "stockbad")
+    if unchanged_from is not None:
+        # Fingerprints identify exact XLSX bytes, including ZIP/core-property timestamps.
+        # Rewriting identical cells is not an unchanged export; retain the original synthetic bytes.
+        for name in (SE.SALES_FILE, SE.AGING_FILE):
+            (Path(d) / name).write_bytes((Path(unchanged_from) / name).read_bytes())
     rows = stock_rows()
     rows[0][3] = E("#DIV/0!")
     rows.append(list(rows[1]))
@@ -138,7 +143,7 @@ def test_states_match_the_production_gate(tmp_path, make):
 
 def test_a_gate_verified_synthetic_metric_is_still_not_certifiable(tmp_path, promoted):  # noqa: F811
     # a SYNTHETIC register copy certifies stock.reorder; with full declarations its gate decision may be VERIFIED —
-    # the release prerequisites (flag off, strict result, Kredi, app checks) still refuse certification
+    # the release prerequisites (flag off and app checks) still refuse certification under Option B
     d = folder_clean(tmp_path)
     selection(d)
     m, served, diag = diag_of(d)
@@ -147,22 +152,29 @@ def test_a_gate_verified_synthetic_metric_is_still_not_certifiable(tmp_path, pro
         "stock.reorder").state.value
     assert dm["certification_permitted"] is False
     unmet = {p["code"] for p in dm["release_prerequisites"] if p["met"] is not True}
-    assert {"generation_bound_api_evidence", "kredi_reconciliation_not_fail", "app_refresh_and_restart_binding"} <= unmet
+    assert {"generation_bound_api_evidence", "app_refresh_and_restart_binding"} <= unmet
+    prereq = {p["code"]: p["met"] for p in dm["release_prerequisites"]}
+    assert "kredi_reconciliation_not_fail" not in prereq
+    assert prereq["metric_source_dependencies_clear"] is True
     assert "EVET" not in "\n".join(MD.render_tr(diag))
 
 
 # ---------------------------------------------------------------------------------------------
 # 3. an unrelated source's failure is never treated as resolved
 # ---------------------------------------------------------------------------------------------
-def test_unrelated_strict_failure_stays_visible_and_blocks_release(tmp_path, capsys):
+def test_unrelated_strict_failure_stays_visible_but_does_not_block_unaffected_metric(tmp_path, capsys):
     d = folder_sales_duplicate(tmp_path)
     code, out = run_cli(d, "--metric-diagnostics", capsys=capsys)
     assert code == 1 and "GENEL SONUÇ: FAIL" in out
     m, served = manifest_of(d)
     diag = MD.diagnose(m, served, TODAY, strict_overall="FAIL", strict_sources={"sales": "FAIL"})
+    baseline = diag_of(folder_clean(tmp_path))[2]
     for k in KEYS:
         pre = {p["code"]: p["met"] for p in diag["metrics"][k]["release_prerequisites"]}
-        assert pre["strict_core_reconciliation_not_fail"] is False
+        base_pre = {p["code"]: p["met"] for p in baseline["metrics"][k]["release_prerequisites"]}
+        # Both still have missing date/totals/owner declarations; unrelated sales FAIL adds no new metric blocker.
+        assert pre["metric_source_dependencies_clear"] == base_pre["metric_source_dependencies_clear"]
+        assert "strict_core_reconciliation_not_fail" not in pre
     assert "sales=FAIL" in "\n".join(MD.render_tr(diag))
     assert "sales=FAIL" in out.split("METRİK TANILAMA")[1]
 
@@ -220,7 +232,8 @@ def test_full_declarations_still_leave_definitions_blockers_and_release_open(tmp
     assert "Kaynak raporun tarihi bilinmiyor." not in texts and "Kaynak eşlemesinin onayı bilinmiyor." not in texts
     assert {b["code"] for b in dm["open_blockers"]} >= {"DQ-4", "STOCK-DATE", "STOCK-REPORT-SCOPE", "REAL-DATA"}
     assert {x["key"] for x in dm["unapproved_definitions"]} == {"stock_coverage_rule", "operational_freshness"}
-    assert dm["gate_state"] == "not_verified" and dm["certification_permitted"] is False
+    assert dm["gate_state"] == "invalid" and dm["certification_permitted"] is False
+    assert "STOCK-THRESHOLDS-RETIRED" in dm["gate_codes"]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -229,11 +242,11 @@ def test_full_declarations_still_leave_definitions_blockers_and_release_open(tmp
 def test_evidence_of_another_generation_is_refused(tmp_path, promoted):  # noqa: F811
     a = folder_clean(tmp_path, "a")
     selection(a)
-    b = folder_stock_broken(tmp_path)
+    b = folder_stock_broken(tmp_path, unchanged_from=a)
     ma, sa = manifest_of(a)
     mb, sb = manifest_of(b)
-    # (a) the record of A judged against the bytes of B: every source whose bytes differ binds nothing (the Cari is
-    #     byte-identical in A and B and stays bound — correctly)
+    assert {k for k in sa if sa[k] != sb[k]} == {"stock"}
+    # (a) only Stock was replaced; the other synthetic source files were preserved byte-for-byte.
     diag = MD.diagnose(ma, sb, TODAY, strict_overall="OPEN")
     assert diag["generation"]["unbound_sources"] == ["stock"]
     for k in ("stock.reorder", "stock.overstock", "stock.product_counts"):
@@ -264,7 +277,7 @@ def test_missing_evidence_is_unavailable_never_passing(tmp_path, promoted):  # n
     for k in ("stock.reorder", "stock.overstock", "stock.product_counts"):
         s = diag["metrics"][k]["source_judgement"]["stock"]
         assert s["available"] is False and s["reason"] == "NO-EVIDENCE"
-        assert diag["metrics"][k]["gate_state"] == "not_verified"
+        assert diag["metrics"][k]["gate_state"] == ("invalid" if k == "stock.overstock" else "not_verified")
         assert MD.UNAVAILABLE in s["problems"][0]["categories"]
 
 
@@ -294,8 +307,9 @@ def test_clean_generation_is_complete_and_bound(tmp_path):
 def test_unbound_source_with_matching_generation_id_is_not_complete(tmp_path, promoted):  # noqa: F811
     a = folder_clean(tmp_path, "a")
     selection(a)
-    ma, _ = manifest_of(a)
-    _, sb = manifest_of(folder_stock_broken(tmp_path))                 # the stock bytes of another export
+    ma, sa = manifest_of(a)
+    _, sb = manifest_of(folder_stock_broken(tmp_path, unchanged_from=a))
+    assert {k for k in sa if sa[k] != sb[k]} == {"stock"}
     diag = MD.diagnose(ma, sb, TODAY, strict_overall="OPEN")
     g = diag["generation"]
     assert g["generation_id_matches"] is True                          # the ID alone still matches …
@@ -376,3 +390,100 @@ def test_no_identity_transaction_or_amount_leaks(tmp_path, capsys):
                       for h in spec["required"])
     leaked = sorted(s for s in secrets if s and len(s) >= 4 and s in diag_text and s not in schema)
     assert leaked == []
+
+
+# M8-R4 D-069: Option B never erases strict findings and never certifies an ambiguous own source.
+def test_option_b_own_source_error_and_missing_declarations_still_block(tmp_path):
+    _, _, diag = diag_of(folder_stock_broken(tmp_path))
+    for key in ("stock.reorder", "stock.overstock", "stock.product_counts"):
+        pre = {p["code"]: p["met"] for p in diag["metrics"][key]["release_prerequisites"]}
+        assert pre["metric_source_dependencies_clear"] is False
+        assert diag["metrics"][key]["certification_permitted"] is False
+    _, _, clean = diag_of(folder_clean(tmp_path))
+    for key in KEYS:
+        pre = {p["code"]: p["met"] for p in clean["metrics"][key]["release_prerequisites"]}
+        assert pre["metric_source_dependencies_clear"] is False  # no approved date / totals / mapping
+
+
+def test_option_b_unrelated_kredi_does_not_gate_stock_or_collections(tmp_path):
+    _, _, diag = diag_of(folder_sales_duplicate(tmp_path))
+    for key in KEYS:
+        codes = {p["code"] for p in diag["metrics"][key]["release_prerequisites"]}
+        assert "kredi_reconciliation_not_fail" not in codes
+        assert "strict_core_reconciliation_not_fail" not in codes
+        assert diag["metrics"][key]["certification_permitted"] is False
+    assert diag["strict"]["overall"] == "OPEN"  # passed to this read-only helper
+
+
+def test_option_b_generation_mismatch_never_clears_prerequisite(tmp_path):
+    folder = folder_clean(tmp_path)
+    manifest, served = manifest_of(folder)
+    diag = MD.diagnose(manifest, served, TODAY, strict_overall="FAIL",
+                       expected_generation="wrong-generation")
+    for key in KEYS:
+        pre = {p["code"]: p["met"] for p in diag["metrics"][key]["release_prerequisites"]}
+        assert pre["metric_source_dependencies_clear"] is False
+        assert diag["metrics"][key]["certification_permitted"] is False
+
+
+def test_option_b_clean_stock_is_ready_despite_unrelated_sales_fail(tmp_path, promoted):  # noqa: F811
+    folder = folder_sales_duplicate(tmp_path)
+    selection(folder)
+    manifest, served = manifest_of(folder)
+    diag = MD.diagnose(manifest, served, TODAY, strict_overall="FAIL", strict_sources={"sales": "FAIL"})
+    metric = diag["metrics"]["stock.reorder"]
+    prereq = {p["code"]: p["met"] for p in metric["release_prerequisites"]}
+    assert prereq["metric_source_dependencies_clear"] is True
+    assert metric["gate_state"] == "verified"  # synthetic register only; production register is never promoted
+    assert metric["certification_permitted"] is False
+    assert diag["strict"] == {"overall": "FAIL", "sources": {"sales": "FAIL"}}
+
+
+def test_option_b_unused_stock_field_failure_does_not_block_used_fields(tmp_path):
+    folder = folder_clean(tmp_path)
+    rows = stock_rows()
+    rows[0][6] = E("#REF!")  # inventory value is used by overstock, but not reorder or product counts
+    write_stock(folder, rows)
+    selection(folder)
+    manifest, served = manifest_of(folder)
+    diag = MD.diagnose(manifest, served, TODAY, strict_overall="FAIL", strict_sources={"stock": "FAIL"})
+    for key in ("stock.reorder", "stock.product_counts"):
+        metric = diag["metrics"][key]
+        prereq = {p["code"]: p["met"] for p in metric["release_prerequisites"]}
+        assert prereq["metric_source_dependencies_clear"] is True
+        assert metric["source_judgement"]["stock"]["strict_only_still_in_source"]
+    metric = diag["metrics"]["stock.overstock"]
+    assert metric["gate_state"] == "invalid"
+    assert next(p["met"] for p in metric["release_prerequisites"]
+                if p["code"] == "metric_source_dependencies_clear") is False
+    assert all(not m["certification_permitted"] for m in diag["metrics"].values())
+
+
+def test_option_b_withheld_metric_dependency_blocks_readiness(tmp_path, promoted, monkeypatch):  # noqa: F811
+    folder = folder_clean(tmp_path)
+    selection(folder)
+    reg = dict(promoted)
+    reg["stock.reorder"] = dataclasses.replace(reg["stock.reorder"], depends_on=("stock.overstock",))
+    monkeypatch.setattr(ACC, "REGISTER", reg)
+    m, served, diag = diag_of(folder)
+    metric = diag["metrics"]["stock.reorder"]
+    assert metric["source_evidence_state_for_this_metric"] == "verified"
+    # Integration of PR #37 with PR #38 (D-070): the withheld dependency's exact state is the production gate's own
+    # decision — INVALID since `stock.overstock` carries the STOCK-THRESHOLDS-RETIRED blocker (it was NOT_VERIFIED
+    # before D-070). Either way it is withheld and must block readiness.
+    dep = ACC.current_gate(TODAY, m.bound_snapshot(served), m.generation_id).decide("stock.overstock")
+    assert dep.state == ACC.State.INVALID and "STOCK-THRESHOLDS-RETIRED" in dep.codes
+    assert metric["dependencies_withheld"] == [{"key": "stock.overstock", "state": dep.state.value}]
+    assert next(p["met"] for p in metric["release_prerequisites"]
+                if p["code"] == "metric_source_dependencies_clear") is False
+    assert metric["certification_permitted"] is False
+
+
+def test_option_b_kredi_metric_retains_its_own_reconciliation_prerequisite(tmp_path):
+    manifest, served = manifest_of(folder_clean(tmp_path))
+    metric = MD.diagnose(manifest, served, TODAY, strict_overall="FAIL", keys=("owner.kredi",))[
+        "metrics"]["owner.kredi"]
+    prereq = {p["code"]: p["met"] for p in metric["release_prerequisites"]}
+    assert prereq["kredi_reconciliation_not_fail"] is None  # absent Kredi evidence is never a pass
+    assert prereq["metric_source_dependencies_clear"] is False
+    assert metric["certification_permitted"] is False

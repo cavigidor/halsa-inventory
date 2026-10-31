@@ -45,7 +45,7 @@ CRM_DRAFT_PURPOSE = {"collection": "collection", "sales_followup": "sales_follow
 
 A.DEFAULT_REASONS.update({
     "collections": "Vadesi geçen alacak tahsilat öncelik eşiğini aştı.",
-    "overstock": "Stok maksimum seviyenin üzerinde; bağlı sermaye eritilmeli.",
+    "overstock": db.RETIREMENT_REASON,
     "winback": f"Geçmişte güçlü alım yapan müşteri {db.LAPSED_YEAR} yılında hiç alım yapmadı.",
     "real_decline": "Bu yılki ciro, enflasyondan arındırıldığında geçen yılın aynı döneminin altında.",
     "cross_sell": "Benzer aktif müşterilerde sık görülen bir ürün grubundan bu müşteri hiç alım yapmadı.",
@@ -81,25 +81,8 @@ def produce_collections(inp):
 
 
 def produce_overstock(inp):
-    out = []
-    for o in inp["over_cand"]:
-        fi = min(1.0, (o["inv"] or 0) / C.OVERSTOCK_VALUE_CAP)
-        conf = SC.confidence_label(has_amount=o["inv"] > 0, has_history=o["buyers"] > 0,
-                                   has_context=len(o.get("top_buyers", [])) > 0)
-        score = SC.action_priority(fi, 0.4, 0.3, _CONF_NUM[conf])
-        best = o["top_buyers"][0]["name"] if o.get("top_buyers") else "—"
-        facts = [f"Fazla stok değeri: {_money(o['inv'])}",
-                 f"Stok: {o['stock']}", f"Geçmiş alıcı sayısı: {o['buyers']}",
-                 f"En güçlü aday: {best}"]
-        reason = A.DEFAULT_REASONS["overstock"]
-        reason += (" Bu ürünü daha önce alan müşteriler var; aday alıcı listesi hazır."
-                   if o.get("top_buyers") else " Uygun geçmiş alıcı bulunamadı.")
-        out.append(A.make_action(source=CAT_OVERSTOCK.source, category="overstock",
-                                 entity_type="product", entity_id=o["code"],
-                                 title=f"STOK ERİTME — {o['name']}", reason=reason, facts=facts,
-                                 drivers={"inv": o["inv"], "buyers": o["buyers"]}, score=score,
-                                 confidence=conf))
-    return out
+    # D-070: refuse even stale/injected candidates. The category remains registered for client compatibility.
+    return []
 
 
 def produce_winback(inp):

@@ -1,5 +1,83 @@
 # STATUS.md — current checkpoint
 
+**Integration check M8-R4 + M8-R5A, 2026-10-31 (temporary branch `integration/m8-r4-r5a`; NOT merged / deployed).**
+PR #37 (`c430e0e`) and PR #38 (`ecce773`) merged with `--no-ff` onto `main` `ffa2c81`; D-069 and D-070 both kept;
+one integration-only test adjustment (a withheld dependency's state is now taken from the gate: INVALID after D-070).
+Full suite with browser + JS required, AI disabled: **1885 passed / 7 skipped / 2 xfailed** (1,894 collected =
+main 1,861 + 8 + 25). Certified ceilings identical to `main` (0 VERIFIED); only `stock.reorder` / `stock.overstock`
+became stricter (invalid). Old-policy pages / manifests refused live and after restart (ad-hoc check). Findings and
+merge recommendation: `docs/accuracy/m8_r4_r5a_integration.md`.
+
+**M8-R4 (D-069), isolated checkpoint 2026-10-30 — NOT accepted/merged/deployed.** Working only in the independent
+`~/Documents/Halsa-Codex-R4` clone on PR #37's `m8-r4-option-b-scoped-release`, starting at
+`410ee070da3178985ee20148ec090d2abf7bd1a8` (matched GitHub; initially clean). Original Claude-held checkout untouched;
+no private workbooks, `.env`, SQLite or ignored exports copied. PR #36 is already merged at `ffa2c81`; R3 details
+below are historical. Review: PR #37 changes release policy and diagnostic reporting only; the existing production
+Gate already evaluates declared metric dependencies. No new production display behavior or row/SKU isolation.
+
+- Original CI jobs: PR run `41000795041` **1 failed / 1854 passed / 7 skipped / 2 xfailed**; push run `41000789349`
+  **2 failed / 1853 passed / 7 skipped / 2 xfailed**. Both have a stale Stock-requires-Kredi assertion. The latter
+  also times out before the first upload. The test auth helper reused stale cookies when a fresh server reused a port;
+  deterministically reproduced against two real servers, then fixed by invalidating the helper cache at registration.
+  Historic CI lacks port/cookie telemetry, so that individual run's trigger cannot be proved from its log.
+- Local baseline: **1 failed / 33 passed**. Same-address regression before fix: **1 failed** (replacement session
+  unauthenticated). After fixes and four added Option B regressions: focused **39 passed in 42.93s**.
+- Full local suite: **1860 passed / 7 skipped / 2 xfailed in 422.72s (7:02)**, with
+  `AI_PROVIDER=disabled REQUIRE_BROWSER_TESTS=1 REQUIRE_JS_TESTS=1 .venv/bin/python -m pytest -q`.
+  Seven skips require absent private ERP exports; the two existing strict expected failures cover missing-cost
+  margin handling and invoice-account allocation (DQ-6). Browser and JavaScript tests ran, not skipped.
+  New remote CI must validate the exact pushed head; its result is recorded in PR #37 checks and the final handoff.
+- First pushed head `226cecb`: PR CI `41093877358` passed **1860 / 7 skipped / 2 xfailed** (525.38s); push CI
+  `41093869371` failed **1 / 1859 passed / 7 skipped / 2 xfailed** (636.57s). The failure exposed an R3 fixture
+  assumption: separately rewritten XLSX files with identical cells need not have identical hashes (ZIP timestamps
+  and core metadata). A delayed synthetic replay reproduced all four sources becoming unbound. Corrected the two
+  Stock-only replacement tests to preserve original synthetic Sales/Cari bytes and assert only Stock's hash changes;
+  production binding remains unchanged. Corrected focused suite: **39 passed in 46.34s**; a delayed replay across
+  the timestamp boundary confirms only Stock changes/is unbound. Full rerun and exact-head remote CI results are
+  tracked in PR #37 and the final handoff.
+- Strict reconciliation, Veri Kontrol, business calculations, register, generation binding and evidence flag unchanged;
+  **0 production metrics VERIFIED**. No test disabled, timeout relaxed or authentication bypass added.
+- Father answers received; their business-rule changes are **M8-R5, not started here**. Remaining: agreement-based
+  overdue report and Stock as-of discrepancy, safe duplicate-row isolation, private reconciliation/refresh/restart
+  acceptance and planner independent review. This checkpoint does not require private sources and does not complete R4.
+
+Review, acceptance table, exact failures and Claude handoff: `docs/accuracy/m8_r4_isolated_checkpoint.md`.
+Supersedes the stale headers below, retained as history.
+
+**M8-R5A — Stock threshold retirement, 2026-10-30 (not accepted/merged/deployed).** Independent clone
+`~/Documents/Halsa-Codex-R5A`, branch `codex/m8-r5a-retire-stock-thresholds`, starting from latest fetched GitHub
+main `ffa2c81fca12dcd8043d6de226b90984dcdaa300` (initially clean). PR #37 remains separate/draft/unmerged and was
+not modified; Claude-held directories and private sources were not accessed/copied.
+
+- D-070 records the owner's father-confirmed Stock facts. Obsolete min/max and cached `STOK Kontrol %` no longer
+  create reorder/overstock/clearance recommendations or threshold-driven product cards/AI commentary. No
+  replacement stock targets, forecasts, physical-stock interpretation, discontinued inference or duplicate rule.
+- Unsupported low-stock/overstock totals are unavailable (`None`/JSON null), not zero; stock candidate lists are
+  empty because the policy is withdrawn. Unrelated customer/financial calculations and views are unchanged.
+  Combined queue/context dependencies now follow those remaining calculations: customer metrics plus the existing
+  product count where used; no dependency on a retired clearance producer. Product-card retirement is explicit.
+- Raw schema, Excel records/formulas, signed balances/blanks, duplicate rows, source inspection/reconciliation and
+  Veri Kontrol detection/history remain. Stock diagnostic explanations now distinguish source findings from targets.
+- Certified ceilings/approvals unchanged: **0/33 production metrics VERIFIED**, evidence flag False. Runtime
+  reorder/overstock decisions become stricter through an explicit INVALID retirement blocker; dependent outputs stay
+  withheld. The new policy marker requires controlled refresh/republication of old HTML/manifests; no migration.
+- Dedicated synthetic suite: **25 passed** (1.63s): signed/blank/zero balances, obsolete settings, no-sales,
+  duplicates, byte/formula preservation, unchanged unrelated calculations, stale AI refusal, mixed-action references,
+  null-vs-zero refresh reconciliation and production API refusal. JavaScript wrapper: **16 passed** (18.92s).
+  Final policy/generation-focused suite: **253 passed / 1 existing xfailed** (29.15s).
+- Compatibility tests retain generation/tamper/restart/rollback/request-pinning checks using the existing independent
+  product-count metric as rendered data; queue/DOM stress tests use explicitly synthetic product actions, not retired
+  stock recommendations. An inherited XLSX timestamp fixture flake is corrected by preserving unchanged synthetic
+  bytes, with exact source hash/rejection assertions retained.
+- Full applicable suite: **1877 passed / 7 skipped / 2 existing xfailed in 448.90s (7:28)**, with
+  `AI_PROVIDER=disabled REQUIRE_BROWSER_TESTS=1 REQUIRE_JS_TESTS=1 .venv/bin/python -m pytest -q`.
+  Skips require absent private ERP exports; expected failures remain missing-cost margin and invoice-account
+  allocation. Browser/JS tests ran. Final-head CI evidence is recorded in the separate draft PR and final handoff.
+- Planner review and private owner-local acceptance remain pending. No merge/deploy, metric promotion or R5B work.
+
+Dependency trace, old/new behavior, source/display consequences and acceptance matrix:
+`docs/accuracy/m8_r5a_stock_retirement.md`. Earlier headers below are retained as historical checkpoints.
+
 _Updated 2026-10-29 (**M8-R3 — strict vs dependency-scoped metric diagnostics, PR open, awaiting independent review.** Opt-in, read-only `--metric-diagnostics`; strict result and exit code unchanged. Real 5 Oct files: FAIL 7 / 23 OPEN, Veri Kontrol 20, 0 of 33 VERIFIED; no candidate certifiable. Release-gate option A / B explained, not chosen. NOT deployed; `GENERATION_BOUND_API_EVIDENCE` False. Previous: M8-R2 / T1 merged as PR #35 (`cc4a50a`). Report: `docs/accuracy/m8_r3_metric_diagnostics.md`)._
 
 ## Git

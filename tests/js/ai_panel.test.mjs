@@ -193,9 +193,13 @@ test('filters and badges are server-described (a new category needs no UI change
 });
 
 // 6, 7, 8 — explicit top 5 then next 5; header; ≤5 ids; running state does not block the cards
-test('top 5, then next 5: one POST each, ≤5 ids in Python order, X-StockAgent header', async () => {
+test('top 5, then next 5: one POST each, ≤5 ids in server order, X-StockAgent header', async () => {
   let release;
   const base = clone(FIX.actions);
+  // Renderer-only batch; no retired business category is needed to fill the queue.
+  base.actions = Array.from({length: 12}, (_, i) => ({...clone(FIX.actions.actions[0]),
+    action_id: `test_batch:${i}`, score: 100 - i}));
+  base.count = base.actions.length;
   const ok = okEnrich(base.actions);
   const t = setup({ actions: base, enrich: (body) => new Promise((r) => { release = () => r(ok(body)); }) });
   t.open(); await until(cardsReady(t));
@@ -636,7 +640,14 @@ const actionOf = (t, c) => t.actions.actions.find((a) => a.action_id === c.datas
 const setSelect = (sel, v) => { sel.value = v; sel.dispatchEvent(new sel.ownerDocument.defaultView.Event('change')); };
 
 test('✉ Taslak and 🔍 Müşteri appear on customer cards only, never on product cards', async () => {
-  const t = setup();
+  const actions = clone(FIX.actions), categories = clone(FIX.categories);
+  // Independent synthetic renderer category, never emitted by the business action producers.
+  categories.push({key:'test_product', label_tr:'Sentetik ürün', color:'#123456',
+    entity_type:'product', source:'test_renderer', draft_purpose:null});
+  actions.actions.push({...clone(actions.actions[0]), action_id:'test_product:SYN-UI', category:'test_product',
+    source:'test_renderer', entity_type:'product', entity_id:'SYN-UI', title:'Sentetik ürün kartı'});
+  actions.count = actions.actions.length;
+  const t = setup({actions, categories});
   t.open(); await until(cardsReady(t));
   for (const c of t.qa('.aic')) {
     const isCust = actionOf(t, c).entity_type === 'customer';
