@@ -7,9 +7,12 @@ workbook used, no metric promoted, `GENERATION_BOUND_API_EVIDENCE` False, nothin
 **Current status (2026-10-31):**
 - **PR #37 merged** (planner-approved, code only): squash commit **`52522b1`** on `main`; its tree is byte-identical to
   the reviewed head `c430e0e` (tree `1692ad9`).
-- **PR #38 updated, not merged, still draft:** `main` (`52522b1`) merged into `codex/m8-r5a-retire-stock-thresholds`
-  without rebase (`e2f0d69`; resulting tree identical to the reviewed integration merge `b55046b`), then the carried
-  test correction (finding 1) and the two regression tests for findings 2 and 3 (§6). Findings 4 and 5 remain open.
+- **PR #38 merged** (planner-approved, code only): squash commit **`ac191d7`** on `main`, tree identical to the reviewed
+  head `a6332c5`. Before that, `main` (`52522b1`) was merged into `codex/m8-r5a-retire-stock-thresholds` without rebase
+  (`e2f0d69`; tree identical to the reviewed integration merge `b55046b`), then the carried test correction
+  (finding 1) and the two regression tests for findings 2 and 3 (§6).
+- **Findings 4 and 5:** fixed in the post-merge diagnostics cleanup PR (branch `m8-diagnostics-retired-stock-cleanup`;
+  presentation and a test comment only), pending review.
 - **PR #39** stays open as evidence until the planner approves its cleanup.
 
 ## 1. Starting state
@@ -79,8 +82,8 @@ passed with real login.
 | 1 | #37 × #38 | must fix on merge | the hard-coded dependency state above | **done in PR #38** (carried from `677d166`) |
 | 2 | #38 | low | only one test detects an ungated product-count header | **done in PR #38**: §6 Test A |
 | 3 | #38 | low | no committed test for old-policy page / manifest invalidation (verified ad hoc here) | **done in PR #38**: §6 Test B |
-| 4 | #37 + #38 | low (presentation) | the diagnostics still list `stock.reorder` / `stock.overstock` as "first-release candidates", and tag `STOCK-THRESHOLDS-RETIRED` as a pending business answer although the father has answered | after both merge: drop the two retired metrics from `CANDIDATES` (or label them "retired, D-070") and give the retirement blocker its own category |
-| 5 | #37 | cosmetic | `test_option_b_unrelated_kredi_does_not_gate_stock_or_collections` comments that the strict result is OPEN while its scenario is a strict FAIL (the helper is given "OPEN") | correct the comment |
+| 4 | #37 + #38 | low (presentation) | the diagnostics still list `stock.reorder` / `stock.overstock` as "first-release candidates", and tag `STOCK-THRESHOLDS-RETIRED` as a pending business answer although the father has answered | after both merge: drop the two retired metrics from `CANDIDATES` (or label them "retired, D-070") and give the retirement blocker its own category | **fixed in the cleanup PR:** identifiers kept, labelled `RETIRED — D-070` (`retired_by`); blocker category `retirement_decided` ("uygulanmış kaldırma kararı (D-070; bekleyen soru değil)"); code and INVALID state unchanged |
+| 5 | #37 | cosmetic | `test_option_b_unrelated_kredi_does_not_gate_stock_or_collections` comments that the strict result is OPEN while its scenario is a strict FAIL (the helper is given "OPEN") | **fixed in the cleanup PR:** comment distinguishes the CLI FAIL (exit 1, now asserted by its own test) from the "OPEN" handed to the helper |
 
 No defect found in production gating, generation binding, source validation, Veri Kontrol detection or the unrelated
 customer / financial calculations.

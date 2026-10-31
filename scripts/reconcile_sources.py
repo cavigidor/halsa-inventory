@@ -24,7 +24,8 @@ Exit code: 0 = PASS, 1 = FAIL, 2 = unreadable input / usage error / refused evid
 4 = the checks ran but the evidence file could not be written (nothing else was written).
 
 `--metric-diagnostics` (M8-R3, opt-in, with `--core`): after the overall result, a READ-ONLY comparison of the strict
-source-wide result with the actual gate decision of each candidate metric (services/metric_diagnostics.py), from the
+source-wide result with the actual gate decision of each diagnosed metric (services/metric_diagnostics.py; the D-070
+retired stock metrics stay listed, labelled RETIRED — D-070), from the
 same manifest and the same frozen bytes. It adds no check, never changes the overall result or the exit code, promotes
 nothing and writes nothing (with `--evidence-out` the evidence file gains a `metric_diagnostics` section).
 
