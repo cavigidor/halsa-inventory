@@ -1,5 +1,19 @@
 # STATUS.md — current checkpoint
 
+**2026-10-31 — PR #37 (M8-R4, D-069) MERGED; PR #38 (M8-R5A, D-070) updated, NOT merged (draft).**
+- PR #37 squash-merged into `main` as `52522b1` (planner-approved, code only); tree identical to the reviewed head
+  `c430e0e`. No deployment, no certification, `GENERATION_BOUND_API_EVIDENCE` False.
+- PR #38: `main` merged into the branch without rebase (`e2f0d69`, tree identical to the reviewed integration merge
+  `b55046b` of temporary PR #39); the integration test correction carried (withheld `stock.overstock` dependency is
+  INVALID with `STOCK-THRESHOLDS-RETIRED`); two regression tests added — A: an unverified `stock.product_counts`
+  never exposes the count (HTML header, displayed marker, `GET /`, `/api/context`, refresh report) with a synthetic
+  VERIFIED control; B: an old-policy (`m8-accuracy-1`) page + manifest is refused live and after restart, and a
+  regenerated current-policy page follows normal authorization. Negative controls confirm both tests fail when the
+  protection is removed.
+- Local full suite (browser + JS required, AI disabled): **1890 passed, 7 skipped, 2 xfailed** (1,899 collected = the PR #39 integration 1,894 + 5 new regression tests). Certified ceilings: 33 metrics, 0 VERIFIED.
+- PR #39 (temporary integration check) stays open until the planner approves cleanup.
+  Report: `docs/accuracy/m8_r4_r5a_integration.md`.
+
 **M8-R4 (D-069), isolated checkpoint 2026-10-30 — NOT accepted/merged/deployed.** Working only in the independent
 `~/Documents/Halsa-Codex-R4` clone on PR #37's `m8-r4-option-b-scoped-release`, starting at
 `410ee070da3178985ee20148ec090d2abf7bd1a8` (matched GitHub; initially clean). Original Claude-held checkout untouched;
