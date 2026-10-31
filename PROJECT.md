@@ -10,6 +10,10 @@ Every month the ERP exports three Excel files:
 The goal is to turn these exports into concrete daily actions: whom to collect from,
 what to reorder, which overstock to sell and to whom, and which lapsed customers to win back.
 
+**M8-R5A / D-070:** purchasing/overstock/clearance recommendations based on the old Stock min/max settings are
+withdrawn; those fields and cached `STOK Kontrol %` are preserved as source data, not valid current targets.
+The dependent product AI/card path is withdrawn. No replacement forecasting or physical-stock model is implemented.
+
 ## Architecture
 Two layers. The rule that matters most: **numbers come only from Python.**
 

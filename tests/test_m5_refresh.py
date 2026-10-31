@@ -257,7 +257,8 @@ def test_context_and_dashboard_totals_reconcile(env):
     DB.build(env["data"], staged, today=TODAY, sources=src, frames=v["frames"], stats_out=stats)
     ok = RF.verify(ctx, stats, staged, BASE_DATE)
     assert ok["ok"], ok["errors"]
-    assert ok["counts"]["overdue_total"] == round(stats["overdue_total"]) and ok["counts"]["overstock_value"] == round(stats["overstock_value"])
+    assert ok["counts"]["overdue_total"] == round(stats["overdue_total"])
+    assert ok["counts"]["overstock_value"] is None and stats["overstock_value"] is None
     bad = RF.verify(ctx, {**stats, "overdue_total": stats["overdue_total"] + 1}, staged, BASE_DATE)
     assert not bad["ok"] and any("vadesi geçen toplam" in e for e in bad["errors"])
     wrong_date = RF.verify(ctx, stats, staged, "2026-07-01")

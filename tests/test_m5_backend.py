@@ -71,14 +71,15 @@ def test_reason_is_deterministic_turkish(synthetic_ctx):
         by_cat.setdefault(a["category"], a["reason"])
     assert "2026" in by_cat["winback"] and "Kademe" in by_cat["winback"]
     assert "enflasyon" in by_cat["real_decline"]
-    assert "Stok" in by_cat["overstock"]
+    assert "overstock" not in by_cat  # D-070: no stock-clearance reason from obsolete thresholds
 
 
 def test_registry_refactor_preserves_m1_ordering_and_scores(synthetic_dir):
     """Every action matches the M1 formula output (scores/facts) and the queue is score-ranked."""
     from services import context as CTX
     c = CTX.build_context(synthetic_dir, inflation_rate=0.40)
-    assert [a["category"] for a in c["actions"]][:2] == ["real_decline", "overstock"]
+    assert c["actions"][0]["category"] == "real_decline"
+    assert not any(a["category"] == "overstock" for a in c["actions"])
     assert all(A.validate(dict(a)) for a in c["actions"])
 
 
@@ -661,20 +662,24 @@ def test_customer_get_is_deterministic_with_zero_provider_calls(mk):
 
 def test_product_get_is_deterministic_with_zero_provider_calls(mk, synthetic_ctx):
     c, prov = mk()
-    code = synthetic_ctx["overstock"][0]["code"]
-    j = c.get(f"/api/agent/product/{code}").json()
-    assert j["facts"]["product_code"] == code and j["recommendation"] is None and prov.calls == 0
+    assert synthetic_ctx["overstock"] == []
+    assert c.get('/api/agent/product/SP-002').status_code == 404
+    assert prov.calls == 0  # retired recommendations cannot manufacture a product fact card
 
 
 def test_analysis_endpoints_are_post_only_and_guarded(mk, synthetic_ctx):
     c, prov = mk()
-    prod = synthetic_ctx["overstock"][0]["code"]
-    for i, path in enumerate((f"/api/agent/customer/{OPEN_CODE}/analyze", f"/api/agent/product/{prod}/analyze")):
+    for i, path in enumerate((f"/api/agent/customer/{OPEN_CODE}/analyze",)):
         assert c.get(path).status_code == 405
         assert c.post(path, headers={"X-StockAgent": "0"}).status_code == 403
         assert prov.calls == i, "neither GET nor an unguarded POST reaches the provider"
         assert c.post(path).status_code == 200
         assert prov.calls == i + 1
+    path = '/api/agent/product/SP-002/analyze'
+    assert c.get(path).status_code == 405
+    assert c.post(path, headers={"X-StockAgent": "0"}).status_code == 403
+    assert c.post(path).status_code == 404
+    assert prov.calls == 1
 
 
 @pytest.mark.parametrize("path", ["/api/agent/customer/NOPE", "/api/agent/product/NOPE"])

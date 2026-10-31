@@ -1234,3 +1234,24 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **No shortcut to VERIFIED:** the unchanged production `Gate`, registered blockers, definition approvals, declared dates, certified ceiling, independent real-data reconciliation and named regression tests still apply. A source-wide duplicate currently remains a source-integrity blocker for every metric reading that source: row-scoped exclusion needs its own proved implementation, not an assumption that other SKUs are safe. Do not use an unreviewed diagnostic to present any business figures.
 - **Acceptance:** synthetic strict-failure isolation tests; corrupted own-source and mixed-generation rejection; unchanged `GENEL SONUÇ` and exit code; independent review, owner-local acceptance and separate per-metric certification PR before any VERIFIED promotion. `GENERATION_BOUND_API_EVIDENCE` remains False.
 - **Supersedes:** global non-FAIL prerequisite in §8.3 step 2 and the Option A/B undecided wording in M8-R3; does not alter D-049/055 source-bound evidence or any financial calculation.
+
+### D-070 · 2026-10-30 · Retire obsolete Stock thresholds (M8-R5A)
+- **Authority:** the owner relayed his father's business answers and explicitly requested this Stock-only checkpoint.
+  `minseviye`/`maxseviye` are old purchasing settings retained solely for export compatibility; they are not current
+  targets. There is no separate discontinued indicator. Signed negative ERP balances can reflect component removals
+  and sales. One accidentally retained row in a specific workbook does not justify a generic duplicate-row rule.
+- **Decision:** withdraw reorder/overstock classifications, threshold-based critical alerts, clearance actions and
+  dependent product commentary/cards. `STOK Kontrol %` is not reinterpreted as an independent purchasing model.
+  No new target, forecast, quantity normalization, duplicate sum/drop or no-sales-to-discontinued inference.
+- **Preserve:** original Excel bytes/formulas and import schema, signed balances and blanks, every duplicate row,
+  source traceability, strict inspection/reconciliation, Veri Kontrol detection/history, unrelated financial rules.
+  Unsupported recommendation totals become unavailable, not zero. Product AI refuses before any provider call;
+  stale overstock actions never enter AI evidence. No independent raw Stock catalog is invented.
+- **Gate:** certified ceilings, approval records and GENERATION_BOUND_API_EVIDENCE=False unchanged; no metric
+  VERIFIED. Add an explicit retirement blocker; keep legacy source checks conservatively. New policy marker
+  invalidates old generated HTML/manifest acceptance through the existing refresh/restart mechanism.
+- **Dependencies:** the remaining customer action queue no longer depends on retired stock clearance; the full
+  context retains the existing stock product-count dependency rather than obsolete recommendations. All remaining
+  customer dependencies and source checks stay; the product-card metric has an explicit retirement blocker.
+- **Boundary:** separate branch from main; unmerged Option B PR #37 untouched. No private workbook acceptance,
+  merge/deploy, Cari/supplier/customer-liability/overdue work or next milestone. Planner independent review pending.

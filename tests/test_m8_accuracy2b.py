@@ -32,7 +32,7 @@ from services import source_validation as SV
 from tests.fixtures.xlsx_synth import E, F, MISSING, write_xlsx
 from tests.test_m8_accuracy2 import (SE, TODAY, promoted, refresh, selection, world, write_stock,  # noqa: F401
                                      stock_rows)
-from tests.test_m8_accuracy2_review2 import close, data_of, live_client, reorder_rows, restart  # noqa: F401
+from tests.test_m8_accuracy2_review2 import close, data_of, live_client, displayed_stock_count, restart  # noqa: F401
 
 pytestmark = pytest.mark.production_gate
 S, NV, INV = ACC.State.VERIFIED, ACC.State.NOT_VERIFIED, ACC.State.INVALID

@@ -56,8 +56,8 @@ def publish(w):
     return w.store.current()
 
 
-def low_codes(ctx):
-    return sorted(str(r["code"]) for r in ctx["low_stock"])
+def product_count(ctx):
+    return ctx['company']['products_scanned']  # independent descriptive value changes with the source revision
 
 
 @pytest.fixture
@@ -127,10 +127,10 @@ def test_refresh_between_authorization_and_read_returns_the_authorized_generatio
         assert dep.fired == 1                                         # B was published mid-request
         gen_b = world.store.current()
         assert gen_b.core_id != g["gen_a"].core_id and world.repo.live() is not g["ctx_a"]
-        assert low_codes(world.repo.live()) != low_codes(g["ctx_a"])   # A and B really differ
+        assert product_count(world.repo.live()) != product_count(g["ctx_a"])   # A and B really differ
         assert r.status_code == 200
         assert r.headers["X-Halsa-Generation"] == g["gen_a"].generation_id
-        assert low_codes(r.json()["data"]) == low_codes(g["ctx_a"])    # A's data, authorized by A's evidence
+        assert product_count(r.json()["data"]) == product_count(g["ctx_a"])    # A's data, authorized by A's evidence
         # the next request sees B, which is not verified → withheld, and says so
         APP.app.dependency_overrides[APP.get_repo] = lambda: world.repo
         r2 = c.get("/api/context")
@@ -151,7 +151,7 @@ def test_negative_control_without_pinning_the_race_is_real(world, two_generation
     try:
         r = c.get("/api/context")
         assert r.status_code == 200 and r.headers["X-Halsa-Generation"] == g["gen_a"].generation_id
-        assert low_codes(r.json()["data"]) == low_codes(world.repo.live()) != low_codes(g["ctx_a"])
+        assert product_count(r.json()["data"]) == product_count(world.repo.live()) != product_count(g["ctx_a"])
     finally:
         c.__exit__(None, None, None)
         APP.app.dependency_overrides.clear()
@@ -168,7 +168,7 @@ def test_failed_refresh_during_a_request_rolls_back_and_the_request_stays_consis
         r = c.get("/api/context")
         assert dep.fired == 1 and r.status_code == 200
         assert r.headers["X-Halsa-Generation"] == g["gen_a"].generation_id
-        assert low_codes(r.json()["data"]) == low_codes(g["ctx_a"])
+        assert product_count(r.json()["data"]) == product_count(g["ctx_a"])
         # rollback: dashboard, manifest, context and store all still A
         assert open(world.dash, encoding="utf-8").read() == dash_before
         assert open(GEN.manifest_path(world.dash), encoding="utf-8").read() == man_before
@@ -181,16 +181,23 @@ def test_failed_refresh_during_a_request_rolls_back_and_the_request_stays_consis
         APP.app.dependency_overrides.clear()
 
 
-def test_indices_of_a_pinned_older_context_never_leak_to_newer_requests(world, two_generations):
+def test_indices_of_a_pinned_older_context_never_leak_to_newer_requests(world, two_generations, monkeypatch):
     g = two_generations
+    original = world.repo._compute_indices
+    def probe(ctx):
+        customers, products = original(ctx)
+        customers['SYN-INDEX-PROBE'] = {'products_scanned': product_count(ctx)}
+        return customers, products
+    monkeypatch.setattr(world.repo, '_compute_indices', probe)
     tok = RP.begin()
     try:
         assert world.repo.current() is g["ctx_a"]                     # pinned A
         refresh_to(world, g["b"])()                                   # B published during the request
-        assert world.repo.product("SP-777") is None                   # A's index (no SP-777)
+        assert world.repo.customer('SYN-INDEX-PROBE')['products_scanned'] == product_count(g['ctx_a'])
     finally:
         RP.end(tok)
-    assert world.repo.product("SP-777") is not None                   # the next reader gets B's own index
+    assert world.repo.customer('SYN-INDEX-PROBE')['products_scanned'] == product_count(world.repo.live())
+    assert product_count(world.repo.live()) != product_count(g['ctx_a'])
 
 
 def _owner_world(tmp_path, world):
@@ -298,7 +305,7 @@ def test_simultaneous_requests_never_mix_generations(world, two_generations):
         while not stop.is_set():
             r = c.get("/api/context")
             results.append((r.status_code, r.headers.get("X-Halsa-Generation"),
-                            low_codes(r.json()["data"]) if r.status_code == 200 else None))
+                            product_count(r.json()["data"]) if r.status_code == 200 else None))
 
     readers = [threading.Thread(target=reader) for _ in range(4)]
     t = threading.Thread(target=refresher)
@@ -320,7 +327,7 @@ def test_simultaneous_requests_never_mix_generations(world, two_generations):
     gen_a = g["gen_a"].generation_id
     for h, codes in ok:
         # only A is approved: every displayed response is A, carries A's data and says A
-        assert h == gen_a and codes == low_codes(g["ctx_a"])
+        assert h == gen_a and codes == product_count(g["ctx_a"])
     assert any(s == ACC.WITHHELD_HTTP_STATUS for s, _, _ in results)    # B was live at times: withheld, never shown
 
 
