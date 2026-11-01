@@ -74,7 +74,7 @@ def test_positive_and_negative_balances_keep_their_sign():
     pos, neg = rows["120.01.0003"], rows["120.01.0004"]
     assert (pos["balance"], pos["direction"]) == (2_000, "debit")
     assert (neg["balance"], neg["direction"]) == (-7_250, "credit")       # not dropped, not zeroed, not flipped
-    assert neg["direction_label"] == "Halsa hesap sahibine borçlu" and neg["oldest"] == BUCKETS[2]
+    assert neg["direction_label"] == "Negatif bakiye" and neg["oldest"] == BUCKETS[2]   # neutral: class unconfirmed
     assert balances == {"120.01.0003": 2_000, "120.01.0004": -7_250}
 
 
@@ -82,7 +82,8 @@ def test_320_accounts_are_suppliers_and_no_other_prefix_is_classified():
     rows, _ = _by_code(_aging(_row("320.01.0001", {OLDEST: -3_000}), _row("120.01.0005", {OLDEST: 10}),
                               _row("150.01.0001", {OLDEST: 10}), _row("3201", {OLDEST: 10})))
     assert rows["320.01.0001"]["account_class"] == "supplier"
-    assert rows["320.01.0001"]["class_label"] == "Tedarikçi (320)" and rows["320.01.0001"]["direction_label"] == "—"
+    assert rows["320.01.0001"]["class_label"] == "Tedarikçi (320)"
+    assert rows["320.01.0001"]["direction_label"] == "Negatif bakiye"   # sign named neutrally, no debtor / creditor claim
     assert rows["320.01.0001"]["balance"] == -3_000                     # signed source amount kept
     assert rows["3201"]["account_class"] == "supplier"                  # prefix rule, code read as recorded
     assert rows["120.01.0005"]["account_class"] == rows["150.01.0001"]["account_class"] == "unconfirmed"
@@ -194,7 +195,8 @@ def test_c360_supplier_account_is_not_shown_as_a_customer_receivable(c360):
     aging = dict(c360.aging)
     aging["910.99.0001"] = {**aging["910.99.0001"], "account_class": "supplier"}
     a = _accounts(dataclasses.replace(c360, aging=aging), "910.00.0001")["910.99.0001"]
-    assert a["class_label"] == "Tedarikçi (320)" and a["direction_label"] == "—" and a["balance"] == -2_500
+    assert a["class_label"] == "Tedarikçi (320)" and a["balance"] == -2_500
+    assert a["direction_label"] == "Negatif bakiye"                     # not "Halsa müşteriye borçlu" for a supplier
 
 
 # ---------------------------------------------------------------------------------------------
@@ -264,6 +266,122 @@ def test_crm_and_kredi_due_dates_are_unchanged():
     assert CRM.due_state("2026-06-01", "2026-06-30") == "overdue"          # a user-entered date, genuinely past
     assert CRM.due_state("2026-06-30", "2026-06-30") == "today"
     assert KS.PAST_DUE_REMAINING == "past_due_with_remaining"              # Kredi installments keep their due dates
+
+
+# ---------------------------------------------------------------------------------------------
+# review corrections (PR #41): exact signed amounts; no unjustified debtor / creditor wording
+# ---------------------------------------------------------------------------------------------
+DECIMAL_CASES = (("120.01.0101", {OLDEST: 1250.25}, 1250.25, "debit"),          # positive decimal
+                 ("120.01.0102", {OLDEST: -7250.75}, -7250.75, "credit"),       # negative decimal
+                 ("120.01.0103", {NEWEST: -0.40}, -0.4, "credit"),              # small negative, not rounded to 0
+                 ("120.01.0104", {NEWEST: 0.01}, 0.01, "debit"),                # small positive
+                 ("120.01.0105", {OLDEST: 0.1, NEWEST: 0.2}, 0.3, "debit"),     # exact decimal sum, no float residue
+                 ("120.01.0106", {OLDEST: 5, NEWEST: -5}, 0.0, "zero"),         # genuine zero stays zero
+                 ("120.01.0107", {}, 0.0, "zero"))
+
+
+def _decimal_frame():
+    frame = _aging(*[_row(code, b) for code, b, _, _ in DECIMAL_CASES], _row("120.01.0108", {OLDEST: 3.5}))
+    frame.loc[frame["Hesap kodu"] == "120.01.0108", BUCKETS[4]] = None              # blank → unknown
+    return frame
+
+
+def test_signed_amounts_keep_their_decimals_and_sign():
+    frame = _decimal_frame()
+    before = frame.copy(deep=True)
+    rows, balances = _by_code(frame)
+    for code, _, want, direction in DECIMAL_CASES:
+        assert rows[code]["balance"] == want and rows[code]["direction"] == direction, code
+        assert balances[code] == want
+    assert rows["120.01.0103"]["balance"] != 0 and repr(rows["120.01.0105"]["balance"]) == "0.3"
+    assert repr(rows["120.01.0106"]["balance"]) == "0.0"                             # not -0.0
+    assert rows["120.01.0108"]["balance"] is None and rows["120.01.0108"]["direction"] is None
+    pd.testing.assert_frame_equal(frame, before)
+
+
+def test_c360_and_dashboard_receive_the_same_exact_amounts(tmp_path):
+    folder = CF.write_all(str(tmp_path / "c360"))
+    frame = CF.aging_frame()
+    frame[CF.AGING_COLUMNS[3:]] = frame[CF.AGING_COLUMNS[3:]].astype(float)
+    frame.loc[frame["Hesap kodu"] == "910.99.0001", CF.AGING_COLUMNS[5]] = -0.40      # customer invoice account
+    frame.loc[frame["Hesap kodu"] == "910.00.0001", CF.AGING_COLUMNS[4]] = 1250.25
+    path = os.path.join(folder, CF.AGING_FILE)
+    frame.to_excel(path, index=False)
+    sha = hashlib.sha256(open(path, "rb").read()).hexdigest()
+    rows, _ = DB.m_collections(path)
+    dash = {r["code"]: r["balance"] for r in rows}
+    snap = C360.build_snapshot(folder, CTX.build_context(folder, inflation_rate=0.40))
+    acc = _accounts(snap, "910.00.0001")
+    assert acc["910.99.0001"]["balance"] == dash["910.99.0001"] == -0.4
+    assert acc["910.99.0001"]["direction_label"] == "Halsa müşteriye borçlu"       # confirmed customer meaning
+    assert acc["910.00.0001"]["balance"] == dash["910.00.0001"] == 1250.25 + 750      # buckets of the fixture
+    assert hashlib.sha256(open(path, "rb").read()).hexdigest() == sha
+
+
+def test_supplier_and_unclassified_accounts_get_no_debtor_or_receivable_wording():
+    rows, _ = _by_code(_aging(_row("320.01.0201", {OLDEST: 900}), _row("320.01.0202", {OLDEST: -900}),
+                              _row("120.01.0201", {OLDEST: 900}), _row("120.01.0202", {OLDEST: -900}),
+                              _row("150.01.0201", {OLDEST: -1})))
+    debtor_words = ("borçlu", "alacak", "borcu")
+    for r in rows.values():
+        assert r["direction_label"] in ("Pozitif bakiye", "Negatif bakiye", "Sıfır bakiye")
+        assert not any(w in r["direction_label"].lower() for w in debtor_words)
+    for direction in ("debit", "credit", "zero"):
+        for cls in ("supplier", "unconfirmed"):
+            assert CARI.direction_label(direction, cls, customer_account=False) == CARI.DIRECTION_LABELS[direction]
+        assert CARI.direction_label(direction, "supplier", customer_account=True) == CARI.DIRECTION_LABELS[direction]
+    assert CARI.direction_label("credit", "unconfirmed", customer_account=True) == "Halsa müşteriye borçlu"
+    note = CARI.BALANCE_NOTE.lower()
+    assert "hesap sahibi halsa'ya borçlu" not in note and "doğrulanmadı" in note
+
+
+def test_cari_table_shows_fractional_lira_in_the_browser(tmp_path):
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        if os.environ.get("REQUIRE_BROWSER_TESTS") == "1":
+            pytest.fail("REQUIRE_BROWSER_TESTS=1 but playwright is not installed")
+        pytest.skip("playwright not installed")
+    folder = SE.write_all(str(tmp_path / "data"))
+    _decimal_frame().to_excel(os.path.join(folder, SE.AGING_FILE), index=False)
+    out = tmp_path / "page.html"
+    DB.build(folder, str(out))                                    # algorithm harness: the Cari module is embedded
+    html = out.read_text(encoding="utf-8")
+    assert "fmtMoneyExact(b)" in html                             # the Customer 360 card uses the exact formatter
+    with sync_playwright() as pw:
+        try:
+            b = pw.chromium.launch()
+        except Exception as e:
+            if os.environ.get("REQUIRE_BROWSER_TESTS") == "1":
+                pytest.fail(f"Chromium could not start: {e}")
+            pytest.skip("Chromium unavailable")
+        page = b.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(out.as_uri())
+        page.click('.tab[data-t="collections"]')
+        cells = page.eval_on_selector_all("#collections tbody tr", "trs => trs.map(t => t.innerText)")
+        b.close()
+    text = "\n".join(cells)
+    for shown in ("₺1.250,25", "-7.250,75", "-0,40", "₺0,01", "₺0,30", "₺0,00"):
+        assert shown in text, (shown, text)
+    assert "₺-0\t" not in text and "-₺0\t" not in text and errors == []
+
+
+def test_buyer_overdue_driver_is_unreachable(synthetic_dir, monkeypatch):
+    """Review item 4: `score_buyers` (which passes has_overdue=False to `scoring.buyer_score`) runs only for clearance
+    candidates, and `m_overstock_move` returns none since D-070; the only buyer consumer (`product_packet`) is behind the
+    retired product AI. So the `overdue_penalty` driver reaches no output, API or AI packet; the code is left as is."""
+    from services import scoring as SC
+
+    def never(*a, **k):
+        pytest.fail("buyer_score reached")
+    monkeypatch.setattr(SC, "buyer_score", never)
+    ctx = CTX.build_context(synthetic_dir, inflation_rate=0.40)
+    assert ctx["overstock"] == [] and DB.m_overstock_move(pd.DataFrame(), [{"code": "SYN"}]) == []
+    blob = json.dumps(ctx, ensure_ascii=False, default=str)
+    assert "overdue_penalty" not in blob and "top_buyers" not in blob and "has_overdue" not in blob
+    assert ContextRepository(context=ctx).product("SP-002") is None          # no product card → no buyer packet
 
 
 from tests.test_m8_accuracy import client  # noqa: E402,F401 — real production gate, synthetic context

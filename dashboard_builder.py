@@ -218,9 +218,11 @@ def m_collections(path,df=None):
         b=bal.iloc[i]; b=None if pd.isna(b) else float(b)
         cls=CARI.account_class(r[key]); dirn=CARI.balance_direction(b)
         rows.append({'code':str(r[key]),'name':str(r[name]),'rep':('' if pd.isna(r[rep]) else str(r[rep])),
-                     'balance':(None if b is None else _n(b)),'oldest':(CARI.oldest_nonzero_bucket(r,bkts) or '—'),
+                     # exact signed amount (kuruş kept; never _n(), which rounds to whole lira)
+                     'balance':b,'oldest':(CARI.oldest_nonzero_bucket(r,bkts) or '—'),
                      'account_class':cls,'class_label':CARI.CLASS_LABELS[cls],
-                     'direction':dirn,'direction_label':('—' if cls==CARI.CLASS_SUPPLIER else CARI.DIRECTION_LABELS[dirn])})
+                     # account-level list: neutral sign names only (customer meaning is not established here)
+                     'direction':dirn,'direction_label':CARI.direction_label(dirn,cls,customer_account=False)})
     rows.sort(key=lambda r:r['code'])          # neutral order: no ranking, no implied priority
     return rows,{r['code']:r['balance'] for r in rows}
 
@@ -301,7 +303,7 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
           'note':CARI.OVERDUE_RETIRED_REASON}
         modules['collections']={'title':'Cari Bakiye (fatura yaşı)','rows':coll,'filter':'rep',
           'cols':[{'k':'name','l':'Hesap','sub':'code'},{'k':'rep','l':'Temsilci'},{'k':'class_label','l':'Hesap Türü'},
-                  {'k':'balance','l':'Bakiye (işaretli)','money':1,'sign':1},{'k':'direction_label','l':'Bakiye Yönü'},
+                  {'k':'balance','l':'Bakiye (işaretli)','money':1,'exact':1,'sign':1},{'k':'direction_label','l':'Bakiye İşareti'},
                   {'k':'oldest','l':'En Eski Fatura Ayı'}],
           'note':' '.join([CARI.OVERDUE_RETIRED_REASON,CARI.BALANCE_NOTE,CARI.SUPPLIER_NOTE,CARI.UNCONFIRMED_NOTE])}
     stats=[('min altı','—'),('maks üstü','—'),
@@ -1019,6 +1021,7 @@ function state(t,k){const n=$('.c3-state'); n.textContent=t||''; n.className='c3
 function hint(t){const n=$('.c3-hint'); n.textContent=t||''; show(n,!!t);}
 function fmtDate(iso){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||'')); return m?(+m[3])+' '+AY[+m[2]-1]+' '+m[1]:'—';}
 function fmtMoney(v){return (v==null||!Number.isFinite(Number(v)))?'—':'₺'+Math.round(Number(v)).toLocaleString('tr-TR');}
+function fmtMoneyExact(v){return (v==null||!Number.isFinite(Number(v)))?'—':'₺'+Number(v).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:6});}
 function fmtNum(v){return (v==null||!Number.isFinite(Number(v)))?'—':Number(v).toLocaleString('tr-TR',{maximumFractionDigits:2});}
 function fmtPct(v){return (v==null||!Number.isFinite(Number(v)))?'—':'%'+(Number(v)*100).toLocaleString('tr-TR',{maximumFractionDigits:1});}
 function badge(conf){const c=CONF[conf]?conf:'unavailable'; const b=el('span','c3-badge c3-'+c,CONF[c]); b.dataset.conf=c; return b;}
@@ -1175,7 +1178,7 @@ function receivablesCard(r){
     else if(!a.aging.present_in_file) box.append(kv('Cari bakiye','cari dosyasında hesap yok',a.aging.confidence));
     else{const b=a.aging.balance; box.dataset.cls=a.aging.account_class||'';
       box.append(kv('Hesap türü',a.aging.class_label||'—'));
-      box.append(kv('Cari bakiye (işaretli)',b==null?'bilinmiyor':fmtMoney(b),b==null?'unavailable':a.aging.confidence));
+      box.append(kv('Cari bakiye (işaretli)',b==null?'bilinmiyor':fmtMoneyExact(b),b==null?'unavailable':a.aging.confidence));
       box.append(kv('Bakiye yönü',a.aging.direction_label||'—'));
       box.append(kv('En eski fatura ayı (vade değil)',a.aging.oldest_bucket||'—'));
       box.append(kv('Vadesi geçen bakiye','bilinmiyor — ödeme koşulları raporu yok','unavailable'));}
@@ -2966,6 +2969,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <script>
 const DATA={blob};
 const fmtMoney=v=>'₺'+Math.round(v).toLocaleString('tr-TR');
+const fmtMoneyExact=v=>'₺'+Number(v).toLocaleString('tr-TR',{{minimumFractionDigits:2,maximumFractionDigits:6}});  // D-071 Cari balance: kuruş kept
 const fmtNum=(v,d)=>Number(v).toLocaleString('tr-TR',{{minimumFractionDigits:d||0,maximumFractionDigits:d||0}});
 const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;'}}[c]));
 const state={{}};
@@ -3024,6 +3028,7 @@ function draw(id){{
     h+=`<tr class="${{cls}}" data-i="${{i}}">`+m.cols.map(c=>{{
       let v=r[c.k];
       if(c.k==='tier') return `<td><span class="tier t${{v}}">K${{v}}</span></td>`;
+      if(c.money&&c.exact) return `<td class="money ${{(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}}">${{v==null?'—':fmtMoneyExact(v)}}</td>`;
       if(c.money) return `<td class="money ${{c.k==='overdue'?'od':(c.k==='inv'?'val':'')}} ${{(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}}">${{v?fmtMoney(v):(v===0?'₺0':'—')}}</td>`;
       if(c.n!=null) return `<td class="r mono ${{(id==='reorder'&&r.crit&&(c.k==='cov'||c.k==='stock'))?'crit':''}} ${{(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}}">${{v==null?'—':fmtNum(v,String(v).includes('.')?2:0)}}</td>`;
       if(c.k==='code') return `<td class="mono" style="color:var(--muted);font-size:12px">${{v}}</td>`;

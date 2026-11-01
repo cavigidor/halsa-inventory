@@ -4,10 +4,16 @@ The export's monthly buckets show how long ago invoices were issued (invoice age
 Overdue status depends on each customer's payment agreement; the ERP report that shows it has not been supplied.
 So nothing here derives overdue debt, due dates, collection urgency, customer risk or repayment warnings.
 
-Facts kept: the signed balance exactly as the export carries it (blank buckets make it unknown, never zero), the
-oldest month bucket holding a non-zero amount, and one confirmed account class: codes starting with 320 are
+Facts kept: the signed balance exactly as the export carries it (decimals kept; blank buckets make it unknown, never
+zero), the oldest month bucket holding a non-zero amount, and one confirmed account class: codes starting with 320 are
 suppliers. No other prefix is classified (120 is not assumed to be a confirmed customer account).
+
+Sign wording: only the owner-confirmed customer meaning is stated (negative customer balance = Halsa owes the
+customer), and only where the account is a customer's own invoice account (Customer 360). Everywhere else — suppliers,
+unclassified accounts, the account-level dashboard list — the sign is named neutrally (positive / negative / zero).
 """
+from decimal import Decimal, InvalidOperation
+
 import pandas as pd
 
 OVERDUE_RETIRED_CODE = "CARI-OVERDUE-UNSUPPORTED"
@@ -15,8 +21,10 @@ OVERDUE_RETIRED_REASON = ("Cari yaşlandırma dilimleri faturanın kesildiği ay
                           "tarihini göstermez. Vadesi geçen borç, tahsilat önceliği, risk sınıflaması ve ödeme uyarısı "
                           "bu rapordan çıkarılmaz. Vade müşteri sözleşmesine bağlıdır; bunu gösteren rapor henüz "
                           "sağlanmadı.")
-BALANCE_NOTE = ("Bakiye kaynaktaki işaretiyle gösterilir. Pozitif: hesap sahibi Halsa'ya borçlu. Negatif: Halsa hesap "
-                "sahibine borçlu (sıfır borç veya hata değildir). Hiçbiri vadesi geçmiş alacak anlamına gelmez.")
+BALANCE_NOTE = ("Bakiye kaynaktaki işaretiyle ve kuruşuyla gösterilir; işaret değiştirilmez. Müşteri hesabında negatif "
+                "bakiye Halsa'nın müşteriye borcudur (sıfır borç veya hata değildir). 320 tedarikçi hesaplarında ve "
+                "sınıflandırılmamış hesaplarda işaretin anlamı doğrulanmadı. Hiçbir bakiye vadesi geçmiş alacak "
+                "anlamına gelmez.")
 SUPPLIER_NOTE = "320 ile başlayan hesaplar tedarikçi hesaplarıdır; müşteri alacağı olarak gösterilmez."
 UNCONFIRMED_NOTE = "Diğer hesapların (ör. 120) müşteri hesabı olduğu ayrıca doğrulanmadı."
 OVERDUE_UNAVAILABLE = "Vadesi geçen bakiye (müşteri ödeme koşulları raporu sağlanmadı)"
@@ -24,8 +32,10 @@ OVERDUE_UNAVAILABLE = "Vadesi geçen bakiye (müşteri ödeme koşulları raporu
 SUPPLIER_PREFIX = "320"
 CLASS_SUPPLIER, CLASS_UNCONFIRMED = "supplier", "unconfirmed"
 CLASS_LABELS = {CLASS_SUPPLIER: "Tedarikçi (320)", CLASS_UNCONFIRMED: "Sınıflandırılmadı"}
-DIRECTION_LABELS = {"debit": "Hesap sahibi Halsa'ya borçlu", "credit": "Halsa hesap sahibine borçlu",
-                    "zero": "Bakiye sıfır", None: "Bakiye bilinmiyor (boş tutar hücresi)"}
+# Neutral sign names (no debtor / creditor claim): suppliers, unclassified accounts, the account-level list.
+DIRECTION_LABELS = {"debit": "Pozitif bakiye", "credit": "Negatif bakiye", "zero": "Sıfır bakiye",
+                    None: "Bakiye bilinmiyor (boş tutar hücresi)"}
+# Customer meaning (D-071 rule D), only for a non-supplier invoice account of a customer (Customer 360).
 CUSTOMER_DIRECTION_LABELS = {**DIRECTION_LABELS, "debit": "Müşteri Halsa'ya borçlu",
                              "credit": "Halsa müşteriye borçlu"}
 
@@ -33,6 +43,13 @@ CUSTOMER_DIRECTION_LABELS = {**DIRECTION_LABELS, "debit": "Müşteri Halsa'ya bo
 def account_class(code) -> str:
     """Only the owner-confirmed rule (320 = supplier). The code is read as recorded, never trimmed (D-042)."""
     return CLASS_SUPPLIER if str(code).startswith(SUPPLIER_PREFIX) else CLASS_UNCONFIRMED
+
+
+def direction_label(direction: str | None, account_class: str, customer_account: bool) -> str:
+    """Customer wording only for a customer's own non-supplier invoice account; neutral sign names otherwise."""
+    if customer_account and account_class != CLASS_SUPPLIER:
+        return CUSTOMER_DIRECTION_LABELS[direction]
+    return DIRECTION_LABELS[direction]
 
 
 def balance_direction(balance) -> str | None:
@@ -43,13 +60,24 @@ def balance_direction(balance) -> str | None:
 
 def signed_balances(frame: pd.DataFrame, buckets: list[str], single: str | None) -> pd.Series:
     """Signed balance per row: the sum of the numeric bucket values, NaN (unknown) when any bucket is blank or
-    non-numeric. A legacy single-balance column is read as recorded (NaN when blank). Values are never changed."""
+    non-numeric. A legacy single-balance column is read as recorded (NaN when blank). Values are never changed.
+    The sum is taken in decimal on each value's shortest representation, so kuruş amounts add up exactly (no binary
+    float residue such as 0.30000000000000004, and nothing is rounded to whole lira)."""
     if single:
         return pd.to_numeric(frame[single], errors="coerce")
-    if not buckets:
-        return pd.Series(float("nan"), index=frame.index)
+    if not buckets or frame.empty:
+        return pd.Series(float("nan"), index=frame.index, dtype=float)
     vals = frame[buckets].apply(lambda s: pd.to_numeric(s, errors="coerce"))
-    return vals.sum(axis=1, min_count=len(buckets))
+
+    def exact(row):
+        if row.isna().any():
+            return float("nan")
+        try:
+            total = sum((Decimal(repr(float(v))) for v in row), Decimal(0))
+        except InvalidOperation:
+            return float("nan")
+        return float(total) + 0.0          # + 0.0 turns -0.0 into 0.0 (a genuine zero stays zero)
+    return vals.apply(exact, axis=1)
 
 
 def oldest_nonzero_bucket(row, buckets: list[str]) -> str | None:

@@ -760,8 +760,8 @@ def customer_detail(snap: Customer360Snapshot, code: str, *, ctx: dict | None = 
                  "balance": (ag["balance"] if ag else None), "oldest_bucket": (ag["oldest"] if ag else None),
                  "account_class": cls, "class_label": CARI.CLASS_LABELS.get(cls) if cls else None,
                  "direction": (ag["direction"] if ag else None),
-                 "direction_label": (None if not ag else "—" if cls == CARI.CLASS_SUPPLIER
-                                     else CARI.CUSTOMER_DIRECTION_LABELS[ag["direction"]]),
+                 # the customer's own invoice account: customer wording unless it is a 320 supplier account
+                 "direction_label": (CARI.direction_label(ag["direction"], cls, customer_account=True) if ag else None),
                  "overdue": None, "overdue_status": "unavailable",
                  "confidence": "trusted" if snap.aging_status == "ok" else CONF_UNAVAILABLE}
         accounts.append({"account_code": inv, "account_name": snap.account_names.get(inv),

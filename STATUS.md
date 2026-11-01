@@ -9,6 +9,15 @@
   customer and draft packets, the scenario's receivables basis. Kept, factually: per Cari account the signed balance
   (blank bucket → unknown, never 0; zero and negative kept), oldest non-zero month as invoice age, 320 supplier class,
   sign direction — dashboard tab "Cari Bakiye (fatura yaşı)" and Customer 360 per invoice account (`overdue: null`).
+- **Review corrections (PR #41, after independent review of `07c4969`):** (1) exact signed amount — `m_collections` no
+  longer rounds via `_n()` (−0.40 stayed −0.40, not 0); exact decimal sum, blank None, genuine zero 0; Cari cells use a
+  separate `fmtMoneyExact`; (2) neutral sign names ("Pozitif / Negatif / Sıfır bakiye") for 320 and unclassified
+  accounts and in the account-level list; customer wording only for a customer's non-supplier invoice account in
+  Customer 360; (3) old-policy refusal now also tested for the immediate predecessor `m8-r5a-stock-retirement` with an
+  emulated old Cari overdue snippet (refused live and after restart; negative control served `200` without the bump);
+  (4) buyer `has_overdue` driver proven unreachable (no clearance candidates since D-070; product AI refuses before a
+  packet) — code unchanged, guard test added. Full suite (browser + JS, AI disabled): **1920 passed, 7 skipped,
+  1 xfailed**; focused Cari 168 passed / 1 xfailed, authorization 204 passed, generation / restart 225 passed.
 - Gate: `receivables.risk` INVALID (`CARI-OVERDUE-UNSUPPORTED`); `receivables.collections` NOT_VERIFIED (AGING-DATE,
   CARI-ACCOUNT-CLASS, CARI-FX, REAL-DATA); OVERDUE-DEF answered; DQ-6 removed from win-back (no code path; still
   INVALID). Ceilings / approvals unchanged; **0 of 33 VERIFIED**; `GENERATION_BOUND_API_EVIDENCE` False;
