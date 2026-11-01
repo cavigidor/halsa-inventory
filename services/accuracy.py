@@ -44,6 +44,7 @@ import types
 from dataclasses import dataclass, field
 from typing import Iterable, Mapping
 from services.stock_policy import RETIREMENT_CODE, RETIREMENT_REASON
+from services import cari_policy as CARI
 
 # ---------------------------------------------------------------------------------------------
 # states and user-facing text
@@ -52,7 +53,7 @@ WITHHELD_MESSAGE = "Bu analiz henüz doğrulanmadığı için gösterilmiyor."
 WITHHELD_CODE = "accuracy_withheld"
 WITHHELD_HTTP_STATUS = 409          # the resource exists; its verification state conflicts with displaying it
 MAX_REASONS_SHOWN = 4               # keep the father-facing notice short
-POLICY_VERSION = "m8-r5a-stock-retirement"  # old generated pages/manifests must be refreshed under D-070
+POLICY_VERSION = "m8-r5b1-cari-invoice-age"  # old generated pages/manifests must be refreshed (D-070, D-071)
 DEFAULT_OPERATIONAL_MAX_AGE_DAYS = 45      # PROVISIONAL engineering default, not an owner-approved policy
 TEMPORAL_KINDS = ("operational", "historical")
 # M8-ACCURACY-2: the generation-bound evidence mechanism (services/generation.py) is implemented and shared by the
@@ -151,7 +152,12 @@ DEFINITIONS: dict[str, Definition] = {d.key: d for d in (
     Definition("stock_coverage_rule", "Kapsamı hesaplanamayan ürünlerin kuralı (DQ-4)", question_ref=f"{_Q} #9"),
     Definition("inventory_valuation", "Envanter değerinin hesap esası", question_ref="docs/accuracy/open_verification_items.md"),
     Definition("margin_cost_basis", "Maliyeti eksik satırların kâr hesabı (DQ-1)", question_ref=f"{_Q} #7"),
-    Definition("overdue_definition", "Cari yaşlandırma sütunlarının 'vadesi geçmiş' anlamı", question_ref=f"{_Q} #15"),
+    # D-071: the Cari buckets are invoice age, so this export can never define overdue; it needs the agreement-based
+    # overdue report (not supplied). Kept unapproved for the withdrawn metrics that used it.
+    Definition("overdue_definition", "Vadesi geçmiş borç (müşteri ödeme koşullarına göre; rapor sağlanmadı)",
+               question_ref="D-071"),
+    Definition("cari_account_class", "Cari hesap türü (320 = tedarikçi onaylı; 120 ve diğerleri doğrulanmadı)",
+               question_ref="D-071"),
     Definition("priority_thresholds", "Tahsilat / aksiyon öncelik eşikleri", question_ref=f"{_Q} #15"),
     Definition("inflation_source", "Reel büyüme için enflasyon kaynağı", question_ref="TASKS.md Milestone 4"),
     Definition("active_customer_window", "'Aktif müşteri' penceresi (son 365 gün)", question_ref=f"{_Q} #12"),
@@ -186,10 +192,12 @@ B_DQ5 = Blocker("DQ-5", NV, "KAPALI, temsilci ve sektör bilgisi fatura hesabın
                 "dashboard_builder.cust_attrs applies sales lookup columns (keyed by Musterikod) to Pro_kodu customers.")
 B_WINDOW = Blocker("LAPSED-WINDOW", NV, "Kayıp müşteri dönemi (2020 mi, 2021 mi) karara bağlanmadı.",
                    "dashboard_builder.QUAL_YEARS = 2021–2025 vs spec 2020–2025 (TASKS Blocked).")
-B_DQ6 = Blocker("DQ-6", INV, "Vadesi geçen borç, sipariş müşterisi kodu ile fatura hesabı kodu karıştırılarak "
-                "eşleniyor; borç sıfır görünebilir (DQ-6).",
-                "dashboard_builder.m_lapsed owed.get(order-source code) over a map keyed by Cari 'Hesap kodu' "
-                "(invoice account); tests/test_m8_accuracy.py::test_dq6_winback_overdue_identity_mismatch.")
+# DQ-6 (win-back debt looked up by the order-source code in an invoice-account map) no longer has a code path: D-071
+# removed every debt field from the win-back list (invoice age is not overdue). The identity question itself stays
+# open for any future customer-level use of Cari balances (Veri Kontrol `dq6_aging_order_code_only`).
+B_CARI_OVERDUE = Blocker(CARI.OVERDUE_RETIRED_CODE, INV, CARI.OVERDUE_RETIRED_REASON, "D-071; services/cari_policy.py")
+B_CARI_CLASS = Blocker("CARI-ACCOUNT-CLASS", NV, "320 dışındaki Cari hesapların (ör. 120) müşteri hesabı olduğu ayrıca "
+                       "doğrulanmadı.", "D-071: only 320 = supplier is owner-confirmed; services/cari_policy.py.")
 B_DQ4 = Blocker("DQ-4", NV, "Kaynak stok kontrol alanının tanımı ve hata değerleri doğrulanmadı (DQ-4).",
                 "Historical STOK Kontrol % source findings remain; the old decision rule was withdrawn by D-070. "
                 "Source inspection and Veri Kontrol observations are not removed by retiring recommendations.")
@@ -214,10 +222,10 @@ B_DQ1 = Blocker("DQ-1", INV, "Maliyeti eksik satırlar kâr hesabında sıfır s
                 "tests/test_domain_rules.py::test_dashboard_margin_does_not_treat_missing_cost_as_zero.")
 B_AGING_DATE = Blocker("AGING-DATE", NV, "Cari yaşlandırma raporunun tarihi doğrulanmıyor.",
                        "dashboard_builder.m_collections reads no report date; file chosen by mtime.")
-B_OVERDUE_DEF = Blocker("OVERDUE-DEF", NV, "Yaşlandırma sütunlarının 'vadesi geçmiş' anlamı ve boş hücrelerin "
-                        "sıfır sayılması onaylanmadı.",
-                        "m_collections sums every month bucket as 'Vadesi Geçen' and fills blanks with 0; "
-                        "'Toplam Döviz Bakiye' is ignored.")
+# OVERDUE-DEF is answered by D-071 (buckets = invoice age, never overdue): the overdue outputs are withdrawn
+# (CARI-OVERDUE-UNSUPPORTED) and a blank bucket now makes the balance unknown instead of zero.
+B_FX_BALANCE = Blocker("CARI-FX", NV, "Döviz bakiyesi ('Toplam Döviz Bakiye') okunmuyor; bakiye yalnızca ay "
+                       "dilimlerinin toplamıdır.", "dashboard_builder.m_collections sums the month buckets only.")
 B_SALESPERSON = Blocker("SALESPERSON", NV, "Kayıtlı satış temsilcisi kaynağı karara bağlanmadı.",
                         "Rep columns come from cached sales lookups / Cari 'Temsilci kodu'; owner question #10.")
 B_PRIORITY = Blocker("PRIORITY", NV, "Öncelik puanları ve eşikleri onaylanmadı.",
@@ -249,8 +257,9 @@ B_BUTCE = Blocker("BUTCE-ERRORS", INV, "Bütçe dosyasında #REF! / #DIV/0! hata
                   "dosya belirlenmedi.", "docs/m6_source_inventory.md §10; D-041 (never authoritative).")
 B_AI = Blocker("AI", NV, "Yapay zekâ yorumları kanıt sayılmaz; yönetim panosunda kapalıdır.",
                "Owner directive Part E; services/agent.py output is an interpretation, never evidence.")
-B_SCENARIO = Blocker("SCENARIO", NV, "Senaryo, doğrulanmamış vadesi geçen toplamı ve elle girilen varsayımları "
-                     "kullanıyor.", "app.scenario uses working_capital.overdue_total + request assumptions.")
+B_SCENARIO = Blocker("SCENARIO", NV, "Senaryo elle girilen varsayımları kullanıyor; alacak tutarı yok (vadesi geçen "
+                     "toplam fatura yaşından çıkarılamaz, D-071).",
+                     "app.scenario uses working_capital.overdue_total, which is None since D-071, + request assumptions.")
 B_SOURCE_MISSING = Blocker("SOURCE-MISSING", NV, "Kaynak rapor sağlanmadı.",
                            "Evrak Detaylı Tahsilat Raporu not supplied (M6-4 blocked).")
 B_TRODAT = Blocker("TRODAT-MAPPING", NV, "Trodat ürün eşlemesi ve birimi doğrulanmadı.", "D-039.")
@@ -288,11 +297,11 @@ REGISTER: dict[str, Metric] = {m.key: m for m in (
     _M("stock.clearance_buyers", "Stok Eritme", ("dashboard:osmove",), ("stock", "sales"),
        ("revenue_basis", "kapali_attribute_source", "customer_identity"), ("stock.overstock",),
        blockers=(B_DQ2, B_AMOUNT_ZERO, B_REAL), certified=INV),
-    _M("customers.winback", "Geri Kazanım", ("dashboard:winback", "dashboard:stat:kayip_musteri",
-                                              "dashboard:stat:borclu_kayip", "dashboard:tiers"),
+    _M("customers.winback", "Geri Kazanım", ("dashboard:winback", "dashboard:stat:kayip_musteri", "dashboard:tiers"),
+       # D-071: no Cari debt is read any more; the aging source stays declared conservatively (legacy scope).
        ("sales", "aging"), ("customer_identity", "lapsed_window", "revenue_basis", "kapali_attribute_source",
                             "salesperson_of_record"),
-       blockers=(B_DQ6, B_WINDOW, B_REVENUE, B_AMOUNT_ZERO, B_DQ5, B_REAL), certified=INV),
+       blockers=(B_WINDOW, B_REVENUE, B_AMOUNT_ZERO, B_DQ5, B_REAL), certified=INV),
     _M("customers.momentum", "Büyüme / Küçülme", ("dashboard:momentum",), ("sales",),
        ("customer_identity", "revenue_basis", "kapali_attribute_source", "salesperson_of_record"),
        blockers=(B_REVENUE, B_AMOUNT_ZERO, B_DQ5, B_REAL)),
@@ -303,12 +312,12 @@ REGISTER: dict[str, Metric] = {m.key: m for m in (
        blockers=(B_DQ1, B_REVENUE, B_REAL), certified=INV, temporal="historical", max_source_age_days=None),
     _M("receivables.risk", "Riskli Müşteri", ("dashboard:risk",), ("sales", "aging"),
        ("overdue_definition", "revenue_basis", "salesperson_of_record"),
-       blockers=(B_AGING_DATE, B_OVERDUE_DEF, B_REVENUE, B_SALESPERSON, B_REAL)),
-    _M("receivables.collections", "Tahsilat (vadesi geçen alacak)", ("dashboard:collections",
-                                                                      "dashboard:stat:vadesi_gecen_toplam"),
-       ("aging",), ("overdue_definition",), blockers=(B_AGING_DATE, B_OVERDUE_DEF, B_REAL),
+       # D-071: withdrawn (no risk classification from invoice-age balances); legacy scope kept conservatively.
+       blockers=(B_CARI_OVERDUE, B_AGING_DATE, B_REVENUE, B_SALESPERSON, B_REAL)),
+    _M("receivables.collections", "Cari bakiye ve fatura yaşı (vadesi geçen alacak değil)", ("dashboard:collections",),
+       ("aging",), ("cari_account_class",), blockers=(B_AGING_DATE, B_CARI_CLASS, B_FX_BALANCE, B_REAL),
        # traced: dashboard_builder.m_collections (account code, name, representative, every month bucket); no join
-       # (it neither reads sales nor the customer master). Supplier-prefix accounts: open question (2A), not a rule.
+       # (it neither reads sales nor the customer master). D-071: signed balance + invoice age + 320 supplier class.
        requires=(Requirement("aging", ("Hesap kodu", "Hesap adı", "Temsilci kodu", "bucket:*")),)),
     # ---- server-driven views / APIs ----
     _M("actions.real_decline", "Reel Satış Düşüşü", ("api:/api/agent/actions",), ("sales",),
@@ -393,9 +402,9 @@ def _with_freshness(reg: dict[str, Metric]) -> dict[str, Metric]:
 REGISTER = _with_freshness(REGISTER)
 
 # Dashboard overview stat cards → the metric that owns the number (dashboard_builder.build `stats`).
+# D-071: no "vadesi geçen toplam" / "borçlu kayıp müşteri" card (invoice age is not overdue debt).
 STAT_METRIC = {"min altı": "stock.reorder", "maks üstü": "stock.overstock", "fazla stok değeri": "stock.overstock",
-               "kayıp müşteri": "customers.winback", "vadesi geçen toplam": "receivables.collections",
-               "borçlu kayıp müşteri": "customers.winback"}
+               "kayıp müşteri": "customers.winback"}
 # Static dashboard modules → metric.
 MODULE_METRIC = {"reorder": "stock.reorder", "overstock": "stock.overstock", "osmove": "stock.clearance_buyers",
                  "winback": "customers.winback", "momentum": "customers.momentum", "ordersize": "customers.order_size",
@@ -1185,10 +1194,12 @@ def accuracy_known_issues() -> list[dict]:
          "detail": "Sahip yönergesi gereği yalnızca kaynağı, tarihi, tanımı ve hesabı doğrulanmış sonuçlar gösterilir. "
                    "Diğer analizlerin yerinde neyin eksik olduğunu söyleyen bir not vardır; hesaplama kodu korunur.",
          "status": "open", "count": None, "count_label": None},
-        {"code": "dq6_winback_overdue_identity", "title": "DQ-6 · Geri Kazanım: borç eşlemesinde kimlik karışıklığı",
-         "detail": "Eski Geri Kazanım listesi fatura hesabı borcunu sipariş müşterisi koduyla arıyor; başka bir fatura "
-                   "hesabından faturalanan müşteride borç sıfır görünebilir. Liste gösterilmiyor; düzeltme sahip onayı "
-                   "bekliyor.", "status": "open", "count": None, "count_label": None},
+        {"code": "dq6_winback_overdue_identity", "title": "DQ-6 · Cari hesap ile sipariş müşterisi kimliği",
+         "detail": "Geri Kazanım listesi artık Cari bakiyesi kullanmıyor (D-071: fatura yaşı vade değildir). Cari "
+                   "hesap kodu ile sipariş müşterisi kodunun nasıl eşleneceği, müşteri düzeyinde bakiye kullanılmadan "
+                   "önce sahip kararı bekliyor.", "status": "open", "count": None, "count_label": None},
+        {"code": "cari_overdue_unavailable", "title": "Vadesi geçen alacak hesaplanmıyor",
+         "detail": CARI.OVERDUE_RETIRED_REASON, "status": "open", "count": None, "count_label": None},
     ]
 
 

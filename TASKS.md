@@ -4,6 +4,14 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-6 are merged; **Milestone 7 is COMPLETE** (PR #24, squash merge `de7eb43`; D-047). M8 production-readiness planning is merged (PR #26). **Owner directive 2026-10-18: NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION.** M8-ACCURACY is merged (PR #27, `a28b2b9`); M8-ACCURACY-2 technical foundation is merged (PR #28, `5baa92a`), and M8-ACCURACY-2B corrective foundation is merged (PR #29, `4ad8d8a`). The first owner-local reconciliation completed with core FAIL and Kredi NOT RUN; no business metric may be promoted without approved provenance, business definitions and per-metric reconciliation. All subsequent checkpoints use Claude Code. **Owner requirement 2026-10-22 (D-060, revised by D-061):** browser web app; three access levels — public viewer (no password), financial viewer (shared financial password, read-only Yönetim finances), owner (separate password, all changes); implemented and merged as M8-CP1, PR #30 (`a03efbf`), local only, not deployed.
 
 ## Current
+- [ ] **M8-R5B1 (D-071) — Cari interpretation: draft PR (branch `claude/m8-r5b1-cari-interpretation`), awaiting
+  planner independent review; NOT merged, NOT deployed.** Invoice-age buckets are no longer treated as overdue; collection
+  actions, risk list, win-back debt claim, AI overdue facts and scenario basis withdrawn; signed balances, invoice age and
+  the 320 supplier class kept. 0 of 33 VERIFIED. Report `docs/accuracy/m8_r5b1_cari_interpretation.md`. STOP after review.
+- [ ] **M8-R5B2 (not started; needs owner input first):** obtain and review the agreement-based overdue report (red
+  entries), then decide whether an overdue producer is justified; 120 / other account classes; FX balances; Cari as-of
+  date; DQ-6 identity rule before any customer-level use of Cari balances; owner-local check of D-071 on the real Cari
+  export.
 - [x] **M8-R4 (D-069) — PR #37 squash-merged as `52522b1` (2026-10-31; planner-approved, code only; not deployed).**
 - [x] **M8 post-merge diagnostics cleanup — PR #40 (branch `m8-diagnostics-retired-stock-cleanup`), planner-reviewed and approved 2026-10-31 for a code-only squash merge (not deployed):** retired `stock.reorder` / `stock.overstock` labelled RETIRED — D-070, retirement blocker category `retirement_decided`, test comment corrected; presentation only. PR #39 close / branch deletion needs separate owner authorization.
 - [x] **M8-R5A (D-070) — implementation merged: PR #38 squash-merged as `ac191d7` (2026-10-31; planner-approved, code only; `main` CI passed; not deployed).** History: before the merge the branch was updated with `main`, the integration correction and regression tests A/B; the two low findings (diagnostics candidates / retirement category; one test comment, `docs/accuracy/m8_r4_r5a_integration.md` §5) are fixed in PR #40.
@@ -32,7 +40,10 @@ Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi,
 - [ ] **Mac maintenance follow-up:** inspect `.git/stale-maintenance-lock-claude` and active Git processes before removing that renamed stale lock; do not delete any active lock. Native macOS browser tests remain to be run safely.
 
 ## Next (M8 — accuracy and production launch)
-- [ ] **Deferred M8-R5 — father business definitions (not started):** invoice age is not overdue; customer-specific agreement report still missing; 320 suppliers and negative customer liabilities separate; obsolete min/max and `STOK Kontrol %` dependencies need review; no discontinued inference; specific stale carry-forward row and signed component removals require traceable, source-preserving handling. Stock date discrepancy unresolved. No financial-rule changes in PR #37.
+- [ ] **Deferred M8-R5 — father business definitions:** Stock part done as R5A (D-070, merged); Cari part as R5B1 (D-071,
+  draft PR above): invoice age is not overdue, 320 suppliers, signed negative balances. Still open: the customer-specific
+  agreement report (R5B2), specific stale carry-forward row and signed component removals (traceable, source-preserving
+  handling), Stock date discrepancy.
 - [ ] **M8-CP2–CP8** as sequenced in `docs/m8_father_first_launch.md`; the accuracy release gate (`docs/accuracy/release_gate.md` §4) applies in addition. One implementation PR/checkpoint at a time, with tests and verified acceptance; revise count if approved feature-gap work expands.
 - [ ] **Owner: answer `docs/m8_owner_questions_tr.md`**, identify real file-of-record and supply missing exports via a private channel; do not commit real customer data. The original voice-note transcript is not verified in the repo, so signoff on feature coverage is still required.
 - [ ] **Owner: provision approved private cloud hosting, billing, encrypted backup and secure account setup**; verify privacy/transfer handling for Halsa data, plus father usability from Türkiye. Never host publicly before the owner signs off the D-060 disclosure inventory (`docs/m8_cp1_access.md` §6); owner login requires HTTPS with trusted proxy headers.

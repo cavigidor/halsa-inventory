@@ -162,24 +162,21 @@ class ContextRepository:
         for r in list(winback) + extra.get("winback", []):   # extra: rows of action customers outside the cuts (M5-4)
             merge(r["code"], name=r["name"], rep=r.get("rep"), sector=r.get("sector"),
                   historical_spend=r.get("spend"), last_active_year=r.get("last"),
-                  winback_tier=r.get("tier"), overdue=r.get("overdue"),
+                  winback_tier=r.get("tier"),
                   top_products=[p["name"] for p in r.get("detail", {}).get("products", [])],
                   years=r.get("detail", {}).get("years", []))
         for r in list(shrinking) + extra.get("shrinking", []):
             merge(r["code"], name=r["name"], rep=r.get("rep"), sector=r.get("sector"),
                   sales_2025=r.get("y2025"), sales_2026=r.get("y2026"),
                   nominal_pct=r.get("nominal_pct"), real_pct=r.get("real_pct"))
+        # D-071: no Cari overdue amount, invoice-age bucket, collection score or debt ratio enters customer facts
+        # (the context carries no collection / risk rows; rows passed in anyway contribute identity only).
         for r in list(collections) + extra.get("collections", []):
-            merge(r["code"], name=r["name"], rep=r.get("rep"),
-                  overdue=r.get("overdue"), oldest_overdue=r.get("oldest"),
-                  collections_score=r.get("priority_score"),
-                  revenue_25_26=r.get("revenue_25_26"), still_active=r.get("still_active"))
+            merge(r["code"], name=r["name"], rep=r.get("rep"))
         for r in extra.get("customers", []):   # M7-3: code + sales name of cross-sell-only queue customers
             merge(r["code"], name=r["name"])
         for r in risk:
-            merge(r["code"], name=r["name"], rep=r.get("rep"), overdue=r.get("overdue"),
-                  revenue_25_26=r.get("rev"), still_ordering_2026=(r.get("active") == "Evet"),
-                  debt_to_revenue_pct=r.get("ratio"), closed=r.get("closed"))
+            merge(r["code"], name=r["name"], rep=r.get("rep"), closed=r.get("closed"))
         return cust
 
     def customer(self, code):

@@ -108,7 +108,7 @@ def test_production_register_is_valid_and_nothing_is_verified_today():
 def test_known_invalid_outputs_are_classified_invalid():
     g = ACC.current_gate(today=TODAY)
     for key, code in (("finance.margin", "DQ-1"), ("stock.clearance_buyers", "DQ-2"),
-                      ("customers.winback", "DQ-6"), ("owner.gider_gelir", "GG-TOTALS"),
+                      ("receivables.risk", "CARI-OVERDUE-UNSUPPORTED"), ("owner.gider_gelir", "GG-TOTALS"),
                       ("owner.butce", "BUTCE-ERRORS")):
         d = g.decide(key)
         assert d.state == INV and code in d.codes, key
@@ -296,27 +296,18 @@ def _dq6_frames():
     return sales, aging
 
 
-def test_dq6_winback_overdue_identity_mismatch():
-    """Pins the defect: the order-source customer 900.00.0001 is invoiced through 900.99.0001, which owes money,
-    but the dashboard win-back row shows 0 overdue. The register therefore marks the module INVALID (DQ-6)."""
+def test_dq6_winback_carries_no_debt_claim():
+    """D-071 removed the defect path: the win-back list no longer looks up Cari debt at all (invoice age is not overdue,
+    and the lookup used the order-source code on an invoice-account map). The debtor invoice account keeps its factual
+    signed balance in the Cari list; the win-back row makes no claim about it, and the metric stays INVALID."""
     sales, aging = _dq6_frames()
-    _, owed = db.m_collections(None, aging)
+    _, balances = db.m_collections(None, aging)
     sdf = db.load_sales(None, sales)
-    lap = {r["code"]: r for r in db.m_lapsed(sdf, owed, db.cust_attrs(sdf))}
-    assert owed["900.99.0001"] == 12_000
-    assert lap["900.00.0001"]["overdue"] == 0                     # claims "no overdue" — the identity mismatch
+    lap = {r["code"]: r for r in db.m_lapsed(sdf, balances, db.cust_attrs(sdf))}
+    assert balances["900.99.0001"] == 12_000
+    assert "900.00.0001" in lap and all("overdue" not in r for r in lap.values())
     d = ACC.current_gate(today=TODAY).decide("customers.winback")
-    assert d.state == INV and "DQ-6" in d.codes
-
-
-@pytest.mark.xfail(strict=True, reason="DQ-6 open: needs an owner-approved rule (no allocation of invoice-account "
-                                        "debt to order-source customers, D-042); remove the mark when fixed")
-def test_dq6_winback_never_claims_zero_overdue_for_a_debtor_invoice_account():
-    sales, aging = _dq6_frames()
-    _, owed = db.m_collections(None, aging)
-    sdf = db.load_sales(None, sales)
-    lap = {r["code"]: r for r in db.m_lapsed(sdf, owed, db.cust_attrs(sdf))}
-    assert lap["900.00.0001"]["overdue"] != 0
+    assert d.state == INV and "DQ-6" not in d.codes
 
 
 # ---------------------------------------------------------------------------------------------

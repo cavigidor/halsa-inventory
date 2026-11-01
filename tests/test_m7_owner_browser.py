@@ -46,7 +46,7 @@ def server(tmp_path, owner=None):
     data = FX.write_all(str(tmp_path / "data"))
     dash = str(tmp_path / "dashboard.html")
     assert RF.run_refresh(data, dash, inflation_rate=0.40)["ok"]
-    env = {**os.environ, "STOCKAGENT_NO_DOTENV": "1", "AI_PROVIDER": "disabled", "OPENAI_API_KEY": "",
+    env = {**os.environ, "STOCKAGENT_NO_DOTENV": "1", "AI_PROVIDER": "disabled", "HALSA_TEST_SYNTHETIC_COLLECTIONS": "FAIR", "OPENAI_API_KEY": "",
            "MANUAL_INFLATION_RATE": "0.40", "DATA_FOLDER": data, "DASHBOARD_PATH": dash,
            "AGENT_DB": str(tmp_path / "state.db"), **BA.server_env()}
     for k in ("HEDEF_PATH", "KREDI_PATH", "GIDER_GELIR_PATH", "BUTCE_PATH", "KREDI_SNAPSHOT_DATE",

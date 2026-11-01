@@ -24,6 +24,7 @@ from services.agent import BusinessActionAgent
 from services.ai.base import NullProvider
 from services.ai.mock_provider import MockProvider
 from services.entity import ContextRepository
+from tests.fixtures import synthetic_collections as SCOL
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS_DIR = os.path.join(ROOT, "tests", "js")
@@ -203,7 +204,8 @@ def _fixtures(synthetic_ctx):
     """Real responses of this app on the synthetic context: health, categories, actions (no provider
     call), and one enrich response produced by the mock provider."""
     spy = _SpyMock()
-    APP.app.state.repo = ContextRepository(context=synthetic_ctx)
+    # D-071: the KAPALI test customer is identity-only (tests/fixtures/synthetic_collections.with_kapali_identity)
+    APP.app.state.repo = ContextRepository(context=SCOL.with_kapali_identity(synthetic_ctx))
     APP.app.state.provider = spy
     APP.app.state.agent = BusinessActionAgent(spy)
     c = TestClient(APP.app, headers=H)

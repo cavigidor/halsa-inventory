@@ -543,7 +543,11 @@ def test_join_report_flags_ambiguity_and_never_merges(tmp_path):
 
 def test_dq5_and_dq6_remain_open():
     g = ACC.current_gate(today=TODAY)
-    assert "DQ-6" in g.decide("customers.winback").codes and g.decide("customers.winback").state == INV
+    # D-071: win-back no longer reads Cari debt, so its DQ-6 blocker is gone (still INVALID by its ceiling); the DQ-6
+    # identity question itself stays open as a known issue for any future customer-level use of Cari balances.
+    assert "DQ-6" not in g.decide("customers.winback").codes and g.decide("customers.winback").state == INV
+    issue = next(i for i in ACC.accuracy_known_issues() if i["code"] == "dq6_winback_overdue_identity")
+    assert issue["status"] == "open"
     assert any("DQ-5" in c for c in g.decide("customers.momentum").codes)
 
 

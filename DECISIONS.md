@@ -1255,3 +1255,32 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   customer dependencies and source checks stay; the product-card metric has an explicit retirement blocker.
 - **Boundary:** separate branch from main; unmerged Option B PR #37 untouched. No private workbook acceptance,
   merge/deploy, Cari/supplier/customer-liability/overdue work or next milestone. Planner independent review pending.
+
+### D-071 · 2026-10-31 · Cari aging buckets are invoice age, not overdue debt; 320 = suppliers; signed balances (M8-R5B1)
+- **Authority:** business rules provided by the owner after speaking with his father, relayed in the M8-R5B1 assignment.
+  A. The Cari export's monthly buckets show how long ago invoices were issued; they do not establish when payment was
+  due. B. Overdue status depends on each customer's payment agreement; a separate ERP report (red-highlighted entries)
+  reportedly shows it — not supplied or validated. C. Accounts starting with 320 are suppliers; 120 is not thereby
+  confirmed as a valid customer account. D. A negative customer balance means Halsa owes the customer (not zero debt,
+  not automatically an error, not an overdue receivable). E. Source Excel values are authoritative.
+- **Decision:** withdraw every conclusion derived from invoice age: overdue amounts and totals ("Vadesi Geçen",
+  "vadesi geçen toplam", "borçlu kayıp müşteri"), the TAHSİLAT action producer and its priority score, the Riskli
+  Müşteri list and debt/revenue ratio, the win-back overdue column / yellow highlight / "collect first" barrier, overdue
+  facts, flags and scores in AI customer and draft evidence, and the scenario's receivables basis. No replacement
+  overdue calculator until the agreement report is obtained and reviewed.
+- **Keep, factually:** per Cari account the signed balance as exported (a blank bucket makes it unknown, never zero;
+  zero and negative kept), the oldest month bucket with a non-zero amount labelled as invoice age, the account class
+  (320 = supplier, everything else "Sınıflandırılmadı"), a sign direction label. Dashboard tab "Cari Bakiye (fatura
+  yaşı)" (neutral code order, no ranking, no total); Customer 360 per invoice account (never allocated), with
+  `overdue: null` / `overdue_status: "unavailable"`. AI packets report overdue as missing with an explicit warning.
+- **Unchanged:** source bytes, rows, formulas and import schema; strict reconciliation and Veri Kontrol detection /
+  history (one explanation text updated); CRM follow-up and Kredi installment due dates; D-043 queue mechanics (no Cari
+  collection reason reaches them now; CRM collection follow-ups still do); `collections` category stays registered.
+- **Gate:** `receivables.risk` gets the INVALID blocker `CARI-OVERDUE-UNSUPPORTED`; `receivables.collections` is
+  relabelled and blocked by AGING-DATE, CARI-ACCOUNT-CLASS (new, NOT_VERIFIED), CARI-FX (the previously documented
+  unread FX column) and REAL-DATA; `OVERDUE-DEF` is answered and removed; the DQ-6 win-back blocker is removed because
+  its code path no longer exists (win-back stays INVALID by its certified ceiling). No definition approved, no ceiling
+  changed, 0 of 33 metrics VERIFIED, `GENERATION_BOUND_API_EVIDENCE` False. `POLICY_VERSION` →
+  `m8-r5b1-cari-invoice-age`: old pages / manifests need a controlled refresh (existing mechanism, no migration).
+- **Open:** the agreement-based overdue report; 120 / other account classes; FX balances; Cari as-of date; DQ-6 identity
+  for any future customer-level use of balances; the legacy single "vadesi geçen" column format (read as a balance only).

@@ -29,6 +29,7 @@ from services import store as ST
 from services.entity import ContextRepository
 from tests.fixtures import opp_synth as OS
 from tests.fixtures import queue_synth as QS
+from tests.fixtures import synthetic_collections as SCOL
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 O = OS.O
@@ -38,6 +39,14 @@ H = {"X-StockAgent": "1"}
 # ---------------------------------------------------------------------------------------------
 # fixtures
 # ---------------------------------------------------------------------------------------------
+
+@pytest.fixture(scope="module", autouse=True)
+def _synthetic_collection_reasons():
+    """D-071: production derives no collection reason from Cari invoice age; the generic queue mechanics are exercised
+    with explicitly synthetic reasons (tests/fixtures/synthetic_collections.py)."""
+    with SCOL.synthetic_collection_reasons(SCOL.OPP):
+        yield
+
 @pytest.fixture(scope="module")
 def data_dir(tmp_path_factory):
     return OS.write_all(str(tmp_path_factory.mktemp("opp_data")))

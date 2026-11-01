@@ -133,7 +133,9 @@ Hedef section reads "yapılandırılmadı" and everything else works.
   account used by the customer's orders, Customer 360 shows the orders, lines, amount and first/last order date, plus
   whether the account is **shared** with other canonical customers.
 - **Aging is per invoice account:** the overdue balance and the oldest non-zero bucket, with the same column rules as
-  M5 `m_collections`.
+  M5 `m_collections`. **D-071 (M8-R5B1):** now the *signed* balance as exported (blank bucket → unknown; negative =
+  Halsa owes the customer), the oldest non-zero month as **invoice age (not a due date)**, the account class (320 =
+  supplier) and `overdue: null` / `overdue_status: "unavailable"` — no overdue amount is derived.
 - **Shared accounts:** the balance is shown on the account with the warning *"Bu fatura hesabı birden fazla sipariş
   müşterisi tarafından kullanılıyor; alacak bu müşteriye tek başına atanamaz."* There is **no customer-level total
   and no allocation.**

@@ -13,6 +13,7 @@ from services.agent import BusinessActionAgent
 from services.ai.base import AIResult, NullProvider
 from services.ai.mock_provider import MockProvider
 from services.entity import ContextRepository
+from tests.fixtures import synthetic_collections as SCOL
 
 H = {"X-StockAgent": "1"}
 
@@ -32,7 +33,7 @@ class CountingMock(MockProvider):
 def mk(synthetic_ctx):
     def _mk(provider=None, ctx=None, headers=H):
         provider = provider or CountingMock()
-        APP.app.state.repo = ContextRepository(context=ctx or synthetic_ctx)
+        APP.app.state.repo = ContextRepository(context=SCOL.with_kapali_identity(ctx or synthetic_ctx))
         APP.app.state.provider = provider
         APP.app.state.agent = BusinessActionAgent(provider)
         return TestClient(APP.app, headers=headers), provider
@@ -584,14 +585,16 @@ def test_draft_numbers_only_from_python_facts(mk):
         return next(f["fact_id"] for f in prov.payloads[0]["facts"] if f["label"] == label)
     probe = ScriptedDraft()
     c, _ = mk(provider=probe)
+    # D-071: collection drafts carry no Cari amount any more; the numeric-grounding path is exercised on the
+    # win-back draft's Python-computed year fact instead.
     c.post("/api/agent/draft-message", json={"customer_code": "900.00.0002", "channel": "whatsapp",
-                                              "purpose": "collection"})
-    fid = packet_fact(probe, "Vadesi geçen bakiye")
-    prov = ScriptedDraft([{"message": f"Merhaba, vadesi geçmiş [[FACT:{fid}]] bakiyeniz için görüşebilir miyiz?",
+                                              "purpose": "winback"})
+    fid = packet_fact(probe, "Son alım yılı")
+    prov = ScriptedDraft([{"message": f"Merhaba, en son [[FACT:{fid}]] yılında çalışmıştık; görüşebilir miyiz?",
                            "evidence_fact_ids": [fid], "warnings": []}])
     c, _ = mk(provider=prov)
     j = c.post("/api/agent/draft-message", json={"customer_code": "900.00.0002", "channel": "whatsapp",
-                                                  "purpose": "collection"}).json()
+                                                  "purpose": "winback"}).json()
     disp = next(f["display_value"] for f in prov.payloads[0]["facts"] if f["fact_id"] == fid)
     assert j["available"] is True and disp in j["message"] and "[[" not in j["message"]
     assert j["evidence"][0]["display_value"] == disp
@@ -655,7 +658,9 @@ def test_customer_get_is_deterministic_with_zero_provider_calls(mk):
         r = c.get(f"/api/agent/customer/{code}")
         j = r.json()
         assert r.status_code == 200 and j["summary"] is None and j["facts"]["customer_code"] == code
-        assert j["display_facts"] and all(set(f) == {"label", "display_value"} for f in j["display_facts"])
+        # D-071: the KAPALI test customer is identity-only (no Cari amount), so it may carry no display fact
+        assert (j["display_facts"] or code == KAPALI_CODE)
+        assert all(set(f) == {"label", "display_value"} for f in j["display_facts"])
     assert c.get(f"/api/agent/customer/{KAPALI_CODE}").json()["facts"]["closed"] is True
     assert prov.calls == 0
 

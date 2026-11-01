@@ -435,8 +435,15 @@ class C360Products(BaseModel):
 class C360Aging(BaseModel):
     available: bool
     present_in_file: bool
-    overdue: Optional[float] = None
+    # D-071: signed balance as exported (None = unknown); the oldest bucket is invoice age, not a due date.
+    balance: Optional[float] = None
     oldest_bucket: Optional[str] = None
+    account_class: Optional[Literal["supplier", "unconfirmed"]] = None
+    class_label: Optional[str] = None
+    direction: Optional[Literal["debit", "credit", "zero"]] = None
+    direction_label: Optional[str] = None
+    overdue: None = None                                  # never derived from invoice age (agreement report missing)
+    overdue_status: Literal["unavailable"] = "unavailable"
     confidence: C360Confidence
 
 

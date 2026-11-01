@@ -275,7 +275,7 @@ CHECKS: dict[str, Check] = {
     "join_aging_account_not_in_sales": Check(
         "unmatched_account", "orta", "Cari hesap satışlarda fatura hesabı olarak geçmiyor",
         "Cari yaşlandırmadaki bazı hesap kodları satış raporunda fatura hesabı (Musterikod) olarak hiç geçmiyor. "
-        "Bunlar satış dışı hesaplar olabilir; hangi hesapların tahsilata dahil olacağı sahip kararı bekliyor.",
+        "320 ile başlayan hesaplar tedarikçi hesaplarıdır (D-071); diğerlerinin türü doğrulanmadı.",
         "Bu hesapların türünü muhasebe kayıtlarından kontrol edin; kural için sahip kararı gerekir."),
     "dq5_multiple_invoice_accounts": Check(
         "unresolved_mapping", "yuksek", "Bir müşterinin birden fazla fatura hesabı var (DQ-5)",

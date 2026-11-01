@@ -13,6 +13,7 @@ import datetime as dt
 import json
 
 import config as C
+from services import cari_policy as CARI
 
 SCHEMA_VERSION = "1"
 
@@ -283,30 +284,20 @@ def customer_packet(cust, ctx=None, memory=None):
         p.fact("2026 (Oca–bugün) ciro", c.get("sales_2026"), "money")
         p.fact("Nominal değişim", c.get("nominal_pct"), "percent")
         p.fact("Reel (enflasyondan arındırılmış) değişim", c.get("real_pct"), "percent")
-    # receivables / risk (Python-computed aging)
-    p.fact("Vadesi geçen bakiye", c.get("overdue"), "money")      # None -> missing, never zero
-    if (c.get("overdue") or 0) > 0:
-        p.flag("has_overdue")
-    # Collections/risk fields exist only for customers in those lists. A field that does not APPLY
-    # to this customer (key absent) is omitted; a field that applies but has no value (key present,
-    # None) is reported as missing. (Q-1: lapsed customers were shown 4 bogus "missing" fields.)
-    if "oldest_overdue" in c:
-        p.fact("En eski borç dönemi", c.get("oldest_overdue"), "text")
+    # receivables (D-071): Cari aging buckets are invoice age, not due dates; the agreement-based overdue report is
+    # not supplied. Overdue is therefore reported as MISSING (never zero, never derived), with no debt flag, invoice-
+    # age "oldest debt", collection score or debt ratio, and an explicit warning against payment urgency.
+    p.fact(CARI.OVERDUE_UNAVAILABLE, None, "money")
+    p.warn("cari_overdue_unavailable", CARI.OVERDUE_RETIRED_REASON)
     if "revenue_25_26" in c:
         p.fact("2025–2026 ciro", c.get("revenue_25_26"), "money")
-    if "debt_to_revenue_pct" in c:
-        p.fact("Borç / ciro", c.get("debt_to_revenue_pct"), "percent", display=(
-            None if c.get("debt_to_revenue_pct") is None else fmt_pct(c.get("debt_to_revenue_pct"), signed=False)))
-    if "collections_score" in c:
-        p.fact("Tahsilat öncelik puanı (0–100)", c.get("collections_score"), "decimal",
-               display=None if c.get("collections_score") is None else fmt_decimal(c.get("collections_score"), 1))
     active = c.get("still_active") if c.get("still_active") is not None else c.get("still_ordering_2026")
     if active is not None:
         p.fact("2026'da sipariş veriyor mu", bool(active), "bool")
     if c.get("closed"):
         p.classify("account_status", "KAPALI")
         p.flag("closed_no_opportunities")
-        p.warn("kapali", "Müşteri KAPALI: fırsat/satış önerisi yapılmaz; yalnızca tahsilat ve risk.")
+        p.warn("kapali", "Müşteri KAPALI: fırsat/satış önerisi yapılmaz.")
     for m in (memory or [])[:5]:
         p.fact(f"Geçmiş not ({str(m.get('ts', ''))[:10]}, {m.get('kind', '')})", m.get("detail"), "text",
                "Kullanıcının girdiği not; doğrulanmış finansal veri değildir")
@@ -329,8 +320,6 @@ def product_packet(prod, ctx=None, max_buyers=5):
         p.fact(f"Geçmiş alıcı {i}", b.get("name"), "buyer", "Geçmiş işlem; satın alma veya stok eritme önerisi değildir")
         p.fact(f"Geçmiş alıcı {i} — bu ürüne geçmiş harcama", b.get("spend"), "money")
         p.fact(f"Geçmiş alıcı {i} — son alım yılı", b.get("last"), "year")
-        if b.get("has_overdue"):
-            p.fact(f"Geçmiş alıcı {i} — vadesi geçen borcu var", True, "bool")
     return p
 
 
@@ -345,9 +334,10 @@ def draft_packet(channel, purpose, cust, prod=None, instruction=None, ctx=None):
     p.fact("Müşteri", c.get("name"), "text")
     p.fact("Temsilci", c.get("rep"), "text")
     if purpose == "collection":
-        p.fact("Vadesi geçen bakiye", c.get("overdue"), "money")        # None -> missing, never zero
-        if "oldest_overdue" in c:
-            p.fact("En eski borç dönemi", c.get("oldest_overdue"), "text")
+        # D-071: no amount, due date or lateness is known; the message may not claim any of them.
+        p.fact(CARI.OVERDUE_UNAVAILABLE, None, "money")
+        p.warn("cari_overdue_unavailable", "Vade ve gecikme bilgisi yok: mesajda borcun vadesinin geçtiği, gecikme, "
+                                           "ödeme tarihi veya tutar yazılmaz.")
     else:
         if purpose == "winback":
             p.fact("Son alım yılı", c.get("last_active_year"), "year")

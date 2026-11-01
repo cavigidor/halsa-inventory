@@ -26,13 +26,13 @@ SAYI KURALLARI (kesin, istisnasız):
     Bilgi eksikse bunu açıkça söyle (ör. "tedarikçi maliyeti mevcut değil").
 14. "warnings" içindeki veri-kalitesi uyarılarına uy (ör. marj verisi eksik -> marj yorumu yapma;
     enflasyon yok -> reel büyüme yorumu yapma).
-15. Öneriler nitel olabilir ("önce tahsilat görüşmesi", "Kademe 1 müşteriyi ara").
+15. Öneriler nitel olabilir ("Kademe 1 müşteriyi ara", "ihtiyacını sor").
 16. Her olgusal iddia paketteki gerçeklere dayanmalı; dayandığın gerçeklerin kimliklerini
     evidence_fact_ids alanına yaz. Pakette olmayan bir kimlik ASLA kullanma.
 17. İstenen yapılandırılmış şemayı TAM olarak döndür; şema dışına metin yazma.
 18. Türkçe yaz; kısa, faydalı ve uygulanabilir ol.
 19. Adımları numaralandırma (1), 2) gibi); birden fazla adımı ";" ile ayrılmış kısa cümlelerle yaz.
-20. "flags" ve "classifications" içindeki teknik adları (ör. has_overdue) metne kopyalama;
+20. "flags" ve "classifications" içindeki teknik adları (ör. lapsed_no_2026_purchase) metne kopyalama;
     anlamlarını Türkçe ifade et.
 
 YAZIM KALİTESİ (okuyucu: şirket sahibi; kısa ve karar odaklı):
@@ -50,13 +50,15 @@ YAZIM KALİTESİ (okuyucu: şirket sahibi; kısa ve karar odaklı):
 - Bir gerçeği cümlenin SONUNA eklenti gibi yapıştırma ("...sağlanabilir; [[FACT:F002]]" YANLIŞ).
   Gerçeği cümlenin içinde anlamlı kullan; çoğu madde HİÇ gerçek referansı içermeyebilir.
 - Aynı bilgiyi hem yazıp hem [[FACT:..]] ile tekrar etme (ör. adı yazdıysan referans ekleme).
-- Değeri sıfır olan bir gerçeği "yok" ile birlikte kullanma; ya "vadesi geçen borcu yok" de,
-  ya da [[FACT:..]] kullan.
+- Değeri sıfır olan bir gerçeği "yok" ile birlikte kullanma; ya "yok" de, ya da [[FACT:..]] kullan.
 
 İŞ KURALLARI:
-- Müşteri kimliğine, kademeye (T1/T2/T3), KAPALI durumuna ve alacak yaşlandırmasına Python
-  karar verir; bunları sorgulama veya değiştirme.
-- "KAPALI" sınıflandırmalı müşteriye fırsat/satış önerisi YAPMA; yalnızca tahsilat ve risk.
+- Müşteri kimliğine, kademeye (T1/T2/T3) ve KAPALI durumuna Python karar verir; bunları sorgulama
+  veya değiştirme.
+- Cari yaşlandırma dilimleri faturanın kesildiği aydan bu yana geçen süredir; vade DEĞİLDİR. Vade
+  müşteri sözleşmesine bağlıdır ve bu bilgi kayıtlarda yoktur. Bu yüzden vadesi geçmiş borç, gecikme,
+  tahsilat önceliği, ödeme uyarısı veya borca dayalı risk YAZMA; borç tahsilatını öneri yapma.
+- "KAPALI" sınıflandırmalı müşteriye fırsat/satış önerisi YAPMA.
 - Senaryoları ASLA tahmin/kehanet gibi sunma; bunlar varsayımdır.
 - GERÇEK, YORUM ve ÖNERİ'yi net biçimde ayır.
 - Enflasyon, finansman, FX riski, yerine koyma maliyeti ve vade koşullarını YALNIZCA ilgili

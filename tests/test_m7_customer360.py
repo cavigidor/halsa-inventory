@@ -210,9 +210,14 @@ def test_single_and_multiple_exclusive_accounts(snap):
     a = accounts(detail(snap, C1))
     assert set(a) == {C1, "910.99.0001"} and not any(x["shared"] for x in a.values())
     assert a[C1]["is_customer_code"] is True and a["910.99.0001"]["is_customer_code"] is False
-    assert a[C1]["aging"] == {"available": True, "present_in_file": True, "overdue": 2000.0,
-                              "oldest_bucket": "Aralık-2025", "confidence": "trusted"}
-    assert a["910.99.0001"]["aging"]["present_in_file"] and a["910.99.0001"]["aging"]["overdue"] == 0.0
+    # D-071: signed balance as exported, invoice age (not a due date), overdue unknown — never derived or zero
+    assert a[C1]["aging"] == {"available": True, "present_in_file": True, "balance": 2000,
+                              "oldest_bucket": "Aralık-2025", "account_class": "unconfirmed",
+                              "class_label": "Sınıflandırılmadı", "direction": "debit",
+                              "direction_label": "Müşteri Halsa'ya borçlu", "overdue": None,
+                              "overdue_status": "unavailable", "confidence": "trusted"}
+    zero = a["910.99.0001"]["aging"]
+    assert zero["present_in_file"] and zero["balance"] == 0 and zero["direction"] == "zero" and zero["overdue"] is None
     single = accounts(detail(snap, CKAP))
     assert list(single) == [CKAP] and single[CKAP]["aging"]["present_in_file"] is False
 
@@ -222,7 +227,8 @@ def test_shared_account_never_allocated(snap):
         d = detail(snap, code)
         a = accounts(d)["910.99.0002"]
         assert a["shared"] is True and a["shared_with_customers"] == 1 and a["warning"] == C.SHARED_ACCOUNT_WARNING
-        assert a["aging"]["overdue"] == 4000.0 and a["aging"]["oldest_bucket"] == "Kasım-2025 ve öncesi"
+        assert a["aging"]["balance"] == 4000 and a["aging"]["oldest_bucket"] == "Kasım-2025 ve öncesi"
+        assert a["aging"]["overdue"] is None
         assert "shared_invoice_account" in {w["code"] for w in d["warnings"]}
         keys = set(d["receivables"])
         assert not any(k for k in keys if "total" in k or "customer_overdue" in k)     # no customer-level allocation
@@ -230,9 +236,10 @@ def test_shared_account_never_allocated(snap):
 
 
 def test_aging_matches_m5_account_level(snap, data_dir):
-    _, owed = DB.m_collections(os.path.join(data_dir, F.AGING_FILE))
-    for acc, bal in owed.items():
-        assert snap.aging[acc]["overdue"] == pytest.approx(bal)
+    _, balances = DB.m_collections(os.path.join(data_dir, F.AGING_FILE))
+    assert set(balances) == set(snap.aging)
+    for acc, bal in balances.items():
+        assert snap.aging[acc]["balance"] == bal and "overdue" not in snap.aging[acc]
 
 
 def test_unlinked_aging_account_not_attached(snap):
@@ -679,6 +686,6 @@ def test_tab_script_safe_and_read_only(built):
     assert "Müşteri 360 için panoyu http://127.0.0.1:8000/ üzerinden açın." in js
     for label in ("Eski veri", "Eksik kayıt olabilir", "Doğrulanmadı", "Güvenilir"):
         assert label in js
-    for sec in ("Kimlik", "Satış geçmişi", "Ürünler / kategoriler", "Cari / alacak", "Hedef bilgileri",
+    for sec in ("Kimlik", "Satış geçmişi", "Ürünler / kategoriler", "Cari hesap", "Hedef bilgileri",
                 "Fuar / etkinlik geçmişi", "Aksiyonlar ve geçmiş"):
         assert sec in js
