@@ -9,6 +9,9 @@ Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi,
   requirements on real data; remaining: the `operational_freshness` decision and the separate controlled promotion
   (reconciliation reference, certification, `GENERATION_BOUND_API_EVIDENCE` under its gate). Report
   `docs/accuracy/m8_d072_cari_first_metric.md`. STOP after review; no R5B2.
+- [ ] **Stok / Satış report date from the original file name (D-072 D1, owner rule already confirmed) — separate
+  checkpoint, not started.** Implement the confirmed rule for the Stok and Satış slots; never infer one Satış report
+  date from a historical range file name (a range is a period; ambiguous names stay refused / unknown).
 - [ ] **M8-R5B1 (D-071) — Cari interpretation: draft PR (branch `claude/m8-r5b1-cari-interpretation`), awaiting
   planner independent review; NOT merged, NOT deployed.** Invoice-age buckets are no longer treated as overdue; collection
   actions, risk list, win-back debt claim, AI overdue facts and scenario basis withdrawn; signed balances, invoice age and

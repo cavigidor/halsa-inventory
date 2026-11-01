@@ -18,7 +18,10 @@ not independently established), the sign is named neutrally (positive / negative
 D-072 D2: `Toplam Döviz Bakiye` is a USD balance. It is a separate source field: never added to, compared with or
 converted into the month buckets, and not read by the balance calculation.
 D-072 D1: the report's as-of date is the calendar date in the ORIGINAL file name; with no parseable date there, the
-upload date (provenance recorded). Never the newest bucket, a sheet title or a file timestamp.
+upload date (provenance recorded). Never the newest bucket, a sheet title or a file timestamp. (The owner confirmed
+this rule for the exports generally; it is implemented here for Cari only — Stok / Satış are a separate checkpoint.)
+D-072 mapping: `mapping_check` verifies only the fields the metric reads (account code / name / representative and the
+month buckets); the USD column may be present or absent and is never read.
 D-072 D3: the export is the DinamikCRM report and authoritative; the code reproduces its balances independently from
 the workbook records (there is no workbook-native total row in this export, and none is invented).
 """
@@ -178,30 +181,61 @@ def report_date(original_name: str | None, upload_date: dt.date) -> tuple[dt.dat
 # ---------------------------------------------------------------------------------------------
 # D-072: approved Cari column template (column identity only) and independent reproduction (D3)
 # ---------------------------------------------------------------------------------------------
-TEMPLATE_ID = "dinamikcrm_cari_yaslandirma_v1"
+MAPPING_RULE_ID = "cari_balance_fields_v2"
+REQUIRED_FIELDS = ("Hesap kodu", "Hesap adı", "Temsilci kodu")
 _HEADER_MONTHS = ("Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım",
                   "Aralık")
 _BUCKET = re.compile(r"^(" + "|".join(_HEADER_MONTHS) + r")-(\d{4})( ve öncesi)?$")
 
 
-def template_status(headers: list) -> str:
-    """'approved' when the header row is exactly the owner-approved Cari layout: Hesap kodu, Hesap adı, Temsilci kodu,
-    one '<Ay>-<YYYY> ve öncesi' bucket, then consecutive monthly buckets, then 'Toplam Döviz Bakiye' (USD). Anything
-    else is 'not_matched' (mapping stays unknown; nothing is refused or reinterpreted)."""
+def calculation_buckets(columns) -> list[str]:
+    """The month-bucket columns the balance calculation reads, in column order (the one rule `m_collections` uses):
+    a (stripped) header containing 'öncesi' or a Turkish month name."""
+    return [c for c in columns if "öncesi" in c or any(m in c for m in _HEADER_MONTHS)]
+
+
+def mapping_check(headers: list) -> dict:
+    """D-072 (with D-069 Option B): the column identity of exactly the fields `receivables.collections` reads —
+    account code, account name, representative code and the invoice-month buckets. Unused columns (the USD
+    'Toplam Döviz Bakiye', anything else) may be present or absent; they are neither read nor required.
+
+    'approved' only when: each required field appears exactly once; every column the calculation would read as a
+    bucket is a valid '<Ay>-<YYYY>' header; no bucket header repeats; exactly one '… ve öncesi' bucket and it is the
+    first; the remaining buckets are consecutive months in column order; no legacy single 'vadesi geçen' balance column.
+    Anything else is 'not_matched' with a reason (mapping stays unknown; nothing is refused or reinterpreted)."""
     h = [str(x).strip() if x is not None else "" for x in headers]
-    while h and h[-1] == "":
-        h.pop()
-    if len(h) < 6 or h[:3] != ["Hesap kodu", "Hesap adı", "Temsilci kodu"] or h[-1] != FX_COLUMN:
-        return "not_matched"
+    counts = {x: h.count(x) for x in set(h) if x}
+    out = {"rule": MAPPING_RULE_ID, "fx_column_present": FX_COLUMN in counts}
+    buckets = calculation_buckets([x for x in h if x])
+    out["buckets"] = len(buckets)
+
+    def bad(reason):
+        return {**out, "status": "not_matched", "reason": reason}
+    for f in REQUIRED_FIELDS:
+        if counts.get(f, 0) != 1:
+            return bad(("missing:" if counts.get(f, 0) == 0 else "duplicated:") + f)
+    if any("vadesi geçen" in x.lower() for x in h):
+        return bad("legacy_single_balance_column")
+    if not buckets:
+        return bad("no_month_buckets")
+    if len(set(buckets)) != len(buckets):
+        return bad("duplicated_month_bucket")
     months = []
-    for i, label in enumerate(h[3:-1]):
+    for i, label in enumerate(buckets):
         m = _BUCKET.match(label)
-        if m is None or bool(m.group(3)) != (i == 0):
-            return "not_matched"
+        if m is None:
+            return bad("invalid_month_bucket")
+        if bool(m.group(3)) != (i == 0):
+            return bad("bucket_sequence")
         months.append(int(m.group(2)) * 12 + _HEADER_MONTHS.index(m.group(1)))
     if any(b - a != 1 for a, b in zip(months, months[1:])):
-        return "not_matched"
-    return "approved"
+        return bad("bucket_sequence")
+    return {**out, "status": "approved", "reason": None, "bucket_headers": buckets}
+
+
+def template_status(headers: list) -> str:
+    """Status only (kept for callers): 'approved' / 'not_matched' from `mapping_check`."""
+    return mapping_check(headers)["status"]
 
 
 def independent_balances(content: bytes) -> tuple[list, dict]:

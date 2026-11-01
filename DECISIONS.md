@@ -1301,7 +1301,12 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   `period_complete: true` — a current-state snapshot of the authoritative report is complete as of its date; a bucket
   newer than the date is still a contradiction); carried over unchanged; re-derived identically after a restart.
   Refused (422), never guessed: an impossible date, two different dates in one name, a typed date that differs.
-  Stok / Satış dates stay declared-or-unknown (D-051, D-065) — this decision covers the Cari report.
+  *Scope (clarified in the final review):* the **owner business rule is confirmed for the exports generally** — the
+  report date is the date in the original file name — not only for Cari. **Cari implementation:** this checkpoint
+  (PR #42). **Stok / Satış implementation:** deferred to a separate checkpoint; it is NOT awaiting owner confirmation.
+  Until then Stok / Satış dates stay declared-or-unknown in code (D-051, D-065). That checkpoint must not infer a single
+  Satış report date from a historical range in a file name (e.g. "1 Ocak 2020 - 5 Ekim 2026"): a range is a period,
+  and an ambiguous name stays refused / unknown rather than guessed.
 - **D2 — currency.** `Toplam Döviz Bakiye` is USD. Kept in the source untouched; never added to, compared with or
   converted into the TL month buckets; no exchange-rate rule; an FX difference is not evidence about a bucket sum. The
   balance metric does not read it, so the `CARI-FX` blocker is withdrawn.
@@ -1309,10 +1314,15 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   bank statement or second accounting control total is requested. The Cari export has no workbook-native total row;
   none is invented. Instead every account balance is reproduced by a second, independent reader of the same records
   (openpyxl on the frozen bytes vs the pandas pipeline): a full match establishes the source totals for this source; a
-  mismatch is INVALID; a failed reproduction proves nothing. The exact approved Cari header layout
-  (`dinamikcrm_cari_yaslandirma_v1`: Hesap kodu, Hesap adı, Temsilci kodu, '<Ay>-<YYYY> ve öncesi', consecutive monthly
-  buckets, Toplam Döviz Bakiye) establishes column identity (mapping), as D-056 does for Stok. An explicit `false`
-  declaration still wins. Other sources are unchanged.
+  mismatch is INVALID; a failed reproduction proves nothing. Column identity (mapping) is established by a field-level
+  check of exactly the inputs the metric reads (`cari_balance_fields_v2`, `cari_policy.mapping_check`, final-review
+  correction): `Hesap kodu`, `Hesap adı`, `Temsilci kodu` each exactly once; every column the calculation reads as a
+  month bucket is a valid '<Ay>-<YYYY>' header, none repeated, exactly one '… ve öncesi' bucket and it first, then
+  consecutive months; no legacy single 'vadesi geçen' column; and the identified columns are the ones the calculation
+  actually reads (shared `calculation_buckets` rule). Unused columns — the USD `Toplam Döviz Bakiye` included — may be
+  present or absent and are never read; the earlier exact-layout rule, which required the USD column, is replaced.
+  Duplicate-header detection in the source scan is unchanged. An explicit `false` declaration still wins. Other sources
+  are unchanged.
 - **D4 — account classes.** `120` = Müşteri (customer), `320` = Satıcı (supplier); other prefixes unclassified. Exact
   codes (never trimmed); a class is never an overdue status, a due date or a customer-level allocation. The D-071 sign
   rule now applies to 120: a negative 120 balance reads "Halsa müşteriye borçlu" (account list: the holder's own

@@ -243,7 +243,7 @@ def test_c360_unique_120_positive_account_stays_neutral(c360_120):
 
 
 # ---------------------------------------------------------------------------------------------
-# D3 — independent reproduction and the approved layout feed the evidence (fail closed)
+# D3 — independent reproduction and the field-level mapping check feed the evidence (fail closed)
 # ---------------------------------------------------------------------------------------------
 def _folder(path, *, cari_name=CARI_NAME, snapshot=dt.date(2026, 6, 30), origin="filename", aging=None,
             approval=None):
@@ -277,7 +277,7 @@ def _manifest(folder, today=TODAY, frames_patch=None):
     return GEN.build_manifest(frozen, frames, decl, origin, today=today)
 
 
-def test_reproduction_and_template_establish_totals_and_mapping(tmp_path):
+def test_reproduction_and_field_mapping_establish_totals_and_mapping(tmp_path):
     rec = _manifest(_folder(tmp_path / "f")).record("aging")
     cari = rec.observed["cari"]
     assert cari["template"] == "approved" and cari["reproduction"] == "match" and cari["mismatches"] == 0
@@ -298,13 +298,108 @@ def test_a_pipeline_that_disagrees_with_the_workbook_is_invalid(tmp_path):
                                                                         .requires[0]))
 
 
-def test_a_changed_layout_leaves_mapping_unknown_and_an_explicit_false_still_wins(tmp_path):
-    frame = SE.aging_frame().drop(columns=[CARI.FX_COLUMN])            # not the approved layout
-    rec = _manifest(_folder(tmp_path / "f", aging=frame)).record("aging")
-    assert rec.observed["cari"]["template"] == "not_matched" and rec.evidence.mapping_approved is None
-    rec2 = _manifest(_folder(tmp_path / "g", approval={"totals_consistent": False, "mapping_approved": False})) \
+def _scoped(rec):
+    return rec.evidence.problems(ACC.REGISTER["receivables.collections"].requires[0])
+
+
+def test_the_usd_column_is_neither_required_nor_read_by_the_mapping_check(tmp_path):
+    """Correction 1: mapping approval rests on the fields the metric reads; the USD column may be absent or carry any
+    value without changing mapping, totals, balances or the scoped judgement."""
+    base = _manifest(_folder(tmp_path / "base")).record("aging")
+    without = _manifest(_folder(tmp_path / "nofx", aging=SE.aging_frame().drop(columns=[CARI.FX_COLUMN]))) \
         .record("aging")
-    assert rec2.evidence.totals_consistent is False and rec2.evidence.mapping_approved is False
+    changed = SE.aging_frame()
+    changed[CARI.FX_COLUMN] = [-1.5, 9_999_999.99, 0, 42, None]                    # any USD values, one blank
+    other = _manifest(_folder(tmp_path / "fxchg", aging=changed)).record("aging")
+    for rec, present in ((base, True), (without, False), (other, True)):
+        cari = rec.observed["cari"]
+        assert cari["template"] == "approved" and cari["mapping"]["status"] == "approved"
+        assert cari["mapping"]["fx_column_present"] is present and cari["mapping"]["rule"] == CARI.MAPPING_RULE_ID
+        assert cari["reproduction"] == "match" and cari["mismatches"] == 0
+        assert rec.evidence.mapping_approved is True and rec.evidence.totals_consistent is True
+        assert _scoped(rec) == []
+    assert DB.m_collections(None, SE.aging_frame())[1] == \
+        DB.m_collections(None, SE.aging_frame().drop(columns=[CARI.FX_COLUMN]))[1] == \
+        DB.m_collections(None, changed)[1]
+    assert CARI.mapping_check(SE.AGING_COLUMNS[:-1])["status"] == "approved"
+    assert CARI.mapping_check(SE.AGING_COLUMNS + ["Açıklama"])["status"] == "approved"   # unused extra column
+
+
+def _dup(frame, column):
+    out = frame.copy()
+    i = list(out.columns).index(column)
+    out.insert(i + 1, column + "__dup", out[column])
+    out.columns = [column if c == column + "__dup" else c for c in out.columns]   # two identical header cells
+    return out
+
+
+@pytest.mark.parametrize("case,reason", [
+    ("drop_account", "missing:Hesap kodu"), ("drop_name", "missing:Hesap adı"),
+    ("drop_rep", "missing:Temsilci kodu"), ("dup_account", "duplicated:Hesap kodu"),
+    ("dup_rep", "duplicated:Temsilci kodu"), ("corrupt_name", "missing:Hesap adı"),
+    ("drop_month", "bucket_sequence"), ("dup_month", "duplicated_month_bucket"),
+    ("corrupt_month", "invalid_month_bucket"), ("swap_months", "bucket_sequence"),
+    ("second_oldest_bucket", "bucket_sequence"), ("no_oldest_bucket", "bucket_sequence"),
+    ("legacy_single", "legacy_single_balance_column"),
+])
+def test_a_missing_duplicated_or_corrupted_required_column_blocks_verification(tmp_path, case, reason):
+    f = SE.aging_frame()
+    edits = {
+        "drop_account": lambda: f.drop(columns=["Hesap kodu"]),
+        "drop_name": lambda: f.drop(columns=["Hesap adı"]),
+        "drop_rep": lambda: f.drop(columns=["Temsilci kodu"]),
+        "dup_account": lambda: _dup(f, "Hesap kodu"),
+        "dup_rep": lambda: _dup(f, "Temsilci kodu"),
+        "corrupt_name": lambda: f.rename(columns={"Hesap adı": "Hesap ad"}),
+        "drop_month": lambda: f.drop(columns=["Şubat-2026"]),                     # gap in the month sequence
+        "dup_month": lambda: _dup(f, "Mart-2026"),
+        "corrupt_month": lambda: f.rename(columns={"Mart-2026": "Mart 2026"}),    # read as a bucket, not valid
+        "swap_months": lambda: f[[*SE.AGING_COLUMNS[:5], "Şubat-2026", "Ocak-2026", *SE.AGING_COLUMNS[7:]]],
+        "second_oldest_bucket": lambda: f.rename(columns={"Aralık-2025": "Aralık-2025 ve öncesi"}),
+        "no_oldest_bucket": lambda: f.rename(columns={"Kasım-2025 ve öncesi": "Kasım-2025"}),
+        "legacy_single": lambda: f.assign(**{"Vadesi Geçen Bakiye": 0}),
+    }
+    frame = edits[case]()
+    assert CARI.mapping_check(list(frame.columns)) == {**CARI.mapping_check(list(frame.columns)),
+                                                     "status": "not_matched", "reason": reason}
+    rec = _manifest(_folder(tmp_path / "f", aging=frame)).record("aging")
+    assert rec.observed["cari"]["template"] != "approved" and rec.evidence.mapping_approved is not True
+    assert _scoped(rec) != []                                                    # the metric is not verifiable
+    if case.startswith("dup_"):
+        assert rec.evidence.ambiguous_headers                                     # source scan still flags it
+
+
+def test_columns_the_calculation_reads_must_be_the_columns_identified(tmp_path):
+    # the workbook header is valid, but the frame the calculation reads lacks one (all-zero) month bucket: the
+    # balances still agree, yet the identified and the calculated columns differ → mapping stays unknown
+    def drop_bucket(frames):
+        return {**frames, "aging": frames["aging"].drop(columns=["Aralık-2025"])}
+    rec = _manifest(_folder(tmp_path / "f"), frames_patch=drop_bucket).record("aging")
+    cari = rec.observed["cari"]
+    assert cari["reproduction"] == "match"
+    assert cari["template"] == "not_matched" and cari["mapping"]["reason"] == "calculation_columns_differ"
+    assert rec.evidence.mapping_approved is None and _scoped(rec) != []
+
+
+def test_reproduction_still_catches_a_changed_amount_without_the_usd_column(tmp_path):
+    frame = SE.aging_frame().drop(columns=[CARI.FX_COLUMN])
+    def tamper(frames):
+        a = frames["aging"].copy()
+        a["Ocak-2026"] = a["Ocak-2026"].astype(float)
+        a.loc[a["Hesap kodu"] == "900.00.0006", "Ocak-2026"] = 30_000.01                   # one kuruş
+        return {**frames, "aging": a}
+    rec = _manifest(_folder(tmp_path / "f", aging=frame), frames_patch=tamper).record("aging")
+    assert rec.observed["cari"]["template"] == "approved"
+    assert rec.observed["cari"]["reproduction"] == "mismatch" and rec.observed["cari"]["mismatches"] == 1
+    assert rec.evidence.totals_consistent is False
+    assert any(s == ACC.State.INVALID for s, _ in _scoped(rec))
+
+
+def test_an_explicit_false_declaration_still_wins(tmp_path):
+    rec = _manifest(_folder(tmp_path / "g", approval={"totals_consistent": False, "mapping_approved": False})) \
+        .record("aging")
+    assert rec.observed["cari"]["template"] == "approved"
+    assert rec.evidence.totals_consistent is False and rec.evidence.mapping_approved is False
 
 
 def test_rederivation_after_restart_is_identical(tmp_path):

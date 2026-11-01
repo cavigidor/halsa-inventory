@@ -557,7 +557,7 @@ def build_core_records(frozen: Mapping[str, FrozenSource], frames: Mapping[str, 
                 totals = True
             elif cari["reproduction"] == "mismatch":
                 totals = False
-            # D-072 D2 / D4 + D-071: the exact approved column layout fixes column identity (as D-056 does for stock)
+            # D-072 + D-071: the field-level check of the inputs the metric reads fixes column identity (USD not read)
             if mapping is not False and cari["template"] == "approved":
                 mapping = True
         # the strict verdict above stays source-wide; these keep its origin apart for scoped metrics (review 2)
@@ -602,21 +602,29 @@ def build_core_records(frozen: Mapping[str, FrozenSource], frames: Mapping[str, 
 
 
 def _cari_evidence(fs: "FrozenSource", frame) -> dict | None:
-    """D-072: the approved-template status of the Cari header row and an independent reproduction of every account
-    balance (openpyxl on the frozen bytes vs the pipeline's pandas result). Counts only; never raises."""
+    """D-072: the column identity of the fields the Cari metric reads (`cari_policy.mapping_check`, confirmed against
+    the columns the calculation actually reads) and an independent reproduction of every account balance (openpyxl on
+    the frozen bytes vs the pipeline's pandas result). Counts only; never raises."""
     from services import cari_policy as CARI
     try:
         import dashboard_builder as db
         head, independent = CARI.independent_balances(fs.data)
+        mapping = CARI.mapping_check(head)
+        if mapping["status"] == "approved":
+            cols = [str(c).strip() for c in frame.columns] if frame is not None else []
+            if (CARI.calculation_buckets(cols) != mapping["bucket_headers"]
+                    or any(cols.count(f) != 1 for f in CARI.REQUIRED_FIELDS)):
+                mapping = {**mapping, "status": "not_matched", "reason": "calculation_columns_differ"}
         rows, pipeline = db.m_collections(None, frame) if frame is not None else ([], None)
     except Exception as e:
         return {"template": "unknown", "reproduction": "failed", "failure": type(e).__name__}
+    mapping.pop("bucket_headers", None)
     if pipeline is None:
-        return {"template": CARI.template_status(head), "reproduction": "failed", "failure": "no_frame"}
+        return {"template": mapping["status"], "mapping": mapping, "reproduction": "failed", "failure": "no_frame"}
     keys = set(independent) | set(pipeline)
     mismatches = sum(1 for k in keys if independent.get(k, "missing") != pipeline.get(k, "missing"))
     ok = bool(keys) and mismatches == 0
-    return {"template": CARI.template_status(head), "template_id": CARI.TEMPLATE_ID,
+    return {"template": mapping["status"], "mapping": mapping,
             "reproduction": "match" if ok else ("mismatch" if keys else "failed"),
             "accounts": len(pipeline), "independent_accounts": len(independent), "mismatches": mismatches,
             "unknown_balances": sum(1 for v in pipeline.values() if v is None),

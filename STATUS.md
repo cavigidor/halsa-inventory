@@ -3,7 +3,10 @@
 **2026-11-01 — M8 first Cari metric (D-072): owner decisions implemented — draft PR, NOT merged, NOT deployed.**
 - Branch `claude/m8-cari-first-metric` from `main` @ `0604fe8`. D-072: Cari as-of date = date in the original file name
   (upload date if none, with provenance); `Toplam Döviz Bakiye` = USD, kept apart; exports authoritative (DinamikCRM),
-  balances reproduced independently; 120 = Müşteri, 320 = Satıcı.
+  balances reproduced independently; 120 = Müşteri, 320 = Satıcı. Final-review corrections: Cari mapping is a
+  field-level check of the inputs the metric reads (USD column neither required nor read); the file-name date rule is
+  the owner's confirmed rule for all exports — implemented for Cari here, Stok / Satış deferred to a separate
+  checkpoint (not awaiting the owner). After corrections: **1978 passed, 7 skipped, 1 xfailed**.
 - `receivables.collections` now blocked only by REAL-DATA and the unapproved `operational_freshness` (both promotion-step
   items); AGING-DATE / CARI-ACCOUNT-CLASS / CARI-FX withdrawn. 33 metrics, 0 VERIFIED, flag False, `POLICY_VERSION`
   `m8-cari-d072`.

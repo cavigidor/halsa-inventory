@@ -42,7 +42,10 @@ no dashboard has ever been published — the "Pano henüz yayımlanmadı" page l
 - The report type of every file is **chosen** by the owner from a list; nothing is preselected from the file name.
 - A date is never taken from a modification time, a sheet title, an aging bucket or the latest transaction. For Stok
   and Satış it is never taken from the file name either: unknown declarations are recorded as unknown (left out of the
-  selection file; `report_date_origin` stays empty). **Exception — Cari (D-072 D1, owner decision):** the as-of date
+  selection file; `report_date_origin` stays empty). The owner rule (D-072 D1) that the report date is the date in the
+  original file name is confirmed for the exports generally; it is **implemented for Cari only** so far — the Stok /
+  Satış implementation is a separate, deferred checkpoint (not awaiting owner confirmation; a historical range in a
+  Satış name is a period, never collapsed into one report date). **Cari (implemented):** the as-of date
   is the calendar date in the original file name ("5 Ekim 2026", "2026-10-05", "05.10.2026"; Turkish month names in
   any case), captured at upload from the browser's file name (the stored copy is content-addressed and carries no
   date); with no date in the name, the upload date. `sources.json` records `snapshot_date`, `date_origin`

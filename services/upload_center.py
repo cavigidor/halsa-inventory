@@ -8,7 +8,9 @@ There is NO connection of any kind to DinamikCRM: the owner exports the reports 
 
 Rules (all enforced in code):
 - The report type of every file is chosen by the owner; it is never read from the file name. Dates are DECLARED by
-  the owner or recorded as unknown — never taken from a file name, a modification time or the latest transaction.
+  the owner or recorded as unknown — never taken from a modification time or the latest transaction. Exception: the
+  Cari report date is the date in its original file name (D-072 D1; the owner rule covers all exports, implemented
+  for Cari only so far — Stok / Satış are a separate checkpoint).
   Stored files get content-addressed names (services/upload_files.py), so no reader can infer anything from a name.
 - Validation reuses the deterministic pipeline unchanged: the controlled refresh (`services/refresh.run_refresh`) in
   stage-only mode for stock / sales / Cari (validate → build → verify into a private preview, nothing swapped or

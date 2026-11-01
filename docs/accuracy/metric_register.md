@@ -241,8 +241,9 @@ unchanged certified ceilings, explicit retirement blocker and unavailable totals
   has none, the upload date — recorded in `sources.json` as `date_origin` (`filename` / `upload_date`) with the name,
   shown on the page, judged by the operational freshness rule; an impossible or ambiguous name date is refused.
 - **Evidence (D-072 D3 / D2+D4):** every account balance is reproduced by a second reader (openpyxl on the frozen
-  bytes vs the pandas pipeline): match → totals established, mismatch → INVALID; the exact approved header layout
-  (`dinamikcrm_cari_yaslandirma_v1`) fixes column identity → mapping established. An explicit `false` declaration
+  bytes vs the pandas pipeline): match → totals established, mismatch → INVALID; the field-level mapping check
+  (`cari_balance_fields_v2`: account code / name / representative once each, valid unique consecutive month buckets,
+  identified columns = calculated columns; the USD column neither required nor read) → mapping established. An explicit `false` declaration
   still wins. No workbook-native total row exists in this export and none is invented.
 - **Not derived (D-071):** overdue amount, due date, collection priority, customer risk, repayment warning.
 - **Definition approval:** `cari_account_class` approved by D-072; `operational_freshness` (45 days, provisional) open.

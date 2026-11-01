@@ -216,8 +216,7 @@ def m_collections(path,df=None):
     df=read_aging_raw(path) if df is None else df.copy()
     df.columns=[str(c).strip() for c in df.columns]
     key,name,rep='Hesap kodu','Hesap adı','Temsilci kodu'
-    months=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık']
-    bkts=[c for c in df.columns if 'öncesi' in c or any(m in c for m in months)]  # aging columns, oldest→newest
+    bkts=CARI.calculation_buckets(df.columns)  # aging columns, oldest→newest (one rule, checked by D-072 mapping)
     # eski format desteği: tek bakiye sütunu (başlığı ne derse desin vade kanıtı sayılmaz, D-071)
     single=next((c for c in df.columns if 'vadesi geçen' in c.lower()),None)
     df=df[df[key].astype(str).str.match(r'^\d',na=False)]
