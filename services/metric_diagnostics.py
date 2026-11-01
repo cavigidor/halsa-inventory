@@ -57,6 +57,9 @@ _BLOCKER_CATEGORY = {
     RETIREMENT_CODE: (RETIREMENT,),          # presentation only: the blocker code and its INVALID state are unchanged
     "DQ-4": (BUSINESS, TECHNICAL), "STOCK-REPORT-SCOPE": (BUSINESS, TECHNICAL), "INV-VALUE": (BUSINESS,),
     "OVERDUE-DEF": (BUSINESS,), "STOCK-DATE": (DATE,), "AGING-DATE": (DATE,), "REAL-DATA": (RECONCILIATION,),
+    # D-071: account classes beyond 320 need an owner / accountant answer; FX balances need an answer, then code;
+    # overdue needs the agreement-based report (owner supplies it; then a reviewed decision and producer).
+    "CARI-ACCOUNT-CLASS": (BUSINESS,), "CARI-FX": (BUSINESS, TECHNICAL), "CARI-OVERDUE-UNSUPPORTED": (BUSINESS,),
 }
 
 # source / time problem texts (fixed strings in services/accuracy.py; field-level ones end with ": <field>.")

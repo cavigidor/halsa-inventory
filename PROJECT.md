@@ -10,6 +10,10 @@ Every month the ERP exports three Excel files:
 The goal is to turn these exports into concrete daily actions: whom to collect from,
 what to reorder, which overstock to sell and to whom, and which lapsed customers to win back.
 
+**M8-R5B1 / D-071:** the Cari export's month buckets are invoice age, not overdue debt. "Whom to collect from" needs the
+agreement-based overdue report (not yet supplied); until then the Cari data is shown as factual signed balances with
+invoice age (`services/cari_policy.py`) and no collection, risk or repayment conclusion is produced.
+
 **M8-R5A / D-070:** purchasing/overstock/clearance recommendations based on the old Stock min/max settings are
 withdrawn; those fields and cached `STOK Kontrol %` are preserved as source data, not valid current targets.
 The dependent product AI/card path is withdrawn. No replacement forecasting or physical-stock model is implemented.
@@ -128,11 +132,13 @@ services/sales_projection.py  M7-6: Customer 360 projection of the sales frame b
   A strong year is > ₺10.000. T1 = 3+ strong years, T2 = 2, T3 = 1 only if that year is 2024 or 2025.
   The code uses qualification years 2021–2025 (`QUAL_YEARS`); see TASKS.md *Blocked* about 2020.
 - **KAPALI** (closed) customers are excluded from opportunity lists (win-back, momentum,
-  overstock buyer candidates) and kept in collections and risk.
+  overstock buyer candidates) and kept in the Cari balances (the risk list is withdrawn for everyone, D-071).
 - **Margin**: `Net_Tutar_Maliyet_Dusulmus` has gaps, so margin outliers are unreliable.
   Margin is never sent to the AI.
 - **Receivables**: dynamic monthly aging buckets detected from the column headers.
-  The oldest non-zero bucket is the age.
+  The oldest non-zero bucket is the invoice age. **D-071:** the buckets are invoice age, not due dates — no overdue,
+  collection-priority, risk or repayment conclusion is derived from them; signed balances are kept as exported (negative
+  = Halsa owes the account holder); 320 accounts are suppliers.
 - **Missing ≠ zero** anywhere in the AI layer.
 - **Factual integrity (D-049):** only VERIFIED outputs are displayed (HTML and API); everything else is withheld with
   the notice "Bu analiz henüz doğrulanmadığı için gösterilmiyor." The gate lives in the backend (`services/accuracy.py`).

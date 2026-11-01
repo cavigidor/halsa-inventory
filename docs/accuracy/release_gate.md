@@ -29,6 +29,8 @@ dates, completeness or reconciliation:
 - `customers.momentum`, `customers.order_size` — revenue basis; missing amounts summed as 0 (becomes C if any amount
   is missing in the real export); KAPALI from DQ-5 lookups.
 - `receivables.collections`, `receivables.risk` — bucket "overdue" meaning, report date, revenue basis, rep source.
+  **D-071:** buckets = invoice age, not overdue; `receivables.risk` withdrawn (INVALID `CARI-OVERDUE-UNSUPPORTED`);
+  `receivables.collections` now factual Cari balances (account class beyond 320, FX, report date open).
 - `actions.real_decline` — manual inflation value.
 - `opportunities.cross_sell`, `opportunities.territories` — thresholds, active window, Hedef file of record.
 - `customer360.profile` — revenue basis, code whitespace, rep source, Hedef.
@@ -41,6 +43,7 @@ dates, completeness or reconciliation:
 - `finance.margin` — **DQ-1** missing cost counted as zero profit.
 - `stock.clearance_buyers` — **DQ-2** KAPALI customers in call lists.
 - `customers.winback` — **DQ-6 (new)** overdue looked up by the wrong identity; shows 0 for dealer-invoiced debtors.
+  **D-071:** the debt lookup was removed from win-back; INVALID remains by its certified ceiling.
 - `owner.gider_gelir` — contradictory source totals (annual vs monthly; ÖZET vs expense table).
 - `owner.butce` — `#REF!` / `#DIV/0!` cells and an external-workbook dependency.
 - Composite outputs that depend on these: `actions.queue`, `sales_queue`, `fairs.segments`, `context.full`,

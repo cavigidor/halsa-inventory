@@ -86,7 +86,10 @@ def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sour
     dq = {"stock_coverage_unavailable_products": int((db.num(raw_stock[db.SC["cov"]]).isna() & _has).sum())
           if (db.SC["cov"] in raw_stock.columns and _has is not None) else None}
     del raw_stock
-    coll, owed = (db.m_collections(ap, fr.get("aging")) if ap else ([], {}))
+    # D-071: Cari invoice-age balances are not overdue debt. The context (actions, AI evidence, sales queue) carries no
+    # collection candidates, priority scores, overdue totals or debt flags; the factual balances stay in the dashboard
+    # module and Customer 360 (invoice-account grain). Nothing here reads the Cari file.
+    coll, owed = [], {}
     raw_sales = fr.get("sales")
     own_read = raw_sales is None
     if own_read:
@@ -125,27 +128,18 @@ def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sour
             # They remain in collections/risk. (Milestone 3 fix; see DECISIONS.md D-009.)
             if attr.get(str(cust), {}).get("closed"):
                 continue
-            has_od = (owed.get(str(cust), 0) or 0) > 0
             related = bool(pana and pana in cust_anagrup.get(cust, set()))
             s, comp = SC.buyer_score(r["spend"], int(r["last"]) if pd.notna(r["last"]) else None,
-                                     cust in custs_2026, related, has_od)
+                                     cust in custs_2026, related, False)
             out.append({"code": str(cust), "name": str(r["name"]), "spend": round(float(r["spend"])),
                         "qty": round(float(r["qty"])), "last": int(r["last"]) if pd.notna(r["last"]) else None,
-                        "active_2026": cust in custs_2026, "has_overdue": has_od,
+                        "active_2026": cust in custs_2026,
                         "related_brand": related, "score": s, "drivers": comp})
         out.sort(key=lambda x: -x["score"])
         return out[:limit]
 
-    # ---- collections scored ----
+    # ---- collections: none (D-071, no collection urgency from invoice age) ----
     coll_scored = []
-    for r in coll:
-        # revenue for ratio: risk table carries invoice revenue; approx via owed vs — use risk map
-        rev = next((rk["rev"] for rk in risk if rk["code"] == r["code"]), 0)
-        active = any(rk["code"] == r["code"] and rk["active"] == "Evet" for rk in risk)
-        s, comp = SC.collections_priority(r["overdue"], rev, active, r["oldest"], asof_d)
-        coll_scored.append({**r, "revenue_25_26": rev, "still_active": active,
-                            "priority_score": s, "drivers": comp})
-    coll_scored.sort(key=lambda x: -x["priority_score"])
 
     # ---- shrinking (real growth) ----
     shrink = []
@@ -181,7 +175,7 @@ def build_context(data_folder, inflation_rate=None, macro=None, top_n=None, sour
             "products_scanned": total,
             "working_capital": {
                 "overstock_value": None,  # D-070: withdrawn classification, not a zero-valued measurement
-                "overdue_total": round(sum(r["overdue"] for r in coll)),
+                "overdue_total": None,    # D-071: unavailable (no due dates / agreement report), never zero
                 "low_stock_count": None,
                 "lapsed_count": len(lap),
                 "shrinking_real_count": (len(shrink_real_neg) if infl is not None else None),

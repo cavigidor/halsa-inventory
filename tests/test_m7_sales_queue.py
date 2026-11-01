@@ -28,6 +28,7 @@ from services import sales_queue as SQ
 from services import store as ST
 from services.entity import ContextRepository
 from tests.fixtures import queue_synth as Q
+from tests.fixtures import synthetic_collections as SCOL
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q8, Q9 = (Q.Q[i] for i in range(1, 10))
@@ -36,6 +37,14 @@ Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q8, Q9 = (Q.Q[i] for i in range(1, 10))
 # ---------------------------------------------------------------------------------------------
 # fixtures
 # ---------------------------------------------------------------------------------------------
+
+@pytest.fixture(scope="module", autouse=True)
+def _synthetic_collection_reasons():
+    """D-071: production derives no collection reason from Cari invoice age; the generic queue mechanics are exercised
+    with explicitly synthetic reasons (tests/fixtures/synthetic_collections.py)."""
+    with SCOL.synthetic_collection_reasons(SCOL.QUEUE):
+        yield
+
 @pytest.fixture(scope="module")
 def data_dir(tmp_path_factory):
     return Q.write_all(str(tmp_path_factory.mktemp("queue_data")))
@@ -205,7 +214,9 @@ def test_entity_fallback_keeps_public_customers_identical(data_dir, monkeypatch)
     for code, facts in a._cust_idx.items():
         assert b._cust_idx[code] == facts                  # M5 facts of known customers unchanged
     assert set(b._cust_idx) - set(a._cust_idx)              # queue customers resolvable for drafts
-    assert b.customer(Q.Q1_SECOND) is not None and a.customer(Q.Q1_SECOND) is None
+    # D-071: no Cari row (balance, invoice age, collection score) enters customer facts, so an account that is only a
+    # (synthetic) collection reason stays unresolvable; sales-reason customers stay resolvable (line above).
+    assert b.customer(Q.Q1_SECOND) is None and a.customer(Q.Q1_SECOND) is None
 
 
 # =============================================================================================
@@ -695,10 +706,10 @@ def test_unresolved_sales_customer_counted(ctx, snap, monkeypatch):
 def test_draft_targets_resolve_through_existing_endpoint(client, ctx):
     cl, repo, _ = client
     k = card(cl.get("/api/sales-queue").json(), Q1)
-    assert repo.customer(k["draft"]["collection_target"]) is not None
+    assert repo.customer(k["draft"]["collection_target"]) is None             # D-071: no Cari facts in the index
     assert repo.customer(k["draft"]["sales_target"]) is not None
     r = cl.post("/api/agent/draft-message", headers={"X-StockAgent": "1"},
-                json={"customer_code": k["draft"]["collection_target"], "channel": "whatsapp",
+                json={"customer_code": k["draft"]["sales_target"], "channel": "whatsapp",
                       "purpose": "collection"})
     assert r.status_code == 200 and r.json()["available"] is False          # AI disabled: no draft, no call
 

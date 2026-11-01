@@ -66,7 +66,7 @@ def queue_server(tmp_path):
     data = Q.write_all(str(tmp_path / "data"))
     dash = str(tmp_path / "dashboard.html")
     assert RF.run_refresh(data, dash, inflation_rate=0.40)["ok"]
-    env = {**os.environ, "STOCKAGENT_NO_DOTENV": "1", "AI_PROVIDER": "disabled", "OPENAI_API_KEY": "",
+    env = {**os.environ, "STOCKAGENT_NO_DOTENV": "1", "AI_PROVIDER": "disabled", "HALSA_TEST_SYNTHETIC_COLLECTIONS": "QUEUE", "OPENAI_API_KEY": "",
            "MANUAL_INFLATION_RATE": "0.40", "DATA_FOLDER": data, "DASHBOARD_PATH": dash,
            "AGENT_DB": str(tmp_path / "state.db"), **BA.server_env()}
     env.pop("HEDEF_PATH", None)
@@ -327,7 +327,9 @@ def test_draft_explicit_only_no_ai_before(browser, tmp_path):
         assert body["purpose"] == "collection" and body["customer_code"] in (Q1, Q.Q1_SECOND)
         assert req.value.headers.get("x-stockagent") == "1"
         page.wait_for_selector(f"{card(Q1)} .sq-draft .sq-err")
-        assert "AI kapalı" in page.inner_text(f"{card(Q1)} .sq-draft .sq-err")
+        # D-071: a (synthetic) collection account carries no Cari facts in the customer index, so the server answers
+        # 404 and the card shows a neutral failure; the AI-disabled path is checked on the win-back draft below.
+        assert page.inner_text(f"{card(Q1)} .sq-draft .sq-err").strip()
         # KAPALI → collection only
         page.click(f"{card(Q3)} .sq-drafto")
         opts = page.eval_on_selector_all(f"{card(Q3)} .sq-draft select:first-of-type option",
@@ -337,10 +339,13 @@ def test_draft_explicit_only_no_ai_before(browser, tmp_path):
         # winback → winback; decline → sales follow-up
         page.click(f"{card(Q2)} .sq-drafto")
         assert page.eval_on_selector(f"{card(Q2)} .sq-draft select", "s => s.value") == "winback"
+        page.click(f"{card(Q2)} .sq-dgo")
+        page.wait_for_selector(f"{card(Q2)} .sq-draft .sq-err")
+        assert "AI kapalı" in page.inner_text(f"{card(Q2)} .sq-draft .sq-err")
         page.click(f"{card(Q9)} .sq-drafto")
         assert page.eval_on_selector(f"{card(Q9)} .sq-draft select", "s => s.value") == "sales_followup"
         drafts = [u for _, u in page.requests if "/api/agent/" in u]
-        assert len(drafts) == 1 and page.errors == []
+        assert len(drafts) == 2 and page.errors == []                         # two explicit clicks, nothing else
 
 
 # ---------------------------------------------------------------------------------------------

@@ -32,6 +32,7 @@ from services.entity import ContextRepository
 from services.importers.sales_activity import import_order_sources, parse_label
 from tests.fixtures import c360_synth as CS
 from tests.fixtures import fair_synth as FX
+from tests.fixtures import synthetic_collections as SCOL
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 P = FX.P
@@ -42,6 +43,14 @@ TODAY = dt.date.today()
 # ---------------------------------------------------------------------------------------------
 # fixtures
 # ---------------------------------------------------------------------------------------------
+
+@pytest.fixture(scope="module", autouse=True)
+def _synthetic_collection_reasons():
+    """D-071: production derives no collection reason from Cari invoice age; the generic queue mechanics are exercised
+    with explicitly synthetic reasons (tests/fixtures/synthetic_collections.py)."""
+    with SCOL.synthetic_collection_reasons(SCOL.FAIR):
+        yield
+
 @pytest.fixture(scope="module")
 def data_dir(tmp_path_factory):
     return FX.write_all(str(tmp_path_factory.mktemp("fair_data")))

@@ -18,7 +18,10 @@ GitHub (`cavigidor/halsa-inventory`) is the source of truth. Do not rely on chat
   `Pro_kodu` is empty). Never the invoice party.
 - Lapsed tiers, KAPALI exclusion, receivable aging and margin handling are deterministic
   Python (`dashboard_builder.py`, `services/`). The AI never decides them.
-- KAPALI customers: excluded from opportunities, kept in collections and risk.
+- KAPALI customers: excluded from opportunities, kept in the Cari balances.
+- **Cari aging buckets are invoice age, not overdue debt (D-071).** Never derive overdue amounts, due dates, collection
+  priority, customer risk or repayment warnings from them; overdue stays unknown until the agreement-based report is
+  supplied and reviewed. 320 accounts are suppliers; no other prefix is classified. Signed balances keep their sign.
 - Missing values are never zero.
 - **No verified evidence = no business conclusion (D-049).** Only outputs certified VERIFIED in `services/accuracy.py`
   may be displayed. Never add a flag, env var or parameter that bypasses the gate; never classify a new route as

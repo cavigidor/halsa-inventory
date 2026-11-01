@@ -1,6 +1,41 @@
 # STATUS.md — current checkpoint
 
-**2026-10-31 — PR #38 (M8-R5A, D-070) MERGED as `ac191d7`; post-merge diagnostics cleanup in a draft PR (NOT merged).**
+**2026-10-31 — M8-R5B1 (D-071): Cari invoice age is not overdue debt — draft PR, NOT merged, NOT deployed.**
+- Branch `claude/m8-r5b1-cari-interpretation` from `main` @ `3f24199` (fresh clone, synthetic data only, AI disabled).
+  Owner-relayed father rules recorded as D-071: Cari month buckets = invoice age, not due dates; overdue depends on
+  customer agreements (report not supplied); 320 = suppliers; negative balance = Halsa owes the customer.
+- Withdrawn (no replacement calculator): overdue amounts / totals, TAHSİLAT actions and priority score, Riskli Müşteri
+  and debt ratio, win-back overdue column / highlight / "collect first" barrier, overdue facts / flags / scores in AI
+  customer and draft packets, the scenario's receivables basis. Kept, factually: per Cari account the signed balance
+  (blank bucket → unknown, never 0; zero and negative kept), oldest non-zero month as invoice age, 320 supplier class,
+  sign direction — dashboard tab "Cari Bakiye (fatura yaşı)" and Customer 360 per invoice account (`overdue: null`).
+- **Review corrections (PR #41, after independent review of `07c4969`):** (1) exact signed amount — `m_collections` no
+  longer rounds via `_n()` (−0.40 stayed −0.40, not 0); exact decimal sum, blank None, genuine zero 0; Cari cells use a
+  separate `fmtMoneyExact`; (2) neutral sign names ("Pozitif / Negatif / Sıfır bakiye") for 320 and unclassified
+  accounts and in the account-level list; customer wording only for a customer's non-supplier invoice account in
+  Customer 360; (3) old-policy refusal now also tested for the immediate predecessor `m8-r5a-stock-retirement` with an
+  emulated old Cari overdue snippet (refused live and after restart; negative control served `200` without the bump);
+  (4) buyer `has_overdue` driver proven unreachable (no clearance candidates since D-070; product AI refuses before a
+  packet) — code unchanged, guard test added. Full suite (browser + JS, AI disabled): **1920 passed, 7 skipped,
+  1 xfailed**; focused Cari 168 passed / 1 xfailed, authorization 204 passed, generation / restart 225 passed.
+- **Final review correction (after `2ecd96a`):** Customer 360 uses "Halsa müşteriye borçlu" only for a negative balance on
+  an invoice account uniquely associated with that customer and not a 320 account; shared accounts (full balance, warning
+  kept, never divided), suppliers and every positive balance use neutral sign names. Full suite (browser + JS, AI
+  disabled): **1926 passed, 7 skipped, 1 xfailed** (+6 focused tests); focused Cari + Customer 360 174 passed /
+  1 xfailed, authorization 179 passed. 33 metrics, 0 VERIFIED, flag False.
+- Gate: `receivables.risk` INVALID (`CARI-OVERDUE-UNSUPPORTED`); `receivables.collections` NOT_VERIFIED (AGING-DATE,
+  CARI-ACCOUNT-CLASS, CARI-FX, REAL-DATA); OVERDUE-DEF answered; DQ-6 removed from win-back (no code path; still
+  INVALID). Ceilings / approvals unchanged; **0 of 33 VERIFIED**; `GENERATION_BOUND_API_EVIDENCE` False;
+  `POLICY_VERSION` `m8-r5b1-cari-invoice-age` (old pages need the existing controlled refresh).
+- Tests: new `tests/test_m8_r5b1_cari_interpretation.py` (19; 15 fail on `main`'s code). Queue-mechanics tests use an
+  explicitly synthetic collection stand-in (`tests/fixtures/synthetic_collections.py`). Pristine `main` baseline here:
+  **1893 passed, 7 skipped, 2 xfailed**. Branch, full suite (browser + JS required, AI disabled): **1912 passed,
+  7 skipped, 1 xfailed** (1,920 collected = 1,902 + 19 new − 1). Focused Cari / queue / accuracy set: **438 passed,
+  1 xfailed**. The DQ-6 strict xfail is replaced by a positive test (its code path no longer exists), so xfailed 2 → 1;
+  the remaining xfail is DQ-1 (margin). Skips: private-data tests. GitHub CI: in the PR.
+- Report, dependency trace and acceptance matrix: `docs/accuracy/m8_r5b1_cari_interpretation.md`. Remaining → R5B2.
+
+**2026-10-31 — PR #38 (M8-R5A, D-070) MERGED as `ac191d7`; post-merge diagnostics cleanup PR #40 MERGED as `3f24199` (this heading said "draft PR (NOT merged)" when written; corrected 2026-10-31, body unchanged).**
 - PR #38 squash-merged into `main` as `ac191d7` (planner-approved, code only; tree identical to the reviewed head
   `a6332c5`); `main` CI (push run `41236053439`) passed. Not deployed.
 - Cleanup (branch `m8-diagnostics-retired-stock-cleanup`, findings 4 and 5 of `docs/accuracy/m8_r4_r5a_integration.md`),

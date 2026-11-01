@@ -5,6 +5,7 @@ These pin the deterministic business rules so Milestone 3+ work cannot change th
 import pytest
 
 import dashboard_builder as db
+from services import cari_policy as CARI
 from services import evidence as EV
 from services.entity import ContextRepository
 
@@ -60,29 +61,32 @@ def test_kapali_excluded_from_opportunities(frames, synthetic_ctx):
                for a in synthetic_ctx["actions"])
 
 
-def test_kapali_kept_in_risk_and_collections(frames, synthetic_ctx):
-    risk = {r["code"]: r for r in frames["risk"]}
-    assert risk["900.00.0007"]["closed"] is True
+def test_kapali_kept_in_cari_balances_and_no_risk_classification(frames, synthetic_ctx):
+    # D-071: KAPALI accounts are never dropped from the factual Cari balances; the risk list is withdrawn for every
+    # account and the context carries no collection candidates (invoice age is not overdue debt).
+    assert frames["risk"] == []
     assert "900.00.0007" in {r["code"] for r in frames["coll"]}
-    assert "900.00.0007" in {r["code"] for r in synthetic_ctx["collections"]}
+    assert synthetic_ctx["collections"] == [] and synthetic_ctx["risk"] == []
+    assert "900.00.0007" in synthetic_ctx["closed_customers"]
 
 
 # ---------------- receivable aging (dynamic monthly buckets) ----------------
 def test_receivable_aging(frames):
     coll = {r["code"]: r for r in frames["coll"]}
-    assert coll["900.00.0007"]["overdue"] == 60_000                 # buckets summed
-    assert coll["900.00.0007"]["oldest"] == "Kasım-2025 ve öncesi"  # oldest non-zero bucket
+    assert coll["900.00.0007"]["balance"] == 60_000                 # buckets summed, signed (D-071)
+    assert coll["900.00.0007"]["oldest"] == "Kasım-2025 ve öncesi"  # oldest non-zero bucket = invoice age
     assert coll["900.00.0006"]["oldest"] == "Ocak-2026"
-    assert "900.00.0005" not in coll                                # zero balance excluded
+    assert coll["900.00.0005"]["balance"] == 0 and coll["900.00.0005"]["direction"] == "zero"   # kept, factual
     assert "TOPLAM" not in coll                                     # non-account rows excluded
     # 'Toplam Döviz Bakiye' is not an aging bucket and is not added to the balance
-    assert coll["900.00.0007"]["overdue"] != 60_000 + 7_777
+    assert coll["900.00.0007"]["balance"] != 60_000 + 7_777
+    assert all("overdue" not in r for r in frames["coll"])          # no overdue claim (D-071)
 
 
 def test_context_reconciles_with_dashboard_on_synthetic_data(synthetic_dir, synthetic_ctx, frames):
     _, over, _ = db.m_stock(db._latest(synthetic_dir, db.is_stock))
     wc = synthetic_ctx["company"]["working_capital"]
-    assert wc["overdue_total"] == round(sum(r["overdue"] for r in frames["coll"]))
+    assert wc["overdue_total"] is None                              # D-071: unavailable, never zero
     assert over == [] and wc["overstock_value"] is None
 
 
@@ -114,10 +118,9 @@ def test_dashboard_margin_does_not_treat_missing_cost_as_zero(frames):
 def test_missing_values_are_not_zero_in_packets(synthetic_ctx):
     repo = ContextRepository(context=synthetic_ctx)
     cust = dict(repo.customer("900.00.0001"))
-    cust["overdue"] = None
     p = EV.customer_packet(cust, synthetic_ctx)
-    assert "Vadesi geçen bakiye" in p.missing
-    assert all(f["label"] != "Vadesi geçen bakiye" for f in p.facts)
+    assert CARI.OVERDUE_UNAVAILABLE in p.missing                    # D-071: unknown, never zero
+    assert all("vadesi geçen" not in f["label"].lower() for f in p.facts)
 
 
 def test_real_growth_unavailable_without_inflation(synthetic_dir):

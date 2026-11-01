@@ -36,6 +36,7 @@ import pandas as pd  # noqa: E402
 
 import dashboard_builder as db  # noqa: E402
 from services import sales_projection as SP  # noqa: E402
+from services import cari_policy as CARI  # noqa: E402
 from services.importers.base import run_import  # noqa: E402
 from services import generation as GEN  # noqa: E402
 from services import request_pin as RP  # noqa: E402
@@ -59,6 +60,8 @@ SHARED_ACCOUNT_WARNING = ("Bu fatura hesabı birden fazla sipariş müşterisi t
                           "müşteriye tek başına atanamaz.")
 AGING_LIMITATIONS = [
     "Cari yaşlandırma fatura hesabı düzeyindedir; sipariş müşterisi (Pro_kodu) düzeyinde değildir.",
+    CARI.OVERDUE_RETIRED_REASON,
+    CARI.SUPPLIER_NOTE,
     "Belge vade tarihi, belge bazında gecikme günü, belge tipi ve belge bazlı tahsilat önceliği bu dosyada yoktur.",
     "Detaylı tahsilat raporu sağlanmadı.",
 ]
@@ -429,29 +432,18 @@ def _master(sales_path: str) -> tuple[str, dict[str, MasterEntry]]:
 
 
 def _aging(folder: str, basename: str | None) -> tuple[str, dict[str, dict]]:
-    """Account-level aging, the same column rules as M5's `m_collections`, plus presence of zero-balance accounts."""
+    """Account-level Cari facts, the same column rules as M5's `m_collections` (D-071): signed balance as exported
+    (None when a bucket is blank), oldest non-zero month bucket (invoice age, not a due date), account class."""
     if not basename:
         return "not_supplied", {}
     path = _in_folder(folder, basename)
     if path is None:
         return "failed", {}
     try:
-        a = db.read_aging_raw(path)
-        a.columns = [str(c).strip() for c in a.columns]
-        key = "Hesap kodu"
-        months = db.AYLAR[1:]
-        bkts = [c for c in a.columns if "öncesi" in c or any(m in c for m in months)]
-        single = next((c for c in a.columns if "vadesi geçen" in c.lower()), None)
-        for b in bkts:
-            a[b] = db.num(a[b]).fillna(0)
-        a = a[a[key].astype(str).str.match(r"^\d", na=False)]
-        bal = db.num(a[single]).fillna(0) if single else (a[bkts].sum(axis=1) if bkts else 0)
-        out = {}
-        for i, (_, r) in enumerate(a.iterrows()):
-            b = float(bal.iloc[i]) if hasattr(bal, "iloc") else float(bal)
-            oldest = next((x for x in bkts if r[x] > 0), None)
-            out[str(r[key])] = {"present": True, "overdue": b if b > 0 else 0.0, "oldest": oldest if b > 0 else None}
-        return "ok", out
+        rows, _ = db.m_collections(path)
+        return "ok", {r["code"]: {"present": True, "balance": r["balance"],
+                                  "oldest": (None if r["oldest"] == "—" else r["oldest"]),
+                                  "account_class": r["account_class"], "direction": r["direction"]} for r in rows}
     except Exception:
         return "failed", {}
 
@@ -762,8 +754,17 @@ def customer_detail(snap: Customer360Snapshot, code: str, *, ctx: dict | None = 
         owners = snap.account_customers.get(inv, [])
         shared = len(owners) > 1
         ag = snap.aging.get(inv) if snap.aging_status == "ok" else None
+        # D-071: signed balance as exported; overdue is unknown (no agreement report), never derived from age.
+        cls = ag["account_class"] if ag else None
+        unique = len(owners) == 1 and str(owners[0]) == code       # this customer alone; exact codes (D-042)
         aging = {"available": snap.aging_status == "ok", "present_in_file": ag is not None,
-                 "overdue": (ag["overdue"] if ag else None), "oldest_bucket": (ag["oldest"] if ag else None),
+                 "balance": (ag["balance"] if ag else None), "oldest_bucket": (ag["oldest"] if ag else None),
+                 "account_class": cls, "class_label": CARI.CLASS_LABELS.get(cls) if cls else None,
+                 "direction": (ag["direction"] if ag else None),
+                 # customer wording only when this account belongs to this customer alone (not shared, never
+                 # allocated) and is not a 320 supplier account; neutral sign names otherwise
+                 "direction_label": (CARI.direction_label(ag["direction"], cls, customer_account=unique) if ag else None),
+                 "overdue": None, "overdue_status": "unavailable",
                  "confidence": "trusted" if snap.aging_status == "ok" else CONF_UNAVAILABLE}
         accounts.append({"account_code": inv, "account_name": snap.account_names.get(inv),
                          "is_customer_code": inv == code, "orders": int(r["orders"]), "lines": int(r["lines"]),

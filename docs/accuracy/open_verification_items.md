@@ -42,6 +42,10 @@ Owner questions are numbered as in `docs/m8_owner_questions_tr.md` (Q#). "Withhe
 - **To resolve:** owner decision (Q10) on the attribute source and salesperson of record; move M5 to master attributes.
 
 ### DQ-6 — Win-back overdue joins invoice-account debt by the order-source code · INVALID (new)
+- **D-071 (M8-R5B1):** the win-back list, its actions and `score_buyers` no longer read Cari debt at all (invoice age is
+  not overdue), so this code path is gone; the pinning test and strict xfail are replaced by
+  `tests/test_m8_accuracy.py::test_dq6_winback_carries_no_debt_claim`. The identity question stays open for any future
+  customer-level use of Cari balances. The history below is kept as recorded.
 - **Evidence:** `m_lapsed` uses `owed.get(str(c), 0)` where `c` is the order-source customer and `owed` is keyed by Cari
   `Hesap kodu` (invoice account). A dealer-invoiced customer whose invoice account owes shows **0 / "Yok"**.
   `services/context.score_buyers` uses the same lookup for `has_overdue`. Pinned by

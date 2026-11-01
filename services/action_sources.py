@@ -6,6 +6,7 @@ shrink_real_neg, infl. New sources (M6/M7) register in their own modules the sam
 """
 import config as C
 import dashboard_builder as db
+from services import cari_policy as CARI
 from services import actions as A
 from services import scoring as SC
 
@@ -44,7 +45,7 @@ CAT_CRM_FOLLOWUP = A.Category("crm_followup", "Takip Zamanı", "#0f766e", "custo
 CRM_DRAFT_PURPOSE = {"collection": "collection", "sales_followup": "sales_followup"}
 
 A.DEFAULT_REASONS.update({
-    "collections": "Vadesi geçen alacak tahsilat öncelik eşiğini aştı.",
+    "collections": CARI.OVERDUE_RETIRED_REASON,
     "overstock": db.RETIREMENT_REASON,
     "winback": f"Geçmişte güçlü alım yapan müşteri {db.LAPSED_YEAR} yılında hiç alım yapmadı.",
     "real_decline": "Bu yılki ciro, enflasyondan arındırıldığında geçen yılın aynı döneminin altında.",
@@ -56,28 +57,10 @@ A.DEFAULT_REASONS.update({
 
 # ---------------- producers ----------------
 def produce_collections(inp):
-    out = []
-    for r in inp["coll_scored"]:
-        if r["priority_score"] < COLLECTIONS_THRESHOLD:
-            continue
-        fi = min(1.0, (r["overdue"] or 0) / C.COLLECT_AMOUNT_CAP)
-        urg = min(1.0, (r["drivers"].get("age_months") or 0) / 12)
-        rsk = r["drivers"]["ratio"]
-        conf = SC.confidence_label(has_amount=r["overdue"] > 0, has_history=r["revenue_25_26"] > 0,
-                                   has_context=r["drivers"].get("age_months") is not None)
-        score = SC.action_priority(fi, urg, rsk, _CONF_NUM[conf])
-        facts = [f"Vadesi geçen: {_money(r['overdue'])}",
-                 f"En eski borç: {r['oldest']}",
-                 f"2026 sipariş: {'Aktif' if r['still_active'] else 'Yok'}",
-                 f"2025–2026 ciro: {_money(r['revenue_25_26'])}"]
-        reason = A.DEFAULT_REASONS["collections"]
-        if r.get("still_active"):
-            reason += " Müşteri bu yıl sipariş vermeye devam ediyor (alıp ödemiyor)."
-        out.append(A.make_action(source=CAT_COLLECTIONS.source, category="collections",
-                                 entity_type="customer", entity_id=r["code"],
-                                 title=f"TAHSİLAT — {r['name']}", reason=reason, facts=facts,
-                                 drivers=r["drivers"], score=score, confidence=conf))
-    return out
+    # D-071: Cari aging buckets are invoice age, not overdue debt; no collection urgency or TAHSİLAT action is derived
+    # from them, including from stale or injected rows. The category stays registered for client compatibility
+    # (and for genuine user-entered CRM collection follow-ups, which are a separate category).
+    return []
 
 
 def produce_overstock(inp):
@@ -89,17 +72,14 @@ def produce_winback(inp):
     out = []
     for r in inp["lap"]:
         fi = min(1.0, (r["spend"] or 0) / C.WINBACK_SPEND_CAP)
-        barrier = (r.get("overdue") or 0) > 0
-        conf = "high" if not barrier else "medium"
+        # D-071: no overdue barrier, debt fact or "collect first" text (invoice age is not overdue; DQ-6 identity).
+        conf = "high"
         score = SC.action_priority(fi, 0.3, 0.5, _CONF_NUM[conf])
         facts = [f"Toplam geçmiş harcama: {_money(r['spend'])}",
                  f"Kademe: {r['tier']}", f"Son aktif yıl: {r['last']}",
-                 f"Vadesi geçen borç: {_money(r['overdue']) if barrier else 'Yok'}",
                  f"Temsilci: {r.get('rep') or '—'}"]
         reason = (f"Geçmişte güçlü alım yapan müşteri (Kademe {r['tier']}) "
                   f"{db.LAPSED_YEAR} yılında hiç alım yapmadı.")
-        if barrier:
-            reason += " Vadesi geçen borcu var; önce tahsilat konuşulmalı."
         out.append(A.make_action(source=CAT_WINBACK.source, category="winback",
                                  entity_type="customer", entity_id=r["code"],
                                  title=f"GERİ KAZANIM — {r['name']}", reason=reason, facts=facts,

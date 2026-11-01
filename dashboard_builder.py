@@ -2,6 +2,7 @@
 import os, glob, json, html, datetime as dt, warnings
 import pandas as pd, numpy as np
 from services.stock_policy import RETIREMENT_REASON
+from services import cari_policy as CARI
 warnings.filterwarnings('ignore')
 
 STOCK_HEADER_ROW=3
@@ -116,6 +117,8 @@ def _cust_detail(sub):
     return d
 
 def m_lapsed(df,owed,attr):
+    # D-071: `owed` is accepted for call compatibility and NOT read. Invoice-age balances are not overdue debt, and the
+    # old lookup joined an invoice-account map by the order-source code (DQ-6); win-back rows carry no debt claim.
     piv=df.pivot_table(index='_cust',columns='_yr',values='Nettutar',aggfunc='sum',fill_value=0)
     for y in QUAL_YEARS+[LAPSED_YEAR]:
         if y not in piv: piv[y]=0
@@ -132,7 +135,7 @@ def m_lapsed(df,owed,attr):
         if not tier: continue
         ya=[y for y in QUAL_YEARS if piv.loc[c,y]>0]
         rows.append({'tier':tier,'code':str(c),'name':str(names.get(c,'')),'rep':a.get('rep',''),'sector':a.get('sector',''),
-                     'spend':_n(tot[c]),'last':int(max(ya)) if ya else None,'years':int(n),'overdue':_n(owed.get(str(c),0))})
+                     'spend':_n(tot[c]),'last':int(max(ya)) if ya else None,'years':int(n)})
     rows.sort(key=lambda r:(r['tier'],-r['spend']))
     det=_cust_detail(df[df['_cust'].isin({r['code'] for r in rows})])
     for r in rows: r['detail']=det.get(r['code'],{'years':[],'products':[]})
@@ -192,39 +195,36 @@ def m_overstock_move(df,over_rows):
     return []
 
 def m_risk(df,owed_map,closed_inv,attr):
-    rec=df[df['_yr'].isin([2025,2026])]; g=rec.groupby('_inv')['Nettutar'].sum()
-    act26=set(df[df['_yr']==2026]['_inv']); names=df.groupby('_inv')['_invname'].first()
-    reps=df.groupby('_inv')['_rep'].first(); rows=[]
-    for code,ov in owed_map.items():
-        if ov<=0: continue
-        rev=float(g.get(code,0)); rp=reps.get(code)
-        rows.append({'code':code,'name':str(names.get(code,'') or code),'rep':('' if pd.isna(rp) else str(rp)),
-                     'overdue':_n(ov),'rev':_n(rev),'active':('Evet' if code in act26 else 'Hayır'),
-                     'ratio':(int(round(ov/rev*100)) if rev>0 else None),'closed':bool(code in closed_inv)})
-    rows.sort(key=lambda r:-r['overdue']); return rows
+    """D-071: no customer-risk classification from invoice-age balances (no due dates, no agreements). Withdrawn."""
+    return []
 
 
 def m_collections(path,df=None):
+    """D-071: factual Cari balances, not overdue receivables. One row per account (numeric code, as before): the signed
+    balance as exported (None when a bucket is blank — unknown, never zero), the oldest month bucket holding a non-zero
+    amount (invoice age, not a due date) and the account class (320 = supplier; nothing else is classified).
+    Returns (rows, balances) with balances = {account code: signed balance or None}; nothing reads it as overdue."""
     df=read_aging_raw(path) if df is None else df.copy()
     df.columns=[str(c).strip() for c in df.columns]
     key,name,rep='Hesap kodu','Hesap adı','Temsilci kodu'
     months=['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık']
     bkts=[c for c in df.columns if 'öncesi' in c or any(m in c for m in months)]  # aging columns, oldest→newest
-    # eski format desteği: tek 'Vadesi geçen bakiye' sütunu varsa onu kullan
+    # eski format desteği: tek bakiye sütunu (başlığı ne derse desin vade kanıtı sayılmaz, D-071)
     single=next((c for c in df.columns if 'vadesi geçen' in c.lower()),None)
-    for b in bkts: df[b]=num(df[b]).fillna(0)
     df=df[df[key].astype(str).str.match(r'^\d',na=False)]
-    df['_bal']=num(df[single]).fillna(0) if single else (df[bkts].sum(axis=1) if bkts else 0)
-    owed=df[df['_bal']>0].copy()
-    def oldest(r):
-        for b in bkts:
-            if r[b]>0: return b
-        return '—'
-    rows=[{'name':str(r[name]),'rep':('' if pd.isna(r[rep]) else str(r[rep])),
-           'overdue':_n(r['_bal']),'oldest':oldest(r),'code':str(r[key])}
-          for _,r in owed.sort_values('_bal',ascending=False).iterrows()]
-    owed_map={str(r[key]):float(r['_bal']) for _,r in owed.iterrows()}
-    return rows, owed_map
+    bal=CARI.signed_balances(df,bkts,None if bkts else single)
+    rows=[]
+    for i,(_,r) in enumerate(df.iterrows()):
+        b=bal.iloc[i]; b=None if pd.isna(b) else float(b)
+        cls=CARI.account_class(r[key]); dirn=CARI.balance_direction(b)
+        rows.append({'code':str(r[key]),'name':str(r[name]),'rep':('' if pd.isna(r[rep]) else str(r[rep])),
+                     # exact signed amount (kuruş kept; never _n(), which rounds to whole lira)
+                     'balance':b,'oldest':(CARI.oldest_nonzero_bucket(r,bkts) or '—'),
+                     'account_class':cls,'class_label':CARI.CLASS_LABELS[cls],
+                     # account-level list: neutral sign names only (customer meaning is not established here)
+                     'direction':dirn,'direction_label':CARI.direction_label(dirn,cls,customer_account=False)})
+    rows.sort(key=lambda r:r['code'])          # neutral order: no ranking, no implied priority
+    return rows,{r['code']:r['balance'] for r in rows}
 
 # ---------- oluştur ----------
 def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None,stats_out=None,c360_panel=True,sq_panel=True,opp_panel=True,fair_panel=True,crm_panel=True,own_panel=True,gate=None,manifest=None,vkm_panel=True,up_panel=True):
@@ -262,13 +262,12 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     osmove=m_overstock_move(sdf,over) if sdf is not None else []
     risk=m_risk(sdf,owed,cinv,attr) if (sdf is not None and owed) else []
     tier_counts={t:sum(1 for r in lap if r['tier']==t) for t in (1,2,3)}
-    over_val=None; overdue_total=sum(r['overdue'] for r in coll)
-    lap_owe=sum(1 for r in lap if r['overdue']>0); has_aging=bool(ap)
+    over_val=None; overdue_total=None      # D-071: no overdue total exists (invoice age is not a due date)
+    has_aging=bool(ap)
 
     wb_cols=[{'k':'tier','l':'Kademe'},{'k':'name','l':'Müşteri','sub':'code'},{'k':'rep','l':'Temsilci'},
              {'k':'sector','l':'Sektör'},{'k':'spend','l':'Toplam Harcama','money':1},
              {'k':'last','l':'Son Yıl'},{'k':'years','l':'Güçlü Yıl','n':1}]
-    if has_aging: wb_cols.append({'k':'overdue','l':'Vadesi Geçen','money':1})
     modules={
       'reorder':{'title':'Azalan Stok','rows':low,
         'cols':[{'k':'code','l':'Kod'},{'k':'name','l':'Ürün'},{'k':'stock','l':'Stok','n':1},
@@ -283,8 +282,7 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
                 {'k':'inv','l':'Envanter Değeri','money':1},{'k':'buyers','l':'Alıcı Sayısı','n':1}],
         'note':RETIREMENT_REASON},
       'winback':{'title':'Geri Kazanım','rows':lap,'cols':wb_cols,'expand':True,'filter':'rep',
-        'note':('Geçmişte çok alışveriş yaptı, 2026\'da hiç almadı. Sarı = hâlâ borcu var, kovalamadan önce tahsil edin. Detay için müşteriye tıklayın. Kapalı firmalar çıkarıldı.'
-                if has_aging else 'Geçmişte çok alışveriş yaptı, 2026\'da hiç almadı. Önce Kademe 1, sonra harcamaya göre sıralı. Detay için müşteriye tıklayın. Kapalı firmalar çıkarıldı.')},
+        'note':'Geçmişte çok alışveriş yaptı, 2026\'da hiç almadı. Önce Kademe 1, sonra harcamaya göre sıralı. Detay için müşteriye tıklayın. Kapalı firmalar çıkarıldı.'},
       'momentum':{'title':'Büyüme / Küçülme','rows':momentum,'expand':True,'filter':'rep',
         'cols':[{'k':'name','l':'Müşteri','sub':'code'},{'k':'rep','l':'Temsilci'},{'k':'sector','l':'Sektör'},
                 {'k':'y2025','l':'2025 (Oca–bugün)','money':1},{'k':'y2026','l':'2026 (Oca–bugün)','money':1},
@@ -300,20 +298,16 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
                 {'k':'prof','l':'Kâr','money':1},{'k':'marg','l':'Marj %','n':1}],
         'note':'Marj % = Kâr ÷ Ciro. Ciro = Nettutar (U sütunu), Kâr = Net_Tutar_Maliyet_Dusulmus (AC sütunu), 2025–2026. Maliyet boş olan satırlar marjı bozabilir.'},
     }
-    if risk:
-        modules['risk']={'title':'Riskli Müşteri','rows':risk,'filter':'rep',
-          'cols':[{'k':'name','l':'Müşteri','sub':'code'},{'k':'rep','l':'Temsilci'},{'k':'overdue','l':'Vadesi Geçen','money':1},
-                  {'k':'rev','l':'Ciro 25–26','money':1},{'k':'active','l':'2026 Sipariş'},{'k':'ratio','l':'Borç/Ciro %','n':1}],
-          'note':'Borcu olan müşteriler; ciroyla birlikte. "2026 Sipariş = Evet" ama borçlu = hâlâ alıp ödemiyor. Kapalı firmalar KAPALI etiketiyle gösterilir (borç tahsil edilmeli).'}
     if has_aging:
-        modules['collections']={'title':'Tahsilat','rows':coll,
-          'cols':[{'k':'name','l':'Müşteri'},{'k':'rep','l':'Temsilci'},{'k':'overdue','l':'Vadesi Geçen','money':1},
-                  {'k':'oldest','l':'En Eski Borç'}],
-          'note':'Vadesi geçen alacaklar, en büyük önce. Listenin başındakileri kovalayın.'}
+        modules['risk']={'title':'Riskli Müşteri','rows':risk,'cols':[{'k':'name','l':'Müşteri','sub':'code'}],
+          'note':CARI.OVERDUE_RETIRED_REASON}
+        modules['collections']={'title':'Cari Bakiye (fatura yaşı)','rows':coll,'filter':'rep',
+          'cols':[{'k':'name','l':'Hesap','sub':'code'},{'k':'rep','l':'Temsilci'},{'k':'class_label','l':'Hesap Türü'},
+                  {'k':'balance','l':'Bakiye (işaretli)','money':1,'exact':1,'sign':1},{'k':'direction_label','l':'Bakiye İşareti'},
+                  {'k':'oldest','l':'En Eski Fatura Ayı'}],
+          'note':' '.join([CARI.OVERDUE_RETIRED_REASON,CARI.BALANCE_NOTE,CARI.SUPPLIER_NOTE,CARI.UNCONFIRMED_NOTE])}
     stats=[('min altı','—'),('maks üstü','—'),
            ('fazla stok değeri',_money(over_val)),('kayıp müşteri',f"{len(lap):,}")]
-    if has_aging:
-        stats+=[('vadesi geçen toplam',_money(overdue_total)),('borçlu kayıp müşteri',f"{lap_owe}")]
     # ---- M8-ACCURACY: withhold every output whose metric is not VERIFIED (rows never reach the HTML) ----
     decisions={}
     def _dec(key):
@@ -1027,6 +1021,7 @@ function state(t,k){const n=$('.c3-state'); n.textContent=t||''; n.className='c3
 function hint(t){const n=$('.c3-hint'); n.textContent=t||''; show(n,!!t);}
 function fmtDate(iso){const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso||'')); return m?(+m[3])+' '+AY[+m[2]-1]+' '+m[1]:'—';}
 function fmtMoney(v){return (v==null||!Number.isFinite(Number(v)))?'—':'₺'+Math.round(Number(v)).toLocaleString('tr-TR');}
+function fmtMoneyExact(v){return (v==null||!Number.isFinite(Number(v)))?'—':'₺'+Number(v).toLocaleString('tr-TR',{minimumFractionDigits:2,maximumFractionDigits:6});}
 function fmtNum(v){return (v==null||!Number.isFinite(Number(v)))?'—':Number(v).toLocaleString('tr-TR',{maximumFractionDigits:2});}
 function fmtPct(v){return (v==null||!Number.isFinite(Number(v)))?'—':'%'+(Number(v)*100).toLocaleString('tr-TR',{maximumFractionDigits:1});}
 function badge(conf){const c=CONF[conf]?conf:'unavailable'; const b=el('span','c3-badge c3-'+c,CONF[c]); b.dataset.conf=c; return b;}
@@ -1173,16 +1168,20 @@ function opportunitiesCard(o){   // M7-3: deterministic cross-sell at the anagru
   return c;
 }
 function receivablesCard(r){
-  const c=card('Cari / alacak'); c.dataset.sec='receivables';
-  c.append(el('p','c3-note','Sipariş müşterisi (Pro_kodu) ile fatura hesabı (Musterikod) ayrı kavramlardır. Alacak fatura hesabı düzeyindedir.'));
+  const c=card('Cari hesap'); c.dataset.sec='receivables';
+  c.append(el('p','c3-note','Sipariş müşterisi (Pro_kodu) ile fatura hesabı (Musterikod) ayrı kavramlardır. Cari bakiye fatura hesabı düzeyindedir.'));
   (r.accounts||[]).forEach(a=>{
     const box=el('div','c3-acc'); box.dataset.account=a.account_code;
     box.append(kv('Fatura hesabı',a.account_code+(a.account_name?' · '+a.account_name:'')));
     box.append(kv('Bu hesaptan sipariş',fmtNum(a.orders)+' · '+fmtMoney(a.net_order_amount)));
-    if(!a.aging||!a.aging.available) box.append(kv('Vadesi geçen bakiye','cari dosyası yok','unavailable'));
-    else if(!a.aging.present_in_file) box.append(kv('Vadesi geçen bakiye','cari dosyasında hesap yok',a.aging.confidence));
-    else{box.append(kv('Vadesi geçen bakiye (hesap)',fmtMoney(a.aging.overdue),a.aging.confidence));
-      box.append(kv('En eski dolu yaş dilimi',a.aging.oldest_bucket||'—'));}
+    if(!a.aging||!a.aging.available) box.append(kv('Cari bakiye','cari dosyası yok','unavailable'));
+    else if(!a.aging.present_in_file) box.append(kv('Cari bakiye','cari dosyasında hesap yok',a.aging.confidence));
+    else{const b=a.aging.balance; box.dataset.cls=a.aging.account_class||'';
+      box.append(kv('Hesap türü',a.aging.class_label||'—'));
+      box.append(kv('Cari bakiye (işaretli)',b==null?'bilinmiyor':fmtMoneyExact(b),b==null?'unavailable':a.aging.confidence));
+      box.append(kv('Bakiye yönü',a.aging.direction_label||'—'));
+      box.append(kv('En eski fatura ayı (vade değil)',a.aging.oldest_bucket||'—'));
+      box.append(kv('Vadesi geçen bakiye','bilinmiyor — ödeme koşulları raporu yok','unavailable'));}
     if(a.shared){const s=el('div','c3-shared',a.warning); s.dataset.shared='1'; box.append(s);}
     c.append(box);
   });
@@ -1504,7 +1503,7 @@ function card(it){
   const sub=el('div','sq-sub'); sub.append(el('span','sq-code',it.customer_code), el('span',null,'son sipariş: '+fmtDate(it.last_order_date)));
   c.append(sub);
   const reasons=Array.isArray(it.reasons)?it.reasons:[], primary=reasons.find(r=>r.action_id===it.primary_action_id)||reasons[0];
-  if(it.collection_first&&primary){const cf=el('div','sq-cf','Önce tahsilat: fatura hesabı '+(primary.account_code||'—')+' için vadesi geçen alacak konuşulmalı; diğer satış konuları sonra.'); cf.dataset.cf='1'; c.append(cf);}
+  if(it.collection_first&&primary){const cf=el('div','sq-cf','Önce tahsilat: fatura hesabı '+(primary.account_code||'—')+' için tahsilat gerekçesi önce konuşulmalı; diğer satış konuları sonra.'); cf.dataset.cf='1'; c.append(cf);}
   if(primary){const p=el('p','sq-primary'); p.append(el('b',null,primary.category_label+': '),document.createTextNode(primary.reason||'')); c.append(p);}
   const chips=el('div','sq-chips'), counts={};
   reasons.forEach(r=>{counts[r.category_label]=(counts[r.category_label]||0)+1;});
@@ -1973,7 +1972,7 @@ function custCard(it,c){
   (it.segments||[]).forEach(s=>top.append(el('span','fm-chip',SEG[s]||s)));
   k.append(top);
   (it.warnings||[]).forEach(w=>{const x=el('p','fm-warn',w.message); x.dataset.w=w.code; k.append(x);});
-  if(it.collection_first){const x=el('p','fm-warn fm-cf','Tahsilat önce: vadesi geçen alacak varsa önce tahsilat konuşulmalı.'); k.append(x);}
+  if(it.collection_first){const x=el('p','fm-warn fm-cf','Tahsilat önce: tahsilat gerekçesi varsa önce o konuşulmalı.'); k.append(x);}
   if(it.erp_fuar_orders){const x=el('div','fm-erp'); x.dataset.erp='1'; x.append(document.createTextNode(MSG.erp+' ('+num(it.erp_fuar_orders)+' sipariş) '));
     if(it.stage!=='order'&&c.status!=='archived') x.append(btn('fm-mark','Aşamayı Sipariş olarak işaretle',()=>saveCust(c,it.customer_code,{stage:'order'})));
     k.append(x);}
@@ -2970,6 +2969,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <script>
 const DATA={blob};
 const fmtMoney=v=>'₺'+Math.round(v).toLocaleString('tr-TR');
+const fmtMoneyExact=v=>'₺'+Number(v).toLocaleString('tr-TR',{{minimumFractionDigits:2,maximumFractionDigits:6}});  // D-071 Cari balance: kuruş kept
 const fmtNum=(v,d)=>Number(v).toLocaleString('tr-TR',{{minimumFractionDigits:d||0,maximumFractionDigits:d||0}});
 const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;'}}[c]));
 const state={{}};
@@ -3024,11 +3024,11 @@ function draw(id){{
   let h='<table><thead><tr>'+m.cols.map(c=>`<th class="${{isnum(c)?'r':''}}" data-k="${{c.k}}">${{c.l}} <span class=ar>${{s.sort===c.k?(s.dir>0?'▲':'▼'):'↕'}}</span></th>`).join('')+'</tr></thead><tbody>';
   if(!rows.length) h+=`<tr><td class="empty" colspan="${{m.cols.length}}">Gösterilecek kayıt yok.</td></tr>`;
   rows.forEach((r,i)=>{{
-    const owe=id==='winback'&&r.overdue>0;
-    const cls='main '+(m.expand?'exp':'')+(owe?' owe':'');
+    const cls='main '+(m.expand?'exp':'');
     h+=`<tr class="${{cls}}" data-i="${{i}}">`+m.cols.map(c=>{{
       let v=r[c.k];
       if(c.k==='tier') return `<td><span class="tier t${{v}}">K${{v}}</span></td>`;
+      if(c.money&&c.exact) return `<td class="money ${{(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}}">${{v==null?'—':fmtMoneyExact(v)}}</td>`;
       if(c.money) return `<td class="money ${{c.k==='overdue'?'od':(c.k==='inv'?'val':'')}} ${{(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}}">${{v?fmtMoney(v):(v===0?'₺0':'—')}}</td>`;
       if(c.n!=null) return `<td class="r mono ${{(id==='reorder'&&r.crit&&(c.k==='cov'||c.k==='stock'))?'crit':''}} ${{(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}}">${{v==null?'—':fmtNum(v,String(v).includes('.')?2:0)}}</td>`;
       if(c.k==='code') return `<td class="mono" style="color:var(--muted);font-size:12px">${{v}}</td>`;

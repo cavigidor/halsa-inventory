@@ -267,7 +267,8 @@ def verify(ctx, stats, html_path, expected_as_of, previous_context=None, drop=PL
     if not (ctx.get("as_of_data_date") == stats.get("asof") == expected_as_of):
         errors.append("Bağlam ve pano farklı veri tarihleri üretti.")
     # context ↔ dashboard reconciliation (both from the same dashboard_builder results)
-    pairs = [("vadesi geçen toplam", wc.get("overdue_total"), round(stats.get("overdue_total", 0))),
+    pairs = [("vadesi geçen toplam", wc.get("overdue_total"),            # D-071: None on both sides (unavailable)
+              None if stats.get("overdue_total") is None else round(stats["overdue_total"])),
              ("fazla stok değeri", wc.get("overstock_value"),
               None if stats.get("overstock_value") is None else round(stats["overstock_value"])),
              ("kayıp müşteri sayısı", wc.get("lapsed_count"), stats.get("lapsed")),

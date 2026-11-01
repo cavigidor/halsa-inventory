@@ -134,8 +134,10 @@ def test_reference_inside_sentence_is_fine():
 
 # ---------------- tidy (Q-1 iteration 3): built from live run 2's exact defects ----------------
 def _run2_raw(p):
+    # D-071: the recorded run cited the overdue fact, which no longer exists; the same tacked-on reference now
+    # points at "Son aktif yıl" (the tidy behaviour under test is unchanged).
     f = {lbl: _fid(p, lbl) for lbl in ("Temsilci", "Toplam geçmiş harcama", "2023 ciro", "2023 sipariş sayısı",
-                                         "Vadesi geçen bakiye")}
+                                         "Son aktif yıl")}
     return {
         "summary": (f"Müşteri düzenli alıcı geçmişine sahip; geçmiş toplam harcama kaydı [[FACT:{f['Toplam geçmiş harcama']}]] "
                     f"bunu destekliyor. Son yılda işlem azalması gözleniyor, bu nedenle hızlı temas önemli "
@@ -145,8 +147,8 @@ def _run2_raw(p):
                   f"Sipariş sayısında azalma gözleniyor, satış kaybı devam edebilir [[FACT:{f['2023 sipariş sayısı']}]]."],
         "opportunities": [f"Geçmişte yüksek toplam harcaması fırsat sunuyor [[FACT:{f['Toplam geçmiş harcama']}]].",
                           f"TEMSILCI-A doğrudan temasla hızlı geri kazanım başlatabilir [[FACT:{f['Temsilci']}]]."],
-        "recommended_action": (f"TEMSILCI-A bu hafta müşteriyi arasın; vadesi geçen bakiye olmadığını not etsin "
-                               f"[[FACT:{f['Vadesi geçen bakiye']}]]."),
+        "recommended_action": (f"TEMSILCI-A bu hafta müşteriyi arasın; son aktif yılı not etsin "
+                               f"[[FACT:{f['Son aktif yıl']}]]."),
         "evidence_fact_ids": [], "warnings": [], "confidence": "high"}
 
 
@@ -193,7 +195,7 @@ def test_run3a_year_tacked_after_another_ref_is_removed():
     p = _smoke_packet()
     tier, year = _fid(p, "Geri kazanım kademesi"), _fid(p, "Son aktif yıl")
     raw = {**GOOD, "summary": (f"Müşteri kademesinde ([[FACT:{tier}]]); bu durum hemen müdahale gerektiriyor "
-                               f"[[FACT:{tier}]] [[FACT:{year}]]. Vadesi geçen borç görünmüyor.")}
+                               f"[[FACT:{tier}]] [[FACT:{year}]]. Son alım uzun zaman önce.")}
     tidied, _ = Q.tidy(raw, p)
     assert "gerektiriyor." in tidied["summary"] and Q.assess(tidied, p)["issues"] == []
 
