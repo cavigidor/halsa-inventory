@@ -52,11 +52,11 @@ and ratios, repayment warnings, AI collection outreach, the scenario's receivabl
 
 `320…` → class "Tedarikçi (320)", never a customer receivable or action; signed amount kept; sign named neutrally
 ("Negatif / Pozitif / Sıfır bakiye") because no supplier sign convention is confirmed. Unclassified accounts (120 and
-others) in the account-level list: the same neutral sign names. Customer wording ("Halsa müşteriye borçlu" for a
-negative, "Müşteri Halsa'ya borçlu" for a positive balance) appears only in Customer 360, on an invoice account used by
-that customer's own orders and not a 320 account. The positive-side wording is the converse of rule D (a customer
-balance is what Halsa is owed); it is not used for any account whose customer link is not established. No other prefix
-is classified.
+others) in the account-level list: the same neutral sign names. The only customer wording is "Halsa müşteriye
+borçlu", for a negative balance in Customer 360 on an invoice account uniquely associated with that customer (one
+owner in the account-to-customer map, exact code) and not a 320 account. Shared invoice accounts show the full,
+undivided balance with the shared-account warning and neutral sign names for every customer; positive balances are
+always "Pozitif bakiye" (their meaning is not independently established). No other prefix is classified.
 
 ## Review corrections (PR #41 independent review)
 
@@ -81,6 +81,14 @@ is classified.
    which refuses before building a packet; draft requests get no product (empty product index). The
    `overdue_penalty` driver therefore reaches no output, API or AI packet. Guarded by
    `test_buyer_overdue_driver_is_unreachable` (`buyer_score` patched to fail; context build never calls it).
+
+5. **Final review (`2ecd96a`):** `customer_detail` used customer wording for every associated account, so a shared
+   account's negative balance read as owed to each customer, and a positive customer balance read "Müşteri Halsa'ya
+   borçlu". Now customer wording requires a unique, non-supplier association and applies to the negative side only;
+   `CUSTOMER_DIRECTION_LABELS` keeps only the confirmed negative wording. Balances, warning, schema and gate unchanged.
+   Tests: unique negative (confirmed wording), shared negative (neutral for each customer, full balance, warning),
+   unique positive (neutral), supplier either sign (neutral), values / schema / gate unchanged. Negative control: the
+   shared-negative and unique-positive tests fail on `2ecd96a`.
 
 ## Gate
 

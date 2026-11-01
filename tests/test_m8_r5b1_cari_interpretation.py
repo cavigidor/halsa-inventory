@@ -191,6 +191,82 @@ def test_c360_shared_account_balance_is_never_allocated_and_has_no_overdue(c360)
         assert CARI.OVERDUE_RETIRED_REASON in rec["limitations"] and CARI.SUPPLIER_NOTE in rec["limitations"]
 
 
+# PR #41 final review: customer wording only for a negative balance on an invoice account uniquely associated with
+# that customer and not a 320 supplier; shared accounts, suppliers and every positive balance get neutral sign names.
+@pytest.fixture(scope="module")
+def c360_shared_negative(tmp_path_factory):
+    folder = CF.write_all(str(tmp_path_factory.mktemp("r5b1_shared")))
+    frame = CF.aging_frame()
+    frame[CF.AGING_COLUMNS[3:]] = frame[CF.AGING_COLUMNS[3:]].astype(float)
+    frame.loc[frame["Hesap kodu"] == "910.99.0002", CF.AGING_COLUMNS[3]] = -4_000.25    # shared invoice account
+    frame.loc[frame["Hesap kodu"] == "910.99.0001", CF.AGING_COLUMNS[5]] = -2_500.5     # unique to 910.00.0001
+    path = os.path.join(folder, CF.AGING_FILE)
+    frame.to_excel(path, index=False)
+    sha = hashlib.sha256(open(path, "rb").read()).hexdigest()
+    snap = C360.build_snapshot(folder, CTX.build_context(folder, inflation_rate=0.40))
+    return snap, path, sha
+
+
+def test_c360_unique_negative_customer_account_gets_the_confirmed_wording(c360_shared_negative):
+    snap, _, _ = c360_shared_negative
+    assert snap.account_customers["910.99.0001"] == ["910.00.0001"]
+    a = _accounts(snap, "910.00.0001")["910.99.0001"]
+    assert (a["balance"], a["direction"], a["direction_label"]) == (-2_500.5, "credit", "Halsa müşteriye borçlu")
+
+
+def test_c360_shared_negative_account_is_neutral_for_each_customer_and_never_divided(c360_shared_negative):
+    snap, path, _ = c360_shared_negative
+    owners = snap.account_customers["910.99.0002"]
+    assert sorted(owners) == ["910.00.0002", "910.00.0003"]
+    full = {r["code"]: r["balance"] for r in DB.m_collections(path)[0]}["910.99.0002"]
+    assert full == -4_000.25
+    for code in owners:
+        d = C360.customer_detail(snap, code)
+        acc = {a["account_code"]: a for a in d["receivables"]["accounts"]}["910.99.0002"]
+        assert acc["aging"]["balance"] == full                                   # complete balance, not a share
+        assert acc["aging"]["direction"] == "credit" and acc["aging"]["direction_label"] == "Negatif bakiye"
+        assert "borçlu" not in acc["aging"]["direction_label"]
+        assert acc["shared"] is True and acc["warning"] == C360.SHARED_ACCOUNT_WARNING
+        assert "shared_invoice_account" in {w["code"] for w in d["warnings"]}
+        assert not any("total" in k for k in d["receivables"])
+
+
+def test_c360_unique_positive_customer_account_stays_neutral(c360_shared_negative):
+    snap, _, _ = c360_shared_negative
+    assert snap.account_customers["910.00.0001"] == ["910.00.0001"]
+    a = _accounts(snap, "910.00.0001")["910.00.0001"]
+    assert a["balance"] > 0 and a["direction"] == "debit" and a["direction_label"] == "Pozitif bakiye"
+    assert "Müşteri Halsa'ya borçlu" not in json.dumps(C360.customer_detail(snap, "910.00.0001"), ensure_ascii=False)
+    assert CARI.direction_label("debit", "unconfirmed", customer_account=True) == "Pozitif bakiye"
+
+
+@pytest.mark.parametrize("sign", (-1, 1))
+def test_c360_supplier_account_is_neutral_regardless_of_sign(c360_shared_negative, sign):
+    snap, _, _ = c360_shared_negative
+    aging = dict(snap.aging)
+    aging["910.99.0001"] = {**aging["910.99.0001"], "account_class": "supplier", "balance": sign * 2_500.5,
+                            "direction": "credit" if sign < 0 else "debit"}
+    a = _accounts(dataclasses.replace(snap, aging=aging), "910.00.0001")["910.99.0001"]
+    assert a["class_label"] == "Tedarikçi (320)" and a["balance"] == sign * 2_500.5
+    assert a["direction_label"] == ("Negatif bakiye" if sign < 0 else "Pozitif bakiye")
+
+
+@pytest.mark.production_gate
+def test_c360_wording_change_leaves_values_schema_and_gate_unchanged(c360_shared_negative):
+    from schemas import C360Aging
+    snap, path, sha = c360_shared_negative
+    assert hashlib.sha256(open(path, "rb").read()).hexdigest() == sha            # source bytes untouched
+    for code in ("910.00.0001", "910.00.0002", "910.00.0003"):
+        for acc in C360.customer_detail(snap, code)["receivables"]["accounts"]:
+            ag = acc["aging"]
+            assert set(ag) == set(C360Aging.model_fields)                        # API schema unchanged
+            C360Aging(**ag)
+    g = ACC.current_gate()
+    assert not g.decide("customer360.profile").displayable
+    assert len(ACC.REGISTER) == 33 and not any(m.certified == ACC.State.VERIFIED for m in ACC.REGISTER.values())
+    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
+
+
 def test_c360_supplier_account_is_not_shown_as_a_customer_receivable(c360):
     aging = dict(c360.aging)
     aging["910.99.0001"] = {**aging["910.99.0001"], "account_class": "supplier"}
@@ -331,6 +407,7 @@ def test_supplier_and_unclassified_accounts_get_no_debtor_or_receivable_wording(
             assert CARI.direction_label(direction, cls, customer_account=False) == CARI.DIRECTION_LABELS[direction]
         assert CARI.direction_label(direction, "supplier", customer_account=True) == CARI.DIRECTION_LABELS[direction]
     assert CARI.direction_label("credit", "unconfirmed", customer_account=True) == "Halsa müşteriye borçlu"
+    assert CARI.direction_label("debit", "unconfirmed", customer_account=True) == "Pozitif bakiye"   # unconfirmed
     note = CARI.BALANCE_NOTE.lower()
     assert "hesap sahibi halsa'ya borçlu" not in note and "doğrulanmadı" in note
 

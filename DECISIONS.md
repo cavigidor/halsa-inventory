@@ -1271,9 +1271,10 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **Keep, factually:** per Cari account the signed balance as exported, to the kuruş (a blank bucket makes it unknown,
   never zero; zero and negative kept; never rounded to whole lira), the oldest month bucket with a non-zero amount
   labelled as invoice age, the account class (320 = supplier, everything else "Sınıflandırılmadı"), and the sign named
-  neutrally (positive / negative / zero). Debtor / creditor wording only where rule D applies: a non-supplier invoice
-  account of a customer in Customer 360 (negative = "Halsa müşteriye borçlu"); never for 320 or unclassified accounts
-  in the account-level list (PR #41 review). Dashboard tab "Cari Bakiye (fatura
+  neutrally (positive / negative / zero). Debtor / creditor wording only where rule D applies: a NEGATIVE balance on an
+  invoice account uniquely associated with that customer and not a 320 account, in Customer 360 ("Halsa müşteriye
+  borçlu"). Shared invoice accounts (never allocated), 320 accounts, unclassified accounts in the account-level list
+  and every positive balance (its meaning is not independently established) get neutral sign names (PR #41 reviews). Dashboard tab "Cari Bakiye (fatura
   yaşı)" (neutral code order, no ranking, no total); Customer 360 per invoice account (never allocated), with
   `overdue: null` / `overdue_status: "unavailable"`. AI packets report overdue as missing with an explicit warning.
 - **Unchanged:** source bytes, rows, formulas and import schema; strict reconciliation and Veri Kontrol detection /

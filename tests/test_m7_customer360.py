@@ -214,7 +214,7 @@ def test_single_and_multiple_exclusive_accounts(snap):
     assert a[C1]["aging"] == {"available": True, "present_in_file": True, "balance": 2000,
                               "oldest_bucket": "Aralık-2025", "account_class": "unconfirmed",
                               "class_label": "Sınıflandırılmadı", "direction": "debit",
-                              "direction_label": "Müşteri Halsa'ya borçlu", "overdue": None,
+                              "direction_label": "Pozitif bakiye", "overdue": None,   # positive meaning unconfirmed
                               "overdue_status": "unavailable", "confidence": "trusted"}
     zero = a["910.99.0001"]["aging"]
     assert zero["present_in_file"] and zero["balance"] == 0 and zero["direction"] == "zero" and zero["overdue"] is None

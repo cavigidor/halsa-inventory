@@ -18,6 +18,11 @@
   (4) buyer `has_overdue` driver proven unreachable (no clearance candidates since D-070; product AI refuses before a
   packet) — code unchanged, guard test added. Full suite (browser + JS, AI disabled): **1920 passed, 7 skipped,
   1 xfailed**; focused Cari 168 passed / 1 xfailed, authorization 204 passed, generation / restart 225 passed.
+- **Final review correction (after `2ecd96a`):** Customer 360 uses "Halsa müşteriye borçlu" only for a negative balance on
+  an invoice account uniquely associated with that customer and not a 320 account; shared accounts (full balance, warning
+  kept, never divided), suppliers and every positive balance use neutral sign names. Full suite (browser + JS, AI
+  disabled): **1926 passed, 7 skipped, 1 xfailed** (+6 focused tests); focused Cari + Customer 360 174 passed /
+  1 xfailed, authorization 179 passed. 33 metrics, 0 VERIFIED, flag False.
 - Gate: `receivables.risk` INVALID (`CARI-OVERDUE-UNSUPPORTED`); `receivables.collections` NOT_VERIFIED (AGING-DATE,
   CARI-ACCOUNT-CLASS, CARI-FX, REAL-DATA); OVERDUE-DEF answered; DQ-6 removed from win-back (no code path; still
   INVALID). Ceilings / approvals unchanged; **0 of 33 VERIFIED**; `GENERATION_BOUND_API_EVIDENCE` False;

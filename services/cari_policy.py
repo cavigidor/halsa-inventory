@@ -9,8 +9,10 @@ zero), the oldest month bucket holding a non-zero amount, and one confirmed acco
 suppliers. No other prefix is classified (120 is not assumed to be a confirmed customer account).
 
 Sign wording: only the owner-confirmed customer meaning is stated (negative customer balance = Halsa owes the
-customer), and only where the account is a customer's own invoice account (Customer 360). Everywhere else — suppliers,
-unclassified accounts, the account-level dashboard list — the sign is named neutrally (positive / negative / zero).
+customer), and only where the invoice account is uniquely associated with that one customer and is not a 320 supplier
+account (Customer 360). Everywhere else — shared invoice accounts, suppliers, unclassified accounts, the account-level
+dashboard list — and for every positive balance (its meaning is not independently established), the sign is named
+neutrally (positive / negative / zero).
 """
 from decimal import Decimal, InvalidOperation
 
@@ -35,9 +37,9 @@ CLASS_LABELS = {CLASS_SUPPLIER: "Tedarikçi (320)", CLASS_UNCONFIRMED: "Sınıfl
 # Neutral sign names (no debtor / creditor claim): suppliers, unclassified accounts, the account-level list.
 DIRECTION_LABELS = {"debit": "Pozitif bakiye", "credit": "Negatif bakiye", "zero": "Sıfır bakiye",
                     None: "Bakiye bilinmiyor (boş tutar hücresi)"}
-# Customer meaning (D-071 rule D), only for a non-supplier invoice account of a customer (Customer 360).
-CUSTOMER_DIRECTION_LABELS = {**DIRECTION_LABELS, "debit": "Müşteri Halsa'ya borçlu",
-                             "credit": "Halsa müşteriye borçlu"}
+# Customer meaning (D-071 rule D: negative only), for a non-supplier invoice account uniquely associated with one
+# customer (Customer 360). The positive side stays neutral until its meaning is independently established.
+CUSTOMER_DIRECTION_LABELS = {**DIRECTION_LABELS, "credit": "Halsa müşteriye borçlu"}
 
 
 def account_class(code) -> str:
@@ -46,7 +48,8 @@ def account_class(code) -> str:
 
 
 def direction_label(direction: str | None, account_class: str, customer_account: bool) -> str:
-    """Customer wording only for a customer's own non-supplier invoice account; neutral sign names otherwise."""
+    """Customer wording only when `customer_account` (the invoice account belongs uniquely to this customer) and the
+    account is not a 320 supplier account; neutral sign names otherwise."""
     if customer_account and account_class != CLASS_SUPPLIER:
         return CUSTOMER_DIRECTION_LABELS[direction]
     return DIRECTION_LABELS[direction]

@@ -756,12 +756,14 @@ def customer_detail(snap: Customer360Snapshot, code: str, *, ctx: dict | None = 
         ag = snap.aging.get(inv) if snap.aging_status == "ok" else None
         # D-071: signed balance as exported; overdue is unknown (no agreement report), never derived from age.
         cls = ag["account_class"] if ag else None
+        unique = len(owners) == 1 and str(owners[0]) == code       # this customer alone; exact codes (D-042)
         aging = {"available": snap.aging_status == "ok", "present_in_file": ag is not None,
                  "balance": (ag["balance"] if ag else None), "oldest_bucket": (ag["oldest"] if ag else None),
                  "account_class": cls, "class_label": CARI.CLASS_LABELS.get(cls) if cls else None,
                  "direction": (ag["direction"] if ag else None),
-                 # the customer's own invoice account: customer wording unless it is a 320 supplier account
-                 "direction_label": (CARI.direction_label(ag["direction"], cls, customer_account=True) if ag else None),
+                 # customer wording only when this account belongs to this customer alone (not shared, never
+                 # allocated) and is not a 320 supplier account; neutral sign names otherwise
+                 "direction_label": (CARI.direction_label(ag["direction"], cls, customer_account=unique) if ag else None),
                  "overdue": None, "overdue_status": "unavailable",
                  "confidence": "trusted" if snap.aging_status == "ok" else CONF_UNAVAILABLE}
         accounts.append({"account_code": inv, "account_name": snap.account_names.get(inv),
