@@ -438,7 +438,7 @@ class C360Aging(BaseModel):
     # D-071: signed balance as exported (None = unknown); the oldest bucket is invoice age, not a due date.
     balance: Optional[float] = None
     oldest_bucket: Optional[str] = None
-    account_class: Optional[Literal["supplier", "unconfirmed"]] = None
+    account_class: Optional[Literal["customer", "supplier", "unconfirmed"]] = None
     class_label: Optional[str] = None
     direction: Optional[Literal["debit", "credit", "zero"]] = None
     direction_label: Optional[str] = None

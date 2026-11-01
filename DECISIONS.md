@@ -1288,3 +1288,40 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   `m8-r5b1-cari-invoice-age`: old pages / manifests need a controlled refresh (existing mechanism, no migration).
 - **Open:** the agreement-based overdue report; 120 / other account classes; FX balances; Cari as-of date; DQ-6 identity
   for any future customer-level use of balances; the legacy single "vadesi geçen" column format (read as a balance only).
+
+### D-072 · 2026-11-01 · Cari first metric: report date from the file name, USD column apart, DinamikCRM authoritative, 120 / 320 (owner decisions)
+- **Authority:** the owner's direct, final answers to the outstanding questions of the first Cari metric
+  (`receivables.collections`, "Cari Bakiye (fatura yaşı)"), relayed in the M8 first-verified-Cari-metric assignment.
+  They supersede the open assumptions of D-071 (account class) and of the M8 real-data acceptance (date, FX, totals).
+- **D1 — report date.** The Cari report's as-of date is the calendar date in the ORIGINAL Excel file name
+  (`Cari 5 Ekim 2026.xlsx` = 2026-10-05). The newest invoice-age bucket and any worksheet title never determine or
+  override it. With no parseable date in the name, the upload date (previously approved by the owner), with visible
+  provenance. Implemented in the existing upload flow only, for the Cari slot: captured from the browser's file name at
+  assignment; recorded in `sources.json` (`snapshot_date`, `date_origin` = `filename` / `upload_date`, `date_source`,
+  `period_complete: true` — a current-state snapshot of the authoritative report is complete as of its date; a bucket
+  newer than the date is still a contradiction); carried over unchanged; re-derived identically after a restart.
+  Refused (422), never guessed: an impossible date, two different dates in one name, a typed date that differs.
+  Stok / Satış dates stay declared-or-unknown (D-051, D-065) — this decision covers the Cari report.
+- **D2 — currency.** `Toplam Döviz Bakiye` is USD. Kept in the source untouched; never added to, compared with or
+  converted into the TL month buckets; no exchange-rate rule; an FX difference is not evidence about a bucket sum. The
+  balance metric does not read it, so the `CARI-FX` blocker is withdrawn.
+- **D3 — source authority.** The supplied exports ARE the DinamikCRM reports. No further export, external ERP total,
+  bank statement or second accounting control total is requested. The Cari export has no workbook-native total row;
+  none is invented. Instead every account balance is reproduced by a second, independent reader of the same records
+  (openpyxl on the frozen bytes vs the pandas pipeline): a full match establishes the source totals for this source; a
+  mismatch is INVALID; a failed reproduction proves nothing. The exact approved Cari header layout
+  (`dinamikcrm_cari_yaslandirma_v1`: Hesap kodu, Hesap adı, Temsilci kodu, '<Ay>-<YYYY> ve öncesi', consecutive monthly
+  buckets, Toplam Döviz Bakiye) establishes column identity (mapping), as D-056 does for Stok. An explicit `false`
+  declaration still wins. Other sources are unchanged.
+- **D4 — account classes.** `120` = Müşteri (customer), `320` = Satıcı (supplier); other prefixes unclassified. Exact
+  codes (never trimmed); a class is never an overdue status, a due date or a customer-level allocation. The D-071 sign
+  rule now applies to 120: a negative 120 balance reads "Halsa müşteriye borçlu" (account list: the holder's own
+  account; Customer 360: only when the invoice account belongs uniquely to the customer shown — shared accounts stay
+  neutral, full balance, never divided). Positive balances, 320 and unclassified accounts keep neutral sign names.
+  Definition `cari_account_class` approved (D-072); blocker `CARI-ACCOUNT-CLASS` withdrawn.
+- **Gate (Option B, D-069):** `receivables.collections` keeps REAL-DATA (replaced by the reconciliation reference in
+  the promotion step) and the unapproved `operational_freshness` definition; the static `AGING-DATE` blocker is
+  replaced by evidence (the dated, provenance-carrying report date judged by the operational freshness rule). Strict
+  source-wide reconciliation and Veri Kontrol findings are unchanged and still shown. No metric certified;
+  `GENERATION_BOUND_API_EVIDENCE` False; 33 metrics, 0 VERIFIED. `POLICY_VERSION` → `m8-cari-d072` (labels and date
+  provenance change the page; old pages need the existing controlled refresh). D-071 overdue withdrawals unchanged.

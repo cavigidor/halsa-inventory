@@ -76,6 +76,13 @@ class Out:
             self.line(f"      {label} [{cur}] {t['count']} taksit: {parts}")
 
 
+
+def _date_origin_tr(record) -> str:
+    """D-072: the provenance of a report date as recorded (declared / original file name / upload date)."""
+    from services import cari_policy as CARI
+    origin = (record.evidence.report_date_origin if record.evidence is not None else None) or "declared"
+    return CARI.DATE_ORIGIN_TR.get(origin, origin)
+
 def _today(v: str | None) -> dt.date:
     return dt.date.fromisoformat(v) if v else dt.date.today()
 
@@ -176,7 +183,7 @@ def reconcile_core(data_folder: str, out: Out, *, today: dt.date, keep: dict | N
         ev = r.evidence
         rd = ev.report_date
         out.check(f"{r.key}:report_date", "PASS" if rd else "OPEN",
-                  f"İş tarihi ({r.date_kind}): " + (f"beyan edildi {rd.isoformat()}" if rd else
+                  f"İş tarihi ({r.date_kind}): " + (f"{_date_origin_tr(r)} {rd.isoformat()}" if rd else
                                                      "beyan edilmedi (dosya zamanı kullanılmaz)"))
         if ev.latest_transaction_date:
             out.line(f"      en son işlem tarihi (gözlenen; rapor tarihi değildir): {ev.latest_transaction_date}")

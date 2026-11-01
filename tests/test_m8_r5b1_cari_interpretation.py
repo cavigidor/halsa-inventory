@@ -52,7 +52,7 @@ def test_long_outstanding_invoice_is_invoice_age_not_overdue():
     rows, _ = _by_code(_aging(_row("120.01.0001", {OLDEST: 40_000})))
     r = rows["120.01.0001"]
     assert r["balance"] == 40_000 and r["oldest"] == OLDEST
-    assert "overdue" not in r and r["account_class"] == "unconfirmed" and r["class_label"] == "Sınıflandırılmadı"
+    assert "overdue" not in r and r["account_class"] == "customer" and r["class_label"] == "Müşteri (120)"   # D-072
     assert AS.produce_collections({"coll_scored": [{**r, "overdue": 40_000, "priority_score": 99,
                                                     "drivers": {"age_months": 12, "ratio": 1},
                                                     "revenue_25_26": 1, "still_active": True}]}) == []
@@ -74,19 +74,21 @@ def test_positive_and_negative_balances_keep_their_sign():
     pos, neg = rows["120.01.0003"], rows["120.01.0004"]
     assert (pos["balance"], pos["direction"]) == (2_000, "debit")
     assert (neg["balance"], neg["direction"]) == (-7_250, "credit")       # not dropped, not zeroed, not flipped
-    assert neg["direction_label"] == "Negatif bakiye" and neg["oldest"] == BUCKETS[2]   # neutral: class unconfirmed
+    assert neg["direction_label"] == "Halsa müşteriye borçlu" and neg["oldest"] == BUCKETS[2]   # D-072: 120 customer
+    assert pos["direction_label"] == "Pozitif bakiye"                   # positive meaning still unconfirmed
     assert balances == {"120.01.0003": 2_000, "120.01.0004": -7_250}
 
 
-def test_320_accounts_are_suppliers_and_no_other_prefix_is_classified():
+def test_320_accounts_are_suppliers_120_customers_and_no_other_prefix_is_classified():
     rows, _ = _by_code(_aging(_row("320.01.0001", {OLDEST: -3_000}), _row("120.01.0005", {OLDEST: 10}),
                               _row("150.01.0001", {OLDEST: 10}), _row("3201", {OLDEST: 10})))
     assert rows["320.01.0001"]["account_class"] == "supplier"
-    assert rows["320.01.0001"]["class_label"] == "Tedarikçi (320)"
+    assert rows["320.01.0001"]["class_label"] == "Satıcı (320)"
     assert rows["320.01.0001"]["direction_label"] == "Negatif bakiye"   # sign named neutrally, no debtor / creditor claim
     assert rows["320.01.0001"]["balance"] == -3_000                     # signed source amount kept
     assert rows["3201"]["account_class"] == "supplier"                  # prefix rule, code read as recorded
-    assert rows["120.01.0005"]["account_class"] == rows["150.01.0001"]["account_class"] == "unconfirmed"
+    assert rows["120.01.0005"]["account_class"] == "customer"           # D-072 D4
+    assert rows["150.01.0001"]["account_class"] == "unconfirmed"
     assert CARI.account_class(" 320.01") == "unconfirmed"               # never trimmed (D-042)
 
 
@@ -175,10 +177,12 @@ def _accounts(snap, code):
     return {a["account_code"]: a["aging"] for a in C360.customer_detail(snap, code)["receivables"]["accounts"]}
 
 
-def test_c360_negative_customer_balance_means_halsa_owes_the_customer(c360):
+def test_c360_negative_balance_on_an_unclassified_prefix_stays_neutral(c360):
+    # D-072 D4: the customer meaning needs a 120 customer account; this fixture's 910 prefix is unclassified.
+    # (Confirmed wording for 120 accounts: tests/test_m8_d072_cari_first_metric.py.)
     a = _accounts(c360, "910.00.0001")["910.99.0001"]
     assert a["balance"] == -2_500 and a["direction"] == "credit"
-    assert a["direction_label"] == "Halsa müşteriye borçlu" and a["overdue"] is None
+    assert a["direction_label"] == "Negatif bakiye" and a["overdue"] is None
     assert a["overdue_status"] == "unavailable" and a["oldest_bucket"] == CF.AGING_COLUMNS[5]
 
 
@@ -207,11 +211,12 @@ def c360_shared_negative(tmp_path_factory):
     return snap, path, sha
 
 
-def test_c360_unique_negative_customer_account_gets_the_confirmed_wording(c360_shared_negative):
+def test_c360_unique_negative_unclassified_account_stays_neutral(c360_shared_negative):
+    # D-072 D4: unique association alone is not enough; the account must be a 120 customer account
     snap, _, _ = c360_shared_negative
     assert snap.account_customers["910.99.0001"] == ["910.00.0001"]
     a = _accounts(snap, "910.00.0001")["910.99.0001"]
-    assert (a["balance"], a["direction"], a["direction_label"]) == (-2_500.5, "credit", "Halsa müşteriye borçlu")
+    assert (a["balance"], a["direction"], a["direction_label"]) == (-2_500.5, "credit", "Negatif bakiye")
 
 
 def test_c360_shared_negative_account_is_neutral_for_each_customer_and_never_divided(c360_shared_negative):
@@ -247,7 +252,7 @@ def test_c360_supplier_account_is_neutral_regardless_of_sign(c360_shared_negativ
     aging["910.99.0001"] = {**aging["910.99.0001"], "account_class": "supplier", "balance": sign * 2_500.5,
                             "direction": "credit" if sign < 0 else "debit"}
     a = _accounts(dataclasses.replace(snap, aging=aging), "910.00.0001")["910.99.0001"]
-    assert a["class_label"] == "Tedarikçi (320)" and a["balance"] == sign * 2_500.5
+    assert a["class_label"] == "Satıcı (320)" and a["balance"] == sign * 2_500.5
     assert a["direction_label"] == ("Negatif bakiye" if sign < 0 else "Pozitif bakiye")
 
 
@@ -271,7 +276,7 @@ def test_c360_supplier_account_is_not_shown_as_a_customer_receivable(c360):
     aging = dict(c360.aging)
     aging["910.99.0001"] = {**aging["910.99.0001"], "account_class": "supplier"}
     a = _accounts(dataclasses.replace(c360, aging=aging), "910.00.0001")["910.99.0001"]
-    assert a["class_label"] == "Tedarikçi (320)" and a["balance"] == -2_500
+    assert a["class_label"] == "Satıcı (320)" and a["balance"] == -2_500
     assert a["direction_label"] == "Negatif bakiye"                     # not "Halsa müşteriye borçlu" for a supplier
 
 
@@ -321,9 +326,10 @@ def test_register_withholds_and_promotes_nothing():
     g = ACC.current_gate()
     risk, coll = g.decide("receivables.risk"), g.decide("receivables.collections")
     assert risk.state == ACC.State.INVALID and CARI.OVERDUE_RETIRED_CODE in risk.codes
-    assert not coll.displayable and "CARI-ACCOUNT-CLASS" in coll.codes
+    assert not coll.displayable and "REAL-DATA" in coll.codes          # D-072 removed CARI-ACCOUNT-CLASS / CARI-FX
     assert "OVERDUE-DEF" not in coll.codes and "DEF:overdue_definition" not in coll.codes
-    assert not ACC.DEFINITIONS["overdue_definition"].approved and not ACC.DEFINITIONS["cari_account_class"].approved
+    assert not ACC.DEFINITIONS["overdue_definition"].approved
+    assert ACC.DEFINITIONS["cari_account_class"].approved and ACC.DEFINITIONS["cari_account_class"].decision_ref == "D-072"
     assert len(ACC.REGISTER) == 33 and not any(m.certified == ACC.State.VERIFIED for m in ACC.REGISTER.values())
     assert ACC.GENERATION_BOUND_API_EVIDENCE is False
     assert "vadesi geçen toplam" not in ACC.STAT_METRIC and "borçlu kayıp müşteri" not in ACC.STAT_METRIC
@@ -389,7 +395,7 @@ def test_c360_and_dashboard_receive_the_same_exact_amounts(tmp_path):
     snap = C360.build_snapshot(folder, CTX.build_context(folder, inflation_rate=0.40))
     acc = _accounts(snap, "910.00.0001")
     assert acc["910.99.0001"]["balance"] == dash["910.99.0001"] == -0.4
-    assert acc["910.99.0001"]["direction_label"] == "Halsa müşteriye borçlu"       # confirmed customer meaning
+    assert acc["910.99.0001"]["direction_label"] == "Negatif bakiye"       # D-072: 910 prefix is unclassified
     assert acc["910.00.0001"]["balance"] == dash["910.00.0001"] == 1250.25 + 750      # buckets of the fixture
     assert hashlib.sha256(open(path, "rb").read()).hexdigest() == sha
 
@@ -399,15 +405,21 @@ def test_supplier_and_unclassified_accounts_get_no_debtor_or_receivable_wording(
                               _row("120.01.0201", {OLDEST: 900}), _row("120.01.0202", {OLDEST: -900}),
                               _row("150.01.0201", {OLDEST: -1})))
     debtor_words = ("borçlu", "alacak", "borcu")
-    for r in rows.values():
+    assert rows["120.01.0202"]["direction_label"] == "Halsa müşteriye borçlu"    # D-072: the one confirmed meaning
+    assert rows["120.01.0201"]["direction_label"] == "Pozitif bakiye"
+    for code, r in rows.items():
+        if code == "120.01.0202":
+            continue
         assert r["direction_label"] in ("Pozitif bakiye", "Negatif bakiye", "Sıfır bakiye")
         assert not any(w in r["direction_label"].lower() for w in debtor_words)
     for direction in ("debit", "credit", "zero"):
         for cls in ("supplier", "unconfirmed"):
             assert CARI.direction_label(direction, cls, customer_account=False) == CARI.DIRECTION_LABELS[direction]
         assert CARI.direction_label(direction, "supplier", customer_account=True) == CARI.DIRECTION_LABELS[direction]
-    assert CARI.direction_label("credit", "unconfirmed", customer_account=True) == "Halsa müşteriye borçlu"
-    assert CARI.direction_label("debit", "unconfirmed", customer_account=True) == "Pozitif bakiye"   # unconfirmed
+    assert CARI.direction_label("credit", "unconfirmed", customer_account=True) == "Negatif bakiye"   # D-072: not 120
+    assert CARI.direction_label("credit", "customer", customer_account=True) == "Halsa müşteriye borçlu"
+    assert CARI.direction_label("credit", "customer", customer_account=False) == "Negatif bakiye"  # shared in C360
+    assert CARI.direction_label("debit", "customer", customer_account=True) == "Pozitif bakiye"
     note = CARI.BALANCE_NOTE.lower()
     assert "hesap sahibi halsa'ya borçlu" not in note and "doğrulanmadı" in note
 

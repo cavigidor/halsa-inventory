@@ -34,15 +34,21 @@ no dashboard has ever been published — the "Pano henüz yayımlanmadı" page l
 |---|---|---|---|
 | Stok | `stock` | Rapor (anlık) tarihi | core refresh (`sources.json`) |
 | Satış | `sales` | Rapor tarihi, dönem başlangıcı / sonu, dönem tamamlandı mı? | core refresh |
-| Cari | `aging` | Rapor (anlık) tarihi | core refresh |
+| Cari | `aging` | **D-072 D1:** the date in the original file name (e.g. `Cari 5 Ekim 2026.xlsx`), else the upload date; a typed date must equal it | core refresh |
 | Kredi | `kredi` | Rapor (anlık) tarihi | owner repository (`owner_sources.json`) |
 | Gider/Gelir | `gider_gelir` | Rapor yılı (required by the importer to read the file) | owner repository |
 | Bütçe | `butce` | Plan yılı (required by the importer), rapor tarihi | owner repository |
 
 - The report type of every file is **chosen** by the owner from a list; nothing is preselected from the file name.
-- A date is never taken from a file name, a modification time or the latest transaction. Unknown declarations are
-  recorded as unknown (left out of the selection file; `report_date_origin` stays empty), so the accuracy gate keeps
-  withholding exactly as before.
+- A date is never taken from a modification time, a sheet title, an aging bucket or the latest transaction. For Stok
+  and Satış it is never taken from the file name either: unknown declarations are recorded as unknown (left out of the
+  selection file; `report_date_origin` stays empty). **Exception — Cari (D-072 D1, owner decision):** the as-of date
+  is the calendar date in the original file name ("5 Ekim 2026", "2026-10-05", "05.10.2026"; Turkish month names in
+  any case), captured at upload from the browser's file name (the stored copy is content-addressed and carries no
+  date); with no date in the name, the upload date. `sources.json` records `snapshot_date`, `date_origin`
+  (`filename` / `upload_date`), `date_source` (the name) and `period_complete: true`; the evidence carries
+  `report_date_origin` accordingly, the preview and the page show the provenance, and a carried-over Cari report keeps
+  it. An impossible date or two different dates in the name, or a typed date that differs, are refused (422).
 - Stored files get **content-addressed names** (`yukleme-<128-bit SHA-256 prefix>.xlsx`). No reader can infer a type,
   date or year from them, and they never match the legacy keyword selection (`stok`, `sat`, `cari`, `yas`).
   Consequently Gider/Gelir and Bütçe need their year declared (their importers otherwise fall back to the year in the

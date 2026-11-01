@@ -53,7 +53,7 @@ WITHHELD_MESSAGE = "Bu analiz henüz doğrulanmadığı için gösterilmiyor."
 WITHHELD_CODE = "accuracy_withheld"
 WITHHELD_HTTP_STATUS = 409          # the resource exists; its verification state conflicts with displaying it
 MAX_REASONS_SHOWN = 4               # keep the father-facing notice short
-POLICY_VERSION = "m8-r5b1-cari-invoice-age"  # old generated pages/manifests must be refreshed (D-070, D-071)
+POLICY_VERSION = "m8-cari-d072"  # old generated pages/manifests must be refreshed (D-070, D-071, D-072)
 DEFAULT_OPERATIONAL_MAX_AGE_DAYS = 45      # PROVISIONAL engineering default, not an owner-approved policy
 TEMPORAL_KINDS = ("operational", "historical")
 # M8-ACCURACY-2: the generation-bound evidence mechanism (services/generation.py) is implemented and shared by the
@@ -156,8 +156,8 @@ DEFINITIONS: dict[str, Definition] = {d.key: d for d in (
     # overdue report (not supplied). Kept unapproved for the withdrawn metrics that used it.
     Definition("overdue_definition", "Vadesi geçmiş borç (müşteri ödeme koşullarına göre; rapor sağlanmadı)",
                question_ref="D-071"),
-    Definition("cari_account_class", "Cari hesap türü (320 = tedarikçi onaylı; 120 ve diğerleri doğrulanmadı)",
-               question_ref="D-071"),
+    Definition("cari_account_class", "Cari hesap türü (120 = Müşteri, 320 = Satıcı; diğer önekler sınıflandırılmadı)",
+               True, "D-072"),
     Definition("priority_thresholds", "Tahsilat / aksiyon öncelik eşikleri", question_ref=f"{_Q} #15"),
     Definition("inflation_source", "Reel büyüme için enflasyon kaynağı", question_ref="TASKS.md Milestone 4"),
     Definition("active_customer_window", "'Aktif müşteri' penceresi (son 365 gün)", question_ref=f"{_Q} #12"),
@@ -196,8 +196,7 @@ B_WINDOW = Blocker("LAPSED-WINDOW", NV, "Kayıp müşteri dönemi (2020 mi, 2021
 # removed every debt field from the win-back list (invoice age is not overdue). The identity question itself stays
 # open for any future customer-level use of Cari balances (Veri Kontrol `dq6_aging_order_code_only`).
 B_CARI_OVERDUE = Blocker(CARI.OVERDUE_RETIRED_CODE, INV, CARI.OVERDUE_RETIRED_REASON, "D-071; services/cari_policy.py")
-B_CARI_CLASS = Blocker("CARI-ACCOUNT-CLASS", NV, "320 dışındaki Cari hesapların (ör. 120) müşteri hesabı olduğu ayrıca "
-                       "doğrulanmadı.", "D-071: only 320 = supplier is owner-confirmed; services/cari_policy.py.")
+# CARI-ACCOUNT-CLASS is answered by D-072 D4 (120 = Müşteri, 320 = Satıcı; other prefixes unclassified).
 B_DQ4 = Blocker("DQ-4", NV, "Kaynak stok kontrol alanının tanımı ve hata değerleri doğrulanmadı (DQ-4).",
                 "Historical STOK Kontrol % source findings remain; the old decision rule was withdrawn by D-070. "
                 "Source inspection and Veri Kontrol observations are not removed by retiring recommendations.")
@@ -224,8 +223,8 @@ B_AGING_DATE = Blocker("AGING-DATE", NV, "Cari yaşlandırma raporunun tarihi do
                        "dashboard_builder.m_collections reads no report date; file chosen by mtime.")
 # OVERDUE-DEF is answered by D-071 (buckets = invoice age, never overdue): the overdue outputs are withdrawn
 # (CARI-OVERDUE-UNSUPPORTED) and a blank bucket now makes the balance unknown instead of zero.
-B_FX_BALANCE = Blocker("CARI-FX", NV, "Döviz bakiyesi ('Toplam Döviz Bakiye') okunmuyor; bakiye yalnızca ay "
-                       "dilimlerinin toplamıdır.", "dashboard_builder.m_collections sums the month buckets only.")
+# CARI-FX is withdrawn by D-072 D2: 'Toplam Döviz Bakiye' is a USD balance the Cari balance metric never reads (its
+# Requirement declares no such field); it is kept in the source untouched and never combined with the TL buckets.
 B_SALESPERSON = Blocker("SALESPERSON", NV, "Kayıtlı satış temsilcisi kaynağı karara bağlanmadı.",
                         "Rep columns come from cached sales lookups / Cari 'Temsilci kodu'; owner question #10.")
 B_PRIORITY = Blocker("PRIORITY", NV, "Öncelik puanları ve eşikleri onaylanmadı.",
@@ -315,7 +314,11 @@ REGISTER: dict[str, Metric] = {m.key: m for m in (
        # D-071: withdrawn (no risk classification from invoice-age balances); legacy scope kept conservatively.
        blockers=(B_CARI_OVERDUE, B_AGING_DATE, B_REVENUE, B_SALESPERSON, B_REAL)),
     _M("receivables.collections", "Cari bakiye ve fatura yaşı (vadesi geçen alacak değil)", ("dashboard:collections",),
-       ("aging",), ("cari_account_class",), blockers=(B_AGING_DATE, B_CARI_CLASS, B_FX_BALANCE, B_REAL),
+       # D-072: the report date is evidence (D1: the original file name, else the upload date, recorded with its
+       # provenance and judged by temporal_problems), not a static blocker; 120 / 320 approved (D4); the USD column is
+       # not read (D2); the export is authoritative and reproduced independently (D3). REAL-DATA is replaced by the
+       # reconciliation reference in the separate promotion step.
+       ("aging",), ("cari_account_class",), blockers=(B_REAL,),
        # traced: dashboard_builder.m_collections (account code, name, representative, every month bucket); no join
        # (it neither reads sales nor the customer master). D-071: signed balance + invoice age + 320 supplier class.
        requires=(Requirement("aging", ("Hesap kodu", "Hesap adı", "Temsilci kodu", "bucket:*")),)),

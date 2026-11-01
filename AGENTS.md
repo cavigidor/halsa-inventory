@@ -21,7 +21,9 @@ GitHub (`cavigidor/halsa-inventory`) is the source of truth. Do not rely on chat
 - KAPALI customers: excluded from opportunities, kept in the Cari balances.
 - **Cari aging buckets are invoice age, not overdue debt (D-071).** Never derive overdue amounts, due dates, collection
   priority, customer risk or repayment warnings from them; overdue stays unknown until the agreement-based report is
-  supplied and reviewed. 320 accounts are suppliers; no other prefix is classified. Signed balances keep their sign.
+  supplied and reviewed. 120 accounts are customers and 320 suppliers (D-072); no other prefix is classified. Signed
+  balances keep their sign; the USD column is never combined with the TL buckets; the Cari date is the original file
+  name's date, else the upload date, with provenance (D-072).
 - Missing values are never zero.
 - **No verified evidence = no business conclusion (D-049).** Only outputs certified VERIFIED in `services/accuracy.py`
   may be displayed. Never add a flag, env var or parameter that bypasses the gate; never classify a new route as

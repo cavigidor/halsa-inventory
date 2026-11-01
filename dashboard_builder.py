@@ -199,6 +199,15 @@ def m_risk(df,owed_map,closed_inv,attr):
     return []
 
 
+def _cari_date_note(manifest):
+    """D-072 D1: the Cari report's as-of date and where it came from (visible provenance), from the generation the page
+    is built for; nothing when no generation / no date (unknown stays unknown)."""
+    rec=manifest.record('aging') if manifest is not None else None
+    ev=rec.evidence if rec is not None else None
+    if ev is None or ev.report_date is None: return 'Cari rapor tarihi bilinmiyor.'
+    d=ev.report_date
+    return f"Cari rapor tarihi: {d.day} {AYLAR[d.month]} {d.year} ({CARI.DATE_ORIGIN_TR.get(ev.report_date_origin or 'declared','beyan edildi')})."
+
 def m_collections(path,df=None):
     """D-071: factual Cari balances, not overdue receivables. One row per account (numeric code, as before): the signed
     balance as exported (None when a bucket is blank — unknown, never zero), the oldest month bucket holding a non-zero
@@ -221,8 +230,9 @@ def m_collections(path,df=None):
                      # exact signed amount (kuruş kept; never _n(), which rounds to whole lira)
                      'balance':b,'oldest':(CARI.oldest_nonzero_bucket(r,bkts) or '—'),
                      'account_class':cls,'class_label':CARI.CLASS_LABELS[cls],
-                     # account-level list: neutral sign names only (customer meaning is not established here)
-                     'direction':dirn,'direction_label':CARI.direction_label(dirn,cls,customer_account=False)})
+                     # account-level list: the account is its holder's own; customer wording only for a 120 customer
+                     # account with a negative balance (D-071 rule D + D-072 D4); neutral sign names otherwise
+                     'direction':dirn,'direction_label':CARI.direction_label(dirn,cls,customer_account=True)})
     rows.sort(key=lambda r:r['code'])          # neutral order: no ranking, no implied priority
     return rows,{r['code']:r['balance'] for r in rows}
 
@@ -305,7 +315,8 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
           'cols':[{'k':'name','l':'Hesap','sub':'code'},{'k':'rep','l':'Temsilci'},{'k':'class_label','l':'Hesap Türü'},
                   {'k':'balance','l':'Bakiye (işaretli)','money':1,'exact':1,'sign':1},{'k':'direction_label','l':'Bakiye İşareti'},
                   {'k':'oldest','l':'En Eski Fatura Ayı'}],
-          'note':' '.join([CARI.OVERDUE_RETIRED_REASON,CARI.BALANCE_NOTE,CARI.SUPPLIER_NOTE,CARI.UNCONFIRMED_NOTE])}
+          'note':' '.join([_cari_date_note(manifest),CARI.OVERDUE_RETIRED_REASON,CARI.BALANCE_NOTE,CARI.SUPPLIER_NOTE,
+                           CARI.UNCONFIRMED_NOTE,CARI.FX_NOTE]).strip()}
     stats=[('min altı','—'),('maks üstü','—'),
            ('fazla stok değeri',_money(over_val)),('kayıp müşteri',f"{len(lap):,}")]
     # ---- M8-ACCURACY: withhold every output whose metric is not VERIFIED (rows never reach the HTML) ----

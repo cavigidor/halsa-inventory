@@ -66,7 +66,8 @@ SLOTS: dict[str, dict[str, Any]] = {
                                                           "period_complete"),
               "hint": "Ürün ve müşteri bazlı satış raporu ('liste' sayfasıyla)."},
     "aging": {"label": "Cari", "role": "core", "fields": ("snapshot_date",),
-              "hint": "Cari yaşlandırma raporu."},
+              "hint": ("Cari yaşlandırma raporu. Rapor tarihi dosya adındaki tarihtir (ör. 'Cari 5 Ekim 2026'); "
+                       "dosya adında tarih yoksa yükleme tarihi kullanılır (D-072). Tarih alanını boş bırakın.")},
     "kredi": {"label": "Kredi", "role": "owner", "fields": ("snapshot_date",),
               "hint": "Kredi takip / kredi sözleşmeleri dosyası."},
     "gider_gelir": {"label": "Gider/Gelir", "role": "owner", "fields": ("report_year",),
@@ -127,6 +128,10 @@ MSG = {
     "carried_changed": ("Yayındaki {label} raporu diskte değişmiş veya bulunamadı; devralınamaz. Bu raporu da "
                         "yükleyin."),
     "internal": "Beklenmeyen bir hata oluştu; hiçbir şey yayınlanmadı. Tekrar deneyin.",
+    "cari_date_conflict": ("Cari raporunun tarihi dosya adındaki tarihtir (D-072); girilen tarih bununla çelişiyor. "
+                           "Tarih alanını boş bırakın veya dosya adını düzeltin."),
+    "cari_date_ambiguous": ("Cari dosyasının adındaki tarih okunamadı (geçersiz veya birden fazla farklı tarih). "
+                            "Dosyayı tek bir rapor tarihiyle yeniden adlandırıp yükleyin."),
 }
 # importer error codes the owner can act on (anything else is shown as its code under a fixed sentence)
 IMPORT_CODE_TR = {
@@ -235,6 +240,21 @@ def _decl_from_json(slot: str, d: Mapping[str, Any]) -> dict:
     return clean_declarations(slot, {k: (str(v) if k in YEAR_FIELDS and v is not None else v) for k, v in d.items()})
 
 
+def cari_date(f: Mapping[str, Any]) -> dict:
+    """D-072 D1 for one uploaded Cari file: the date in its ORIGINAL file name (the sanitized label the browser sent),
+    else the date it was uploaded; the provenance is recorded. A current-state snapshot of the authoritative DinamikCRM
+    report (D-072 D3) is complete as of that date (date contradictions still make it incomplete in the evidence)."""
+    from services import cari_policy as CARI
+    up = f.get("uploaded_on")
+    upload_date = dt.date.fromisoformat(up) if up else dt.date.today()
+    try:
+        day, origin = CARI.report_date(f.get("label"), upload_date)
+    except CARI.AmbiguousFilenameDate:
+        raise UploadError(422, "cari_date_ambiguous", file_id=f.get("file_id"))
+    return {"snapshot_date": day, "date_origin": origin, "date_source": f.get("label") if origin == "filename" else None,
+            "period_complete": True}
+
+
 def unknown_fields(slot: str, decl: Mapping[str, Any]) -> list[str]:
     return [FIELD_LABELS[f] for f in SLOTS[slot]["fields"] if decl.get(f) is None]
 
@@ -334,7 +354,8 @@ class UploadCenter:
             if dup is None:
                 fid = "f-" + secrets.token_hex(6)
                 files.append({"file_id": fid, "sha256": stored.sha256, "size": stored.size, "name": stored.name,
-                              "label": UF.clean_label(label), "parts": stored.parts})
+                              "label": UF.clean_label(label), "parts": stored.parts,
+                              "uploaded_on": dt.date.today().isoformat()})
             else:
                 fid = dup["file_id"]                       # the same content twice in one batch is one file
             c.execute("""UPDATE upload_batch SET files=?, status='draft', preview=NULL, preview_token=NULL,
@@ -388,7 +409,15 @@ class UploadCenter:
             decl = a.get("declarations") or {}
             if not isinstance(decl, Mapping):
                 raise UploadError(422, "bad_date", file_id=f["file_id"])
-            out[f["file_id"]] = {"slot": slot, "declarations": _decl_json(clean_declarations(slot, decl))}
+            clean = clean_declarations(slot, decl)
+            entry = {"slot": slot, "declarations": _decl_json(clean)}
+            if slot == "aging":
+                derived = cari_date(f)
+                if clean.get("snapshot_date") not in (None, derived["snapshot_date"]):
+                    raise UploadError(422, "cari_date_conflict", file_id=f["file_id"])
+                entry["declarations"]["snapshot_date"] = derived["snapshot_date"].isoformat()
+                entry["derived"] = _decl_json(derived)
+            out[f["file_id"]] = entry
         if len({f["sha256"] for f in files}) != len(files):
             raise UploadError(422, "same_file_twice")
         return out
@@ -405,7 +434,7 @@ class UploadCenter:
             files = json.loads(r["files"])
             a = self._assignments(files, assignments)
             digest = _digest(sorted((v["slot"], next(f["sha256"] for f in files if f["file_id"] == k),
-                                     v["declarations"]) for k, v in a.items()))
+                                     v["declarations"], v.get("derived") or {}) for k, v in a.items()))
             job_id = self._claim_job(c, batch_id, "validate")
             c.execute("""UPDATE upload_batch SET assignments=?, digest=?, status='validating', preview=NULL,
                          preview_token=NULL, candidate=NULL, base=NULL, message=NULL, updated_at=? WHERE batch_id=?""",
@@ -541,7 +570,8 @@ class UploadCenter:
             path = (self.blobs.path(f["sha256"]) if where == "blob"
                     else os.path.join(self.deps.data_folder, f["name"]))
             uploaded[slot] = {"file_id": fid, "sha256": f["sha256"], "name": f["name"], "label": f["label"],
-                              "path": path, "declarations": _decl_from_json(slot, v["declarations"])}
+                              "path": path, "declarations": _decl_from_json(slot, v["declarations"]),
+                              "derived": dict(v.get("derived") or {})}
         errors, warnings = [], []
         m = self.deps.generations().current()
         live_core = {x.key: x for x in (m.core if m is not None else ()) if x.key in CORE_SLOTS}
@@ -562,9 +592,11 @@ class UploadCenter:
                     decl = {f: rec.declared.get(f) for f in SLOTS[key]["fields"]}
                     decl = clean_declarations(key, _decl_json({k: v for k, v in decl.items()
                                                                if not isinstance(v, (dict, list))}))
+                    derived = {f: rec.declared.get(f) for f in ("period_complete", "date_origin", "date_source")
+                               if rec.declared.get(f) is not None and f not in SLOTS[key]["fields"]}
                     core[key] = {"file_id": None, "sha256": rec.sha256, "name": rec.file,
                                  "label": self._labels().get(rec.file, rec.file),
-                                 "path": p, "declarations": decl, "carried": True,
+                                 "path": p, "declarations": decl, "carried": True, "derived": derived,
                                  "approval": rec.declared.get("approval")}
             if not ({"stock", "sales"} <= set(core)) and not any(e["code"] == "carried_changed" for e in errors):
                 errors.append({"code": "core_required", "message": MSG["core_required"]})
@@ -589,9 +621,11 @@ class UploadCenter:
         paths = {k: (core[k]["path"] if k in core else None) for k in CORE_SLOTS}
         decls = {}
         for k in CORE_SLOTS:
-            d = {f: None for f in ("snapshot_date", "report_date", "period_start", "period_end", "period_complete")}
+            d = {f: None for f in GEN._DECL_FIELDS}       # the exact field set the selection reader re-derives
             if k in core:
                 d.update({f: v for f, v in core[k]["declarations"].items() if f in d})
+                d.update({f: v for f, v in (core[k].get("derived") or {}).items()
+                          if f in ("period_complete", "date_origin", "date_source")})
                 if core[k].get("approval"):
                     d["approval"] = core[k]["approval"]
             decls[k] = d
@@ -766,6 +800,12 @@ class UploadCenter:
                                   "value": (decl[f].isoformat() if isinstance(decl.get(f), dt.date) else decl.get(f))}
                                  for f in SLOTS[key]["fields"]],
                 "unknown_fields": unknown_fields(key, decl), "sheets": _sheet_names(u["path"])}
+        derived = u.get("derived") or {}
+        if derived.get("date_origin"):
+            from services import cari_policy as CARI
+            view["declarations"].append({"field": "date_origin", "label": "Tarih kaynağı",
+                                         "value": CARI.DATE_ORIGIN_TR.get(derived["date_origin"], derived["date_origin"])
+                                         + (f" — {derived['date_source']}" if derived.get("date_source") else "")})
         if key in CORE_SLOTS:
             from services import source_validation as SV
             rec = cand_core.record(key) if cand_core is not None else None
@@ -995,6 +1035,8 @@ class UploadCenter:
         core_doc = None
         if plan["core_changed"]:
             core_doc = GEN.core_selection_document({k: {"file": v["name"], **v["declarations"],
+                                                        **{f: x for f, x in (v.get("derived") or {}).items()
+                                                           if f in ("period_complete", "date_origin", "date_source")},
                                                         **({"approval": v["approval"]} if v.get("approval") else {})}
                                                     for k, v in plan["core"].items()})
         owner_doc = None

@@ -6,8 +6,9 @@ A. Product-count authorization: after D-070 the stock product count ("N ürün" 
    `/api/context`, not in the refresh report — under the REAL production register and gate. A synthetic VERIFIED
    copy of the register is the control: then exactly the count is shown.
 B. Policy-version invalidation: a page and manifest published under an earlier policy — `m8-accuracy-1` (before
-   D-070) and the immediate predecessor `m8-r5a-stock-retirement` (before D-071, whose pages carried Cari "Vadesi
-   Geçen" overdue claims) — are never accepted as current: refused live and after a restart, with no old business data
+   D-070), `m8-r5a-stock-retirement` (before D-071, whose pages carried Cari "Vadesi Geçen" overdue claims) and the
+   immediate predecessor `m8-r5b1-cari-invoice-age` (before D-072's Cari labels and date provenance) — are never
+   accepted as current: refused live and after a restart, with no old business data
    or old Cari claim served; a page regenerated under the current policy follows the normal authorization rules.
 
 REAL production gate (`production_gate`). Synthetic workbooks only. No AI, no network, no private file.
@@ -29,8 +30,9 @@ from tests.test_m8_accuracy2_review2 import (close, data_of, displayed_stock_cou
 
 pytestmark = pytest.mark.production_gate
 OLD_POLICY = "m8-accuracy-1"                       # the marker every page / manifest carried before D-070
-R5A_POLICY = "m8-r5a-stock-retirement"             # the immediate predecessor (D-070), replaced by D-071
-PREVIOUS_POLICIES = (OLD_POLICY, R5A_POLICY)
+R5A_POLICY = "m8-r5a-stock-retirement"             # D-070, replaced by D-071
+R5B1_POLICY = "m8-r5b1-cari-invoice-age"           # the immediate predecessor (D-071), replaced by D-072
+PREVIOUS_POLICIES = (OLD_POLICY, R5A_POLICY, R5B1_POLICY)
 # What an R5A-era page said about the Cari export (the D-071 build no longer produces it). Emulated in the old-policy
 # build so the refused page provably carries an old overdue claim; the refresh digests the page AFTER it is written,
 # so the old page and its old manifest stay internally consistent.
@@ -112,7 +114,7 @@ def _publish_as_previous_policy(w, monkeypatch, old=OLD_POLICY):
         if old == R5A_POLICY:
             mp.setattr(DB, "_html", lambda *a, **k: real_html(*a, **k).replace("</body>", LEGACY_CARI + "</body>"))
         _, html = _publish(w, monkeypatch)
-    assert ACC.POLICY_VERSION != old and ACC.POLICY_VERSION == "m8-r5b1-cari-invoice-age"
+    assert ACC.POLICY_VERSION != old and ACC.POLICY_VERSION == "m8-cari-d072"
     assert f'<meta name="stockagent-accuracy" content="{old}">' in html
     assert GEN.read_manifest(GEN.manifest_path(w.dash)).policy_version == old
     assert (LEGACY_CARI in html) == (old == R5A_POLICY)

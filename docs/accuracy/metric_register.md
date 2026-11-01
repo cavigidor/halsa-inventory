@@ -227,19 +227,31 @@ unchanged certified ceilings, explicit retirement blocker and unavailable totals
 - **State:** **INVALID** (`CARI-OVERDUE-UNSUPPORTED`; certified ceiling unchanged). **Shown:** no.
 
 ### `receivables.collections` — Cari bakiye ve fatura yaşı (D-071; formerly "Tahsilat")
-- **Source:** Cari aging `Cari <date>.xlsx`: `Hesap kodu`, `Hesap adı`, `Temsilci kodu`, month buckets
-  (`<Ay-YYYY> ve öncesi`, monthly columns); `Toplam Döviz Bakiye` not read (blocker `CARI-FX`).
+- **Source:** Cari aging `Cari <date>.xlsx` (the DinamikCRM report, authoritative — D-072 D3): `Hesap kodu`,
+  `Hesap adı`, `Temsilci kodu`, month buckets (`<Ay-YYYY> ve öncesi`, monthly columns). `Toplam Döviz Bakiye` is a USD
+  balance (D-072 D2): kept in the source, never read, added, compared or converted by this metric.
 - **Function:** `m_collections` (+ `services/cari_policy.py`). **Formula:** one row per account with a numeric code:
   signed balance = Σ month buckets as exported (legacy single-balance column read as recorded); oldest = first bucket
-  with a non-zero amount = **invoice age, not a due date**; class = supplier for codes starting `320`, otherwise
-  "Sınıflandırılmadı"; direction = debit / credit / zero. Neutral code order; no ranking, no total, no action.
+  with a non-zero amount = **invoice age, not a due date**; class (D-072 D4) = "Müşteri (120)", "Satıcı (320)", other
+  prefixes "Sınıflandırılmadı"; direction = debit / credit / zero, with "Halsa müşteriye borçlu" only for a negative
+  balance on a 120 account (positive, 320 and unclassified: neutral sign names). Neutral code order; no ranking, no
+  total, no action.
 - **Missing data:** a blank or non-numeric bucket makes the balance **unknown** (None), never 0. Zero and negative
-  balances are kept. **Business date:** not read (file chosen by declaration or mtime).
+  balances are kept. **Business date (D-072 D1):** the date in the ORIGINAL file name, captured at upload; if the name
+  has none, the upload date — recorded in `sources.json` as `date_origin` (`filename` / `upload_date`) with the name,
+  shown on the page, judged by the operational freshness rule; an impossible or ambiguous name date is refused.
+- **Evidence (D-072 D3 / D2+D4):** every account balance is reproduced by a second reader (openpyxl on the frozen
+  bytes vs the pandas pipeline): match → totals established, mismatch → INVALID; the exact approved header layout
+  (`dinamikcrm_cari_yaslandirma_v1`) fixes column identity → mapping established. An explicit `false` declaration
+  still wins. No workbook-native total row exists in this export and none is invented.
 - **Not derived (D-071):** overdue amount, due date, collection priority, customer risk, repayment warning.
-- **Definition approval:** `cari_account_class` (120 and others not confirmed as customer accounts) open.
+- **Definition approval:** `cari_account_class` approved by D-072; `operational_freshness` (45 days, provisional) open.
 - **Regression tests:** `tests/test_domain_rules.py::test_receivable_aging`,
-  `test_kapali_kept_in_cari_balances_and_no_risk_classification`, `tests/test_m8_r5b1_cari_interpretation.py`.
-- **State:** NOT_VERIFIED (AGING-DATE, CARI-ACCOUNT-CLASS, CARI-FX, REAL-DATA). **Shown:** no.
+  `test_kapali_kept_in_cari_balances_and_no_risk_classification`, `tests/test_m8_r5b1_cari_interpretation.py`,
+  `tests/test_m8_d072_cari_first_metric.py`.
+- **State:** NOT_VERIFIED (REAL-DATA, unapproved `operational_freshness`). **Shown:** no. Promotion is a separate,
+  planner-accepted step: reconciliation reference replaces REAL-DATA, freshness approved, certified VERIFIED, and
+  `GENERATION_BOUND_API_EVIDENCE` per its own release gate. Real-data evidence: `docs/accuracy/m8_d072_cari_first_metric.md`.
 
 ### `actions.real_decline` — Reel Satış Düşüşü
 - **Function:** `services/context.build_context` + `services/growth.calculate_real_growth` +

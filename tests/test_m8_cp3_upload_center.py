@@ -170,8 +170,11 @@ def test_multi_file_upload_validates_previews_and_publishes_explicitly(srv):
     assert "liste" in src["sales"]["sheets"] and src["sales"]["master_sheet"] is True
     assert all(col["found"] for col in src["stock"]["columns"]) and src["stock"]["data_rows"] == 1
     assert {d["field"]: d["value"] for d in src["stock"]["declarations"]} == {"snapshot_date": "2026-06-30"}
-    assert src["aging"]["unknown_fields"] == ["Rapor (anlık) tarihi"]
-    assert any("Cari" in m["message"] and "bilinmiyor" in m["message"] for m in p["missing"])
+    # D-072 D1: the Cari date comes from the original file name, else the upload date — with visible provenance
+    aging_decl = {d["field"]: d["value"] for d in src["aging"]["declarations"]}
+    assert src["aging"]["unknown_fields"] == [] and aging_decl["snapshot_date"] == dt.date.today().isoformat()
+    assert aging_decl["date_origin"].startswith("dosya adında tarih yok — yükleme tarihi")
+    assert not any("Cari" in m["message"] and "bilinmiyor" in m["message"] for m in p["missing"])
     assert src["kredi"]["state"] == "ready" and src["kredi"]["counts"]["installments"] > 0
     # reconciliation status, VKM delta, dashboard sections, withheld metrics
     assert {r["source"] for r in p["reconciliation"]} >= {"stock", "sales", "aging", "kredi"}
@@ -194,12 +197,15 @@ def test_multi_file_upload_validates_previews_and_publishes_explicitly(srv):
     srcs = {x["key"]: x for x in st["sources"]}
     assert set(srcs) == {"stock", "sales", "liste", "aging", "kredi", "gider_gelir", "butce"}
     assert all(x["bound"] for x in srcs.values())
-    assert srcs["stock"]["declared"]["snapshot_date"] == "2026-06-30" and srcs["aging"]["declared"]["snapshot_date"] is None
+    assert srcs["stock"]["declared"]["snapshot_date"] == "2026-06-30"
+    assert srcs["aging"]["declared"]["snapshot_date"] == dt.date.today().isoformat()       # D-072 D1 upload-date fallback
+    assert srcs["aging"]["declared"]["date_origin"] == "upload_date"
     assert {srcs[k]["selection_origin"] for k in ("kredi", "gider_gelir", "butce")} == {"upload"}
     assert {m["state"] for m in st["metrics"]} <= {"not_verified", "invalid", "unavailable"}
     sel = json.load(open(s.data / GEN.SELECTION_FILE))
     assert sel["schema"] == GEN.SELECTION_SCHEMA and set(sel["core"]) == {"stock", "sales", "aging"}
-    assert sel["core"]["aging"] == {"file": sel["core"]["aging"]["file"]}          # unknown stays unknown
+    assert sel["core"]["aging"] == {"file": sel["core"]["aging"]["file"], "snapshot_date": dt.date.today().isoformat(),
+                                    "period_complete": True, "date_origin": "upload_date"}   # D-072 D1, provenance kept
     assert all(UF.is_stored_name(v["file"]) for v in sel["core"].values())
     osel = json.load(open(s.data / GEN.OWNER_SELECTION_FILE))
     assert osel["owner"]["gider_gelir"]["report_year"] == "2026" and "snapshot_date" not in osel["owner"]["kredi"]
@@ -296,17 +302,26 @@ def test_owner_workbook_without_its_declared_year_cannot_be_read(srv):
 
 
 # ---------------------------------------------------------------------------------------------
-# 3. dates: declared or unknown — never inferred
+# 3. dates: declared or unknown — never inferred (Stok / Satış); Cari: D-072 D1 (file name, else upload date)
 # ---------------------------------------------------------------------------------------------
 def test_unknown_dates_stay_unknown_everywhere(srv):
     s = srv
     published_set(s)
     st = s.c.get("/api/accuracy/status").json()
     for x in st["sources"]:
-        assert all(v is None for k, v in x["declared"].items() if k != "approval"), x
-    assert all(set(v) == {"file"} for v in json.load(open(s.data / GEN.SELECTION_FILE))["core"].values())
+        if x["key"] != "aging":
+            assert all(v is None for k, v in x["declared"].items() if k != "approval"), x
+    core = json.load(open(s.data / GEN.SELECTION_FILE))["core"]
+    assert set(core["stock"]) == set(core["sales"]) == {"file"}
+    today = dt.date.today().isoformat()
+    assert core["aging"] == {"file": core["aging"]["file"], "snapshot_date": today, "period_complete": True,
+                             "date_origin": "upload_date"}           # this synthetic file name carries no date
     m = APP.app.state.generations.current()
-    assert all(r.evidence.report_date is None and r.evidence.report_date_origin is None for r in m.core)
+    for r in m.core:
+        if r.key == "aging":
+            assert (r.evidence.report_date.isoformat(), r.evidence.report_date_origin) == (today, "upload_date")
+        else:
+            assert r.evidence.report_date is None and r.evidence.report_date_origin is None
 
 
 @pytest.mark.parametrize("decl,code", [

@@ -58,7 +58,8 @@ SOURCE_TYPES = {"stock": "stock_snapshot", "sales": "sales_order_lines", "aging"
 DATE_KINDS = {"stock": "current_state_snapshot", "aging": "current_state_snapshot", "sales": "transaction_history",
               "liste": "current_state_snapshot", "kredi": "installment_schedule_snapshot",
               "gider_gelir": "reporting_period", "butce": "planning_period"}
-_DECL_FIELDS = ("snapshot_date", "report_date", "period_start", "period_end", "period_complete")
+_DECL_FIELDS = ("snapshot_date", "report_date", "period_start", "period_end", "period_complete",
+                "date_origin", "date_source")      # D-072 D1: where the report date came from (provenance)
 
 
 class SelectionError(ValueError):
@@ -134,6 +135,18 @@ def _declaration(key: str, entry: dict) -> dict:
     if pc not in (None, True, False):
         raise SelectionError(f"{key}.period_complete: true / false olmalı")
     out["period_complete"] = pc
+    # D-072 D1 provenance of the date: "declared" (default), "filename" (the original file name) or "upload_date"
+    # (the name held no date). The original name is kept only as a bounded display label.
+    origin = entry.get("date_origin")
+    if origin not in (None, "declared", "filename", "upload_date"):
+        raise SelectionError(f"{key}.date_origin: declared / filename / upload_date olmalı")
+    if origin is not None and not (out["snapshot_date"] or out["report_date"]):
+        raise SelectionError(f"{key}.date_origin: tarih olmadan tarih kaynağı olamaz")
+    out["date_origin"] = origin
+    src = entry.get("date_source")
+    if src is not None and (not isinstance(src, str) or len(src) > 255):
+        raise SelectionError(f"{key}.date_source: en fazla 255 karakterlik dosya adı olmalı")
+    out["date_source"] = src
     ap = entry.get("approval")
     if ap is not None:
         # A recorded reconciliation / mapping approval for ONE exact source revision (its SHA-256), citing a decision.
@@ -508,6 +521,9 @@ def build_core_records(frozen: Mapping[str, FrozenSource], frames: Mapping[str, 
         if key == "aging":
             observed["latest_bucket"] = ins.latest_bucket
         contradictions, report_date = _date_checks(key, declared, observed, today)
+        cari = _cari_evidence(fs, frames.get("aging")) if key == "aging" else None
+        if cari is not None:
+            observed["cari"] = cari
         pdup = pandas_ev.get(key)
         fails = tuple(x for x in ((ins.failure,) if not ins.ok else ()) if x)
         pc = declared.get("period_complete")
@@ -532,13 +548,26 @@ def build_core_records(frozen: Mapping[str, FrozenSource], frames: Mapping[str, 
             totals = None
         else:
             totals = declared_totals
+        mapping = ap.get("mapping_approved") if applies else None
+        if cari is not None:
+            # D-072 D3: the Cari export is authoritative and has no workbook-native total row; its balances are
+            # reproduced by a second, independent reader of the same records. An explicit False declaration still
+            # wins (fail closed); a mismatch is a contradiction (INVALID); a failed reproduction proves nothing.
+            if declared_totals is not False and cari["reproduction"] == "match":
+                totals = True
+            elif cari["reproduction"] == "mismatch":
+                totals = False
+            # D-072 D2 / D4 + D-071: the exact approved column layout fixes column identity (as D-056 does for stock)
+            if mapping is not False and cari["template"] == "approved":
+                mapping = True
         # the strict verdict above stays source-wide; these keep its origin apart for scoped metrics (review 2)
         fscope = (rows.footer_scope() if rows is not None
                   else ("source_wide" if (key == "stock" and ins.rows is not None) else None))
         observed["approval_status"] = ("applied" if applies else ("fingerprint_mismatch" if ap else "not_supplied"))
         ev = ACC.SourceEvidence(
             key, available=True, layout_supported=ins.layout_supported, report_date=report_date,
-            report_date_origin="declared" if report_date else None, date_kind=DATE_KINDS[key],
+            report_date_origin=(declared.get("date_origin") or "declared") if report_date else None,
+            date_kind=DATE_KINDS[key],
             period_start=declared.get("period_start"), period_end=declared.get("period_end") or report_date,
             period_complete=period_complete, latest_transaction_date=observed.get("latest_transaction_date"),
             earliest_transaction_date=observed.get("earliest_transaction_date"),
@@ -553,7 +582,7 @@ def build_core_records(frozen: Mapping[str, FrozenSource], frames: Mapping[str, 
             totals_consistent=totals, declared_totals_consistent=declared_totals, footer_totals=fstat,
             footer_scope=fscope,
             fields=ins.fields() if ins.ok else None, joins=jchecks,
-            mapping_approved=(ap.get("mapping_approved") if applies else None),
+            mapping_approved=mapping,
             date_contradictions=contradictions, selection_explicit=(origin == "explicit"),
             inspection_failures=fails + (pdup.inspection_failures if pdup is not None else ()))
         records.append(SourceRecord(key, "core", SOURCE_TYPES[key], DATE_KINDS[key], fs.file, fs.sha256, fs.size,
@@ -570,6 +599,29 @@ def build_core_records(frozen: Mapping[str, FrozenSource], frames: Mapping[str, 
                                         fs.sha256, fs.size, origin, declared, {}, {"master_available": master is not None},
                                         mev, fs.file_modified))
     return tuple(records), joins
+
+
+def _cari_evidence(fs: "FrozenSource", frame) -> dict | None:
+    """D-072: the approved-template status of the Cari header row and an independent reproduction of every account
+    balance (openpyxl on the frozen bytes vs the pipeline's pandas result). Counts only; never raises."""
+    from services import cari_policy as CARI
+    try:
+        import dashboard_builder as db
+        head, independent = CARI.independent_balances(fs.data)
+        rows, pipeline = db.m_collections(None, frame) if frame is not None else ([], None)
+    except Exception as e:
+        return {"template": "unknown", "reproduction": "failed", "failure": type(e).__name__}
+    if pipeline is None:
+        return {"template": CARI.template_status(head), "reproduction": "failed", "failure": "no_frame"}
+    keys = set(independent) | set(pipeline)
+    mismatches = sum(1 for k in keys if independent.get(k, "missing") != pipeline.get(k, "missing"))
+    ok = bool(keys) and mismatches == 0
+    return {"template": CARI.template_status(head), "template_id": CARI.TEMPLATE_ID,
+            "reproduction": "match" if ok else ("mismatch" if keys else "failed"),
+            "accounts": len(pipeline), "independent_accounts": len(independent), "mismatches": mismatches,
+            "unknown_balances": sum(1 for v in pipeline.values() if v is None),
+            "classes": {c: sum(1 for r in rows if r["account_class"] == c) for c in
+                        (CARI.CLASS_CUSTOMER, CARI.CLASS_SUPPLIER, CARI.CLASS_UNCONFIRMED)}}
 
 
 def build_manifest(frozen, frames, declarations, origin, today=None, owner: tuple[SourceRecord, ...] = ()) -> Manifest:
