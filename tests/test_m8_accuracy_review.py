@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 import app as APP
 import dashboard_builder as db
 from services import accuracy as ACC
+from tests import release_state as REL
 from services import context as CTX
 from services import customer360 as C360
 from services import fair_store as FS
@@ -256,9 +257,12 @@ def test_a_promoted_metric_would_still_be_withheld_by_the_api(monkeypatch):
     assert d.state == NV and "NO-EVIDENCE:stock" in d.codes
 
 
-def test_production_register_refuses_promotion_until_generation_bound_api_evidence():
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
+def test_production_register_refuses_promotion_until_generation_bound_api_evidence(monkeypatch):
+    REL.assert_release_state()                    # D-073: one certified metric, flag True
+    monkeypatch.setattr(ACC, "GENERATION_BOUND_API_EVIDENCE", False)   # the rule itself: no flag → no certification
     reg = dict(ACC.REGISTER)
+    reg["receivables.collections"] = dataclasses.replace(reg["receivables.collections"],
+                                                         certified=ACC.State.NOT_VERIFIED)
     reg["stock.reorder"] = dataclasses.replace(reg["stock.reorder"], blockers=(),
                                                definitions=("operational_freshness",), certified=S,
                                                approval_refs=("D-999",), regression_tests=("t",),

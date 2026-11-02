@@ -85,14 +85,18 @@ A father-facing release may go live only when **all** hold:
 - [x] AI interpretations off and unreachable in production.
 - [x] Directory responses carry only code and recorded name (derived fields withheld).
 - [x] Evidence inspection fails closed; unknown evidence never passes.
-- [ ] **Generation-bound evidence shared by dashboard, API, owner views and refresh** (M8-ACCURACY-2, mandatory).
-- [ ] Each analysis the owner wants on day one is promoted to VERIFIED by §2 (none yet).
+- [x] **Generation-bound evidence shared by dashboard, API, owner views and refresh** (M8-ACCURACY-2, mandatory;
+  `GENERATION_BOUND_API_EVIDENCE = True` since D-073 after the owner-local §8.3 acceptance).
+- [ ] Each analysis the owner wants on day one is promoted to VERIFIED by §2 (D-073: `receivables.collections` only).
 - [ ] Owner has reviewed which tabs show only notices and accepts that state for launch, or delays launch.
 - [ ] Declared report dates for every uploaded source (CP3/CP4).
 - [ ] Authentication (CP1) and the rest of the M8 plan. *(2026-10-22, D-060: CP1 implemented locally as viewing
   without login + one owner administration login — `docs/m8_cp1_access.md`; still needs PR review and merge.)*
 - [ ] Owner's recorded sign-off on the public-by-link disclosure inventory (`docs/m8_cp1_access.md` §6) — every metric
   promoted to VERIFIED becomes visible to anyone with the link, not only to the owner (D-060).
+- [ ] **Access / launch checkpoint (owner requirement 2026-11-01):** one site-wide password, a separate password for
+  the sensitive financial sections, owner-only administration / uploads / edits. The D-061 public viewer is the legacy
+  local arrangement; the account-level Cari list (D-073) must not be public by link.
 
 ## 5. This checkpoint's acceptance
 | Criterion | Result |
@@ -503,3 +507,12 @@ passwords or production exposure. `GENERATION_BOUND_API_EVIDENCE` remains False 
 **Deferred:** row-level isolation of negative/duplicate SKUs, explicit source dates and father accounting definitions,
 review of each metric's exact dependencies, owner-local acceptance, independent PR review, and the separately
 approved future certification PR. Do not infer a passing specific stock SKU from this diagnostic alone.
+
+### D-073 — first VERIFIED metric (2026-11-01; owner-approved 60-day Cari freshness)
+§8.3 steps 1–5 were repeated on the real exports for `receivables.collections` (owner-local): the upload / publish /
+restart flow binds every core source, the restart re-derives the same `core_id`, and `GET /` carries the status
+`generation_id`. Step 6 is applied for this metric only: `GENERATION_BOUND_API_EVIDENCE = True`, the reconciliation
+reference recorded (`accuracy.CARI_RECONCILIATION_REF`), REAL-DATA removed, `cari_balance_freshness` approved (D-073,
+60 days), certified VERIFIED. §4 still open: the other analyses the owner wants on day one, and the access / launch
+checkpoint (site-wide password + financial password + owner-only administration) — the legacy public-viewer model is
+not an approved hosting arrangement. Report: `docs/accuracy/m8_d073_cari_promotion.md`.

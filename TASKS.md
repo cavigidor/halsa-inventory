@@ -4,26 +4,33 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-6 are merged; **Milestone 7 is COMPLETE** (PR #24, squash merge `de7eb43`; D-047). M8 production-readiness planning is merged (PR #26). **Owner directive 2026-10-18: NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION.** M8-ACCURACY is merged (PR #27, `a28b2b9`); M8-ACCURACY-2 technical foundation is merged (PR #28, `5baa92a`), and M8-ACCURACY-2B corrective foundation is merged (PR #29, `4ad8d8a`). The first owner-local reconciliation completed with core FAIL and Kredi NOT RUN; no business metric may be promoted without approved provenance, business definitions and per-metric reconciliation. All subsequent checkpoints use Claude Code. **Owner requirement 2026-10-22 (D-060, revised by D-061):** browser web app; three access levels — public viewer (no password), financial viewer (shared financial password, read-only Yönetim finances), owner (separate password, all changes); implemented and merged as M8-CP1, PR #30 (`a03efbf`), local only, not deployed.
 
 ## Current
-- [ ] **M8 first Cari metric (D-072) — draft PR (branch `claude/m8-cari-first-metric`), awaiting planner review; NOT
-  merged, NOT deployed.** Owner decisions D1–D4 implemented; `receivables.collections` meets all of its own evidence
-  requirements on real data; remaining: the `operational_freshness` decision and the separate controlled promotion
-  (reconciliation reference, certification, `GENERATION_BOUND_API_EVIDENCE` under its gate). Report
-  `docs/accuracy/m8_d072_cari_first_metric.md`. STOP after review; no R5B2.
+- [ ] **M8 first VERIFIED metric — `receivables.collections` (D-073, owner-approved 60-day Cari freshness): draft PR
+  #43 (branch `claude/m8-cari-verified-promotion`), activated on the branch, awaiting ChatGPT's final code-only merge
+  review; NOT merged, NOT deployed.** Policy approved (60 days), certified VERIFIED, `GENERATION_BOUND_API_EVIDENCE`
+  True, `POLICY_VERSION` `m8-cari-d073`; owner-local acceptance PASS on the final code. Report
+  `docs/accuracy/m8_d073_cari_promotion.md`. STOP after review.
+- [ ] **Access / launch checkpoint (owner requirement 2026-11-01; not started):** one site-wide password to enter the
+  website, a separate password for the sensitive financial sections, owner-only administration / Excel uploads /
+  edits. Replaces the legacy D-061 public viewer for any hosting; decide where the account-level Cari list (D-073)
+  sits (site password or financial password). No hosting or external deployment until done and approved.
+- [x] **M8 first Cari metric (D-072) — MERGED: PR #42 squash-merged as `5e3656d` (2026-11-01; planner-approved, code
+  only; reviewed head `fcfdc33`; `main` CI `41375523440` 1978 passed / 7 skipped / 1 xfailed; not deployed).** Owner
+  decisions D1–D4 implemented. Report `docs/accuracy/m8_d072_cari_first_metric.md`.
 - [ ] **Stok / Satış report date from the original file name (D-072 D1, owner rule already confirmed) — separate
   checkpoint, not started.** Implement the confirmed rule for the Stok and Satış slots; never infer one Satış report
   date from a historical range file name (a range is a period; ambiguous names stay refused / unknown).
-- [ ] **M8-R5B1 (D-071) — Cari interpretation: draft PR (branch `claude/m8-r5b1-cari-interpretation`), awaiting
-  planner independent review; NOT merged, NOT deployed.** Invoice-age buckets are no longer treated as overdue; collection
+- [x] **M8-R5B1 (D-071) — Cari interpretation: MERGED — PR #41 squash-merged as `0604fe8` (2026-10-31; three review
+  rounds; not deployed); owner-local real-data technical acceptance completed 2026-11-01.** Invoice-age buckets are no longer treated as overdue; collection
   actions, risk list, win-back debt claim, AI overdue facts and scenario basis withdrawn; signed balances, invoice age and
-  the 320 supplier class kept. 0 of 33 VERIFIED. Report `docs/accuracy/m8_r5b1_cari_interpretation.md`. STOP after review.
+  the 320 supplier class kept. Report `docs/accuracy/m8_r5b1_cari_interpretation.md`.
 - [ ] **M8-R5B2 (not started; needs owner input first):** obtain and review the agreement-based overdue report (red
-  entries), then decide whether an overdue producer is justified; 120 / other account classes; FX balances; Cari as-of
-  date; DQ-6 identity rule before any customer-level use of Cari balances; owner-local check of D-071 on the real Cari
-  export.
+  entries), then decide whether an overdue producer is justified; DQ-6 identity rule before any customer-level use of
+  Cari balances. (Answered since: 120 / 320 classes, USD column, Cari as-of date — D-072; owner-local check of D-071
+  on the real Cari export — done 2026-11-01.)
 - [x] **M8-R4 (D-069) — PR #37 squash-merged as `52522b1` (2026-10-31; planner-approved, code only; not deployed).**
 - [x] **M8 post-merge diagnostics cleanup — PR #40 (branch `m8-diagnostics-retired-stock-cleanup`), planner-reviewed and approved 2026-10-31 for a code-only squash merge (not deployed):** retired `stock.reorder` / `stock.overstock` labelled RETIRED — D-070, retirement blocker category `retirement_decided`, test comment corrected; presentation only. PR #39 close / branch deletion needs separate owner authorization.
 - [x] **M8-R5A (D-070) — implementation merged: PR #38 squash-merged as `ac191d7` (2026-10-31; planner-approved, code only; `main` CI passed; not deployed).** History: before the merge the branch was updated with `main`, the integration correction and regression tests A/B; the two low findings (diagnostics candidates / retirement category; one test comment, `docs/accuracy/m8_r4_r5a_integration.md` §5) are fixed in PR #40.
-- [ ] **M8-R5A (D-070) — still open, acceptance only (no engineering work):** private owner-local acceptance on the Mac with the real exports (`docs/accuracy/m8_r5a_stock_retirement.md`, "Acceptance and remaining work"); no deployment, no metric certification. Temporary PR #39 stays open until the owner authorizes its cleanup.
+- [x] **M8-R5A (D-070) — owner-local acceptance on the Mac with the real exports completed 2026-11-01** (all checks passed: duplicate code kept, negative quantities kept, 0 reorder / overstock / clearance rows, totals null; no deployment, no certification). Temporary PR #39 stays open until the owner authorizes its cleanup.
 - [x] **M8-R4 D-069 — isolated engineering checkpoint (history; PR #37 since merged as `52522b1`, see above):** independent clone `~/Documents/Halsa-Codex-R4`; stale Stock/Kredi assertion corrected, browser test session-cache defect reproduced and fixed; focused 39 passed. Final full-suite/CI evidence in `STATUS.md`. Diagnostic/policy changes only: existing production Gate, strict reconciliation, Veri Kontrol and all business calculations preserved. No metric VERIFIED, flag stays False; no merge/deploy. Planner review, private acceptance and row/SKU isolation remain pending; do not claim production Option B display rollout complete. Report: `docs/accuracy/m8_r4_isolated_checkpoint.md`. STOP after checkpoint.
 - [x] **M8-R5A — Stock-only retirement of obsolete min/max (D-070) — engineering task complete (history; merged as `ac191d7`, see above):** authorized 2026-10-30; separate clean clone/branch from main, no PR #37 or Claude-directory changes. Withdraw unsupported reorder/overstock/clearance and product AI outputs; preserve raw schema, formulas, signed balances, duplicates, strict checks and Veri Kontrol. Synthetic and full browser/JS verification, separate draft PR, planner review; no merge/deploy/certification. Report `docs/accuracy/m8_r5a_stock_retirement.md`. No longer the active task.
 - [x] **M8-CP3 — Excel Upload Center "Dosya Yükleme" (D-065–D-067): independently reviewed and squash-merged PR #32 (`e2b0e74`, reviewed head `5b78a25`, CI `40216919121`: 1783 passed / 7 skipped / 2 xfailed).** Owner-only: select files → declare report type / details (never inferred) → background validation (stage-only refresh, M6 owner loaders, read-only VKM delta) → preview → explicit "Değişiklikleri Yayınla" (generation-bound refresh with the previewed `core_id`; selection files written inside the swap step; stale / superseded previews refused; identical sets publish nothing; failures roll back). No DinamikCRM integration. Merged; real Stok/Satış/Cari UI acceptance recorded after PR #33; NOT deployed; no metric VERIFIED; `GENERATION_BOUND_API_EVIDENCE` False. Design: `docs/m8_cp3_upload_center.md`.

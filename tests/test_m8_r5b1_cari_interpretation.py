@@ -23,6 +23,7 @@ from services import kredi_schedule as KS
 from services import refresh as RF
 from services import scenarios as SCN
 from services.entity import ContextRepository
+from tests import release_state as REL
 from tests.fixtures import c360_synth as CF
 from tests.fixtures import synthetic_erp as SE
 
@@ -268,8 +269,8 @@ def test_c360_wording_change_leaves_values_schema_and_gate_unchanged(c360_shared
             C360Aging(**ag)
     g = ACC.current_gate()
     assert not g.decide("customer360.profile").displayable
-    assert len(ACC.REGISTER) == 33 and not any(m.certified == ACC.State.VERIFIED for m in ACC.REGISTER.values())
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
+    assert len(ACC.REGISTER) == 33 and REL.certified_keys() == list(REL.CERTIFIED)
+    REL.assert_release_state()                    # D-073: one certified metric, flag True
 
 
 def test_c360_supplier_account_is_not_shown_as_a_customer_receivable(c360):
@@ -326,12 +327,14 @@ def test_register_withholds_and_promotes_nothing():
     g = ACC.current_gate()
     risk, coll = g.decide("receivables.risk"), g.decide("receivables.collections")
     assert risk.state == ACC.State.INVALID and CARI.OVERDUE_RETIRED_CODE in risk.codes
-    assert not coll.displayable and "REAL-DATA" in coll.codes          # D-072 removed CARI-ACCOUNT-CLASS / CARI-FX
+    # D-072 removed CARI-ACCOUNT-CLASS / CARI-FX; D-073 certified the factual list — still withheld without bound
+    # evidence (no generation here), never on the overdue definition
+    assert not coll.displayable and coll.codes == ("NO-EVIDENCE:aging",) and "REAL-DATA" not in coll.codes
     assert "OVERDUE-DEF" not in coll.codes and "DEF:overdue_definition" not in coll.codes
     assert not ACC.DEFINITIONS["overdue_definition"].approved
     assert ACC.DEFINITIONS["cari_account_class"].approved and ACC.DEFINITIONS["cari_account_class"].decision_ref == "D-072"
-    assert len(ACC.REGISTER) == 33 and not any(m.certified == ACC.State.VERIFIED for m in ACC.REGISTER.values())
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
+    assert len(ACC.REGISTER) == 33 and REL.certified_keys() == list(REL.CERTIFIED)
+    REL.assert_release_state()                    # D-073: one certified metric, flag True
     assert "vadesi geçen toplam" not in ACC.STAT_METRIC and "borçlu kayıp müşteri" not in ACC.STAT_METRIC
     for key in ("actions.queue", "sales_queue", "agent.customer_facts", "scenario.receivables", "customer360.profile"):
         assert not g.decide(key).displayable, key

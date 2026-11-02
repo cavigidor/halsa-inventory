@@ -53,14 +53,16 @@ WITHHELD_MESSAGE = "Bu analiz henüz doğrulanmadığı için gösterilmiyor."
 WITHHELD_CODE = "accuracy_withheld"
 WITHHELD_HTTP_STATUS = 409          # the resource exists; its verification state conflicts with displaying it
 MAX_REASONS_SHOWN = 4               # keep the father-facing notice short
-POLICY_VERSION = "m8-cari-d072"  # old generated pages/manifests must be refreshed (D-070, D-071, D-072)
+POLICY_VERSION = "m8-cari-d073"  # old generated pages/manifests must be refreshed (D-070, D-071, D-072, D-073)
 DEFAULT_OPERATIONAL_MAX_AGE_DAYS = 45      # PROVISIONAL engineering default, not an owner-approved policy
 TEMPORAL_KINDS = ("operational", "historical")
-# M8-ACCURACY-2: the generation-bound evidence mechanism (services/generation.py) is implemented and shared by the
-# dashboard, the API, the owner views and the refresh, with synthetic transition tests. It stays False until the owner
-# has run the documented real-data acceptance (docs/accuracy/release_gate.md §8): while False, the production register
-# refuses any VERIFIED certification (validate_register), so no production metric can be promoted.
-GENERATION_BOUND_API_EVIDENCE = False
+# M8-ACCURACY-2: the generation-bound evidence mechanism (services/generation.py) is shared by the dashboard, the API,
+# the owner views and the refresh. While False, the production register refuses any VERIFIED certification.
+# D-073 (2026-11-01): set True after the documented owner-local real-data acceptance (docs/accuracy/release_gate.md
+# §8.3 steps 1–5, repeated on the real exports for this release: upload / publish / restart bind every core source,
+# the restart re-derives the same core_id, GET / carries the status generation — docs/accuracy/m8_d073_cari_promotion.md
+# §4). It permits a certification; it never shows anything by itself: every metric is still judged by the gate.
+GENERATION_BOUND_API_EVIDENCE = True
 
 
 class State(str, enum.Enum):
@@ -87,6 +89,9 @@ class Definition:
     approved: bool = False
     decision_ref: str | None = None        # e.g. "D-003" — required when approved
     question_ref: str | None = None        # where the open question is tracked
+    # freshness-policy definitions only: the age limit (days since the report date) the policy fixes. A metric that
+    # depends on such a definition must use exactly this limit (validate_register), so code and policy cannot drift.
+    max_age_days: int | None = None
 
 
 @dataclass(frozen=True)
@@ -174,7 +179,16 @@ DEFINITIONS: dict[str, Definition] = {d.key: d for d in (
                question_ref=f"{_Q} #3"),
     Definition("operational_freshness", "Güncel durum analizleri için kaynak güncelliği politikası (45 gün geçici)",
                question_ref="docs/accuracy/release_gate.md"),
+    # D-073 (owner-approved 2026-11-01; supersedes the 45-day proposal): the freshness policy of the factual Cari list
+    # only — 60 days counted from the Cari report date (D-072 D1: the date in the original file name; the upload date
+    # when the name has none). The general `operational_freshness` of every other metric is unchanged.
+    Definition("cari_balance_freshness", "Cari bakiye güncelliği: rapor tarihinden (dosya adındaki tarih; yoksa yükleme "
+               "tarihi) itibaren en fazla 60 gün", True, "D-073", max_age_days=60,
+               question_ref="docs/accuracy/m8_d073_cari_promotion.md"),
 )}
+# Freshness-policy definitions. Every operational, source-bound metric depends on exactly one (`_with_freshness` adds
+# the general, unapproved `operational_freshness` unless the metric declares its own metric-specific policy).
+FRESHNESS_DEFINITIONS = frozenset({"operational_freshness", "cari_balance_freshness"})
 
 
 # ---------------------------------------------------------------------------------------------
@@ -273,6 +287,17 @@ B_MASTER_STATUS = Blocker("MASTER-STATUS", NV, "Müşterinin açık / KAPALI dur
 # ---------------------------------------------------------------------------------------------
 # the metric register (certified states). Keys are stable; docs/accuracy/metric_register.md mirrors them.
 # ---------------------------------------------------------------------------------------------
+# D-073: the owner-local, privacy-safe real-data reconciliation of the factual Cari list (counts, check outcomes and
+# fingerprint prefixes only; the row-level evidence stays on the owner's Mac). Details:
+# docs/accuracy/m8_d073_cari_promotion.md §4. A new monthly upload is judged again by the runtime evidence (§2 step 5);
+# this reference records how the metric itself was accepted, never that any later file is correct.
+CARI_RECONCILIATION_REF = (
+    "D-073 owner-local real-data acceptance 2026-11-02 UTC (docs/accuracy/m8_d073_cari_promotion.md §4): Cari export "
+    "sha256 672fac2f5bf6, core_id 371248e21e96c6f6; report date 2026-10-05 from the original file name; mapping "
+    "cari_balance_fields_v2 approved (USD column present, not read); 824/824 balances reproduced independently, "
+    "0 mismatches, 0 unknown; 796 x 120 / 28 x 320 / 0 unclassified; scoped source problems 0 (D-069 Option B); "
+    "upload, publish and restart through the real Upload Center: same core_id, page generation = API generation")
+
 _M = Metric
 REGISTER: dict[str, Metric] = {m.key: m for m in (
     # ---- static dashboard modules (dashboard_builder.build) ----
@@ -316,9 +341,19 @@ REGISTER: dict[str, Metric] = {m.key: m for m in (
     _M("receivables.collections", "Cari bakiye ve fatura yaşı (vadesi geçen alacak değil)", ("dashboard:collections",),
        # D-072: the report date is evidence (D1: the original file name, else the upload date, recorded with its
        # provenance and judged by temporal_problems), not a static blocker; 120 / 320 approved (D4); the USD column is
-       # not read (D2); the export is authoritative and reproduced independently (D3). REAL-DATA is replaced by the
-       # reconciliation reference in the separate promotion step.
-       ("aging",), ("cari_account_class",), blockers=(B_REAL,),
+       # not read (D2); the export is authoritative and reproduced independently (D3).
+       # D-073 (owner-approved 2026-11-01): the first VERIFIED metric. REAL-DATA is replaced by the owner-local
+       # real-data reconciliation reference below; the metric-specific freshness policy `cari_balance_freshness`
+       # (60 days) is approved. The certification is a CEILING: every request still needs fresh, generation-bound,
+       # scoped evidence (report date, mapping, independent reproduction, no problem in its own inputs), else withheld.
+       ("aging",), ("cari_account_class", "cari_balance_freshness"), blockers=(), certified=State.VERIFIED,
+       max_source_age_days=60,
+       approval_refs=("D-069", "D-071", "D-072", "D-073"),
+       regression_tests=("tests/test_m8_d073_cari_promotion.py", "tests/test_m8_d072_cari_first_metric.py",
+                         "tests/test_m8_r5b1_cari_interpretation.py",
+                         "tests/test_domain_rules.py::test_receivable_aging",
+                         "tests/test_domain_rules.py::test_kapali_kept_in_cari_balances_and_no_risk_classification"),
+       reconciliation_ref=CARI_RECONCILIATION_REF,
        # traced: dashboard_builder.m_collections (account code, name, representative, every month bucket); no join
        # (it neither reads sales nor the customer master). D-071: signed balance + invoice age + 320 supplier class.
        requires=(Requirement("aging", ("Hesap kodu", "Hesap adı", "Temsilci kodu", "bucket:*")),)),
@@ -393,10 +428,11 @@ REGISTER: dict[str, Metric] = {m.key: m for m in (
 )}
 
 def _with_freshness(reg: dict[str, Metric]) -> dict[str, Metric]:
-    """Every operational, source-bound metric depends on the (unapproved) freshness policy definition."""
+    """Every operational, source-bound metric depends on a freshness policy definition: its own metric-specific one
+    (D-073: `cari_balance_freshness`) or else the general, unapproved `operational_freshness`."""
     out = {}
     for k, m in reg.items():
-        if m.temporal == "operational" and m.sources and "operational_freshness" not in m.definitions:
+        if m.temporal == "operational" and m.sources and not FRESHNESS_DEFINITIONS & set(m.definitions):
             m = _dc.replace(m, definitions=m.definitions + ("operational_freshness",))
         out[k] = m
     return out
@@ -416,8 +452,10 @@ MODULE_METRIC = {"reorder": "stock.reorder", "overstock": "stock.overstock", "os
 PANEL_METRIC = {"ai": "actions.queue", "sq": "sales_queue", "c360": "customer360.profile",
                 "opp": "opportunities.cross_sell"}
 # Controlled-refresh report counts → metric (`products` is the stock export's row count: system information).
+# D-073: the retired overdue total (None since D-071) belongs to the withdrawn overdue metric, never to the factual
+# Cari balance list — so certifying `receivables.collections` can never un-redact an "overdue" field.
 REFRESH_COUNT_METRIC = {"low_stock": "stock.reorder", "lapsed": "customers.winback",
-                        "overstock_value": "stock.overstock", "overdue_total": "receivables.collections",
+                        "overstock_value": "stock.overstock", "overdue_total": "receivables.risk",
                         "actions": "actions.queue", "products": "stock.product_counts"}
 
 # ---------------------------------------------------------------------------------------------
@@ -546,6 +584,16 @@ def validate_register(register: dict[str, Metric] | None = None,
         for dk in m.definitions:
             if dk not in defs:
                 raise RegisterError(f"{k}: unknown definition {dk}")
+        fresh = [dk for dk in m.definitions if dk in FRESHNESS_DEFINITIONS]
+        if len(fresh) > 1:
+            raise RegisterError(f"{k}: more than one freshness policy definition {fresh}")
+        for dk in fresh:
+            lim = defs[dk].max_age_days
+            if m.temporal != "operational":
+                raise RegisterError(f"{k}: a freshness policy applies to operational metrics only")
+            if lim is not None and m.max_source_age_days != lim:
+                raise RegisterError(f"{k}: max_source_age_days {m.max_source_age_days} differs from the {dk} policy "
+                                    f"({lim} days)")
         for dep in m.depends_on:
             if dep not in reg:
                 raise RegisterError(f"{k}: unknown dependency {dep}")
@@ -557,7 +605,8 @@ def validate_register(register: dict[str, Metric] | None = None,
             if not b.reason_tr.strip():
                 raise RegisterError(f"{k}: blocker {b.code} without a reason")
         if m.certified == State.VERIFIED:
-            if production and m.temporal == "operational" and m.sources and "operational_freshness" not in m.definitions:
+            if (production and m.temporal == "operational" and m.sources
+                    and not FRESHNESS_DEFINITIONS & set(m.definitions)):
                 raise RegisterError(f"{k}: an operational metric needs the approved freshness policy definition")
             if m.blockers:
                 raise RegisterError(f"{k}: certified VERIFIED with open blockers")
@@ -568,7 +617,7 @@ def validate_register(register: dict[str, Metric] | None = None,
                 raise RegisterError(f"{k}: certified VERIFIED without D-xxx approval references")
             if not m.regression_tests:
                 raise RegisterError(f"{k}: certified VERIFIED without regression tests")
-            if not m.reconciliation_ref:
+            if not m.reconciliation_ref or m.reconciliation_ref.upper().startswith("PENDING"):
                 raise RegisterError(f"{k}: certified VERIFIED without real-data reconciliation evidence")
         elif m.certified not in (State.NOT_VERIFIED, State.INVALID):
             raise RegisterError(f"{k}: unknown certified state")
@@ -971,8 +1020,8 @@ class Gate:
 
 # The production gate. Tests that exercise preserved algorithms replace this factory from tests/ only.
 # M8-ACCURACY-2: the API passes the published generation's snapshot, bound to the fingerprints it is serving
-# (app.accuracy_gate). No metric can be VERIFIED in production regardless, because validate_register refuses any
-# VERIFIED certification while GENERATION_BOUND_API_EVIDENCE is False (owner real-data acceptance pending).
+# (app.accuracy_gate). Only a certified metric (D-073: `receivables.collections` alone) can be VERIFIED, and only on
+# evidence bound to the generation being served; validate_register refuses any certification without its approvals.
 def current_gate(today: dt.date | None = None, snapshot: EvidenceSnapshot | None = None,
                  expected_generation: str | None = None) -> Gate:
     return Gate(REGISTER, DEFINITIONS, snapshot, today, expected_generation)

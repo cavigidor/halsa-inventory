@@ -18,6 +18,7 @@ import pytest
 
 import dashboard_builder as db
 from services import accuracy as ACC
+from tests import release_state as REL
 from services import generation as GEN
 from tests.fixtures.xlsx_synth import F, MISSING
 from tests.test_m8_accuracy2 import TODAY
@@ -233,9 +234,8 @@ def test_altered_approved_template_stays_invalid(tmp_path, approved):
 # ---------------------------------------------------------------------------------------------
 # 9 — production
 # ---------------------------------------------------------------------------------------------
-def test_no_production_metric_becomes_verified(cost_open, clean):
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
-    assert all(m.certified is not S for m in ACC.REGISTER.values())
+def test_no_stock_metric_becomes_verified(cost_open, clean):
+    REL.assert_release_state()                    # D-073: one certified metric (the Cari list), flag True
     for ev in (pipeline_ev(cost_open), pipeline_ev(clean)):
         g = ACC.Gate(ACC.REGISTER, ACC.DEFINITIONS, ACC.EvidenceSnapshot("g", {"stock": ev}), TODAY, "g")
         assert [k for k in ACC.REGISTER if g.decide(k).state == S] == []

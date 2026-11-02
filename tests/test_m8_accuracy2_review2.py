@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 
 import app as APP
 from services import accuracy as ACC
+from tests import release_state as REL
 from services import generation as GEN
 from services import refresh as RF
 from services import request_pin as RP
@@ -450,8 +451,8 @@ def test_production_register_dashboard_without_accepted_generation_is_not_served
     body = Path(world.dash).read_bytes()
     gen, shown = GEN.dashboard_markers(body)
     assert shown == () and gen == world.store.current().core_id
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
-    assert all(m.certified != ACC.State.VERIFIED for m in ACC.REGISTER.values())
+    REL.assert_release_state()                    # D-073: one certified metric, flag True
+    assert REL.certified_keys() == list(REL.CERTIFIED)
     write_stock(world.folder, stock_rows([NEW_ROW]))
     c = restart(world, monkeypatch)
     try:
