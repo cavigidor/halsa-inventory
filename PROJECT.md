@@ -138,7 +138,8 @@ services/sales_projection.py  M7-6: Customer 360 projection of the sales frame b
 - **Receivables**: dynamic monthly aging buckets detected from the column headers.
   The oldest non-zero bucket is the invoice age. **D-071:** the buckets are invoice age, not due dates — no overdue,
   collection-priority, risk or repayment conclusion is derived from them; signed balances are kept as exported (negative
-  = Halsa owes the account holder); 320 accounts are suppliers.
+  = Halsa owes the account holder); 120 = Müşteri, 320 = Satıcı (D-072); `Toplam Döviz Bakiye` is USD and kept apart;
+  the as-of date is the original file name's date (upload date if none), recorded with its provenance.
 - **Missing ≠ zero** anywhere in the AI layer.
 - **Factual integrity (D-049):** only VERIFIED outputs are displayed (HTML and API); everything else is withheld with
   the notice "Bu analiz henüz doğrulanmadığı için gösterilmiyor." The gate lives in the backend (`services/accuracy.py`).

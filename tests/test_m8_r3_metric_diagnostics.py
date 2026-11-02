@@ -219,8 +219,12 @@ def test_missing_dates_totals_mapping_and_definitions_block(tmp_path):
     for k in KEYS:
         dm = diag["metrics"][k]
         texts = {p["text"] for s in dm["source_judgement"].values() for p in s["problems"]}
-        assert {"Kaynak raporun tarihi bilinmiyor.", "Kaynak toplamlarının mutabakatı yapılmadı.",
-                "Kaynak eşlemesinin onayı bilinmiyor."} <= texts
+        assert "Kaynak raporun tarihi bilinmiyor." in texts                  # no declaration in this folder
+        if k == "receivables.collections":
+            # D-072 D3 / D4: the Cari field mapping check and the independent reproduction establish totals and mapping
+            assert not {"Kaynak toplamlarının mutabakatı yapılmadı.", "Kaynak eşlemesinin onayı bilinmiyor."} & texts
+        else:
+            assert {"Kaynak toplamlarının mutabakatı yapılmadı.", "Kaynak eşlemesinin onayı bilinmiyor."} <= texts
         assert "operational_freshness" in {x["key"] for x in dm["unapproved_definitions"]}
         assert dm["gate_state"] != "verified" and dm["certification_permitted"] is False
 

@@ -1,5 +1,22 @@
 # STATUS.md — current checkpoint
 
+**2026-11-01 — M8 first Cari metric (D-072): owner decisions implemented — draft PR, NOT merged, NOT deployed.**
+- Branch `claude/m8-cari-first-metric` from `main` @ `0604fe8`. D-072: Cari as-of date = date in the original file name
+  (upload date if none, with provenance); `Toplam Döviz Bakiye` = USD, kept apart; exports authoritative (DinamikCRM),
+  balances reproduced independently; 120 = Müşteri, 320 = Satıcı. Final-review corrections: Cari mapping is a
+  field-level check of the inputs the metric reads (USD column neither required nor read); the file-name date rule is
+  the owner's confirmed rule for all exports — implemented for Cari here, Stok / Satış deferred to a separate
+  checkpoint (not awaiting the owner). After corrections: **1978 passed, 7 skipped, 1 xfailed**.
+- `receivables.collections` now blocked only by REAL-DATA and the unapproved `operational_freshness` (both promotion-step
+  items); AGING-DATE / CARI-ACCOUNT-CLASS / CARI-FX withdrawn. 33 metrics, 0 VERIFIED, flag False, `POLICY_VERSION`
+  `m8-cari-d072`.
+- Real data (owner's Mac, real Upload Center flow, originals unchanged): Cari date 2026-10-05 from the file name; 824 / 824
+  balances reproduced, 0 mismatches; 796 Müşteri / 28 Satıcı; strict FAIL 7 / 20 OPEN; Veri Kontrol 17 core issues;
+  production gate codes REAL-DATA + DEF:operational_freshness only; a test-only promoted register copy displays exactly
+  this metric (824 rows), withheld again from 2026-11-20 under the provisional 45-day rule.
+- Tests: full suite (browser + JS required, AI disabled) **1962 passed, 7 skipped, 1 xfailed** (`main` 1926 + 33 D-072 +
+  3 predecessor-policy cases); focused 389 passed / 1 xfailed. Report: `docs/accuracy/m8_d072_cari_first_metric.md`.
+
 **2026-10-31 — M8-R5B1 (D-071): Cari invoice age is not overdue debt — draft PR, NOT merged, NOT deployed.**
 - Branch `claude/m8-r5b1-cari-interpretation` from `main` @ `3f24199` (fresh clone, synthetic data only, AI disabled).
   Owner-relayed father rules recorded as D-071: Cari month buckets = invoice age, not due dates; overdue depends on

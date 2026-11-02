@@ -4,6 +4,14 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-6 are merged; **Milestone 7 is COMPLETE** (PR #24, squash merge `de7eb43`; D-047). M8 production-readiness planning is merged (PR #26). **Owner directive 2026-10-18: NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION.** M8-ACCURACY is merged (PR #27, `a28b2b9`); M8-ACCURACY-2 technical foundation is merged (PR #28, `5baa92a`), and M8-ACCURACY-2B corrective foundation is merged (PR #29, `4ad8d8a`). The first owner-local reconciliation completed with core FAIL and Kredi NOT RUN; no business metric may be promoted without approved provenance, business definitions and per-metric reconciliation. All subsequent checkpoints use Claude Code. **Owner requirement 2026-10-22 (D-060, revised by D-061):** browser web app; three access levels — public viewer (no password), financial viewer (shared financial password, read-only Yönetim finances), owner (separate password, all changes); implemented and merged as M8-CP1, PR #30 (`a03efbf`), local only, not deployed.
 
 ## Current
+- [ ] **M8 first Cari metric (D-072) — draft PR (branch `claude/m8-cari-first-metric`), awaiting planner review; NOT
+  merged, NOT deployed.** Owner decisions D1–D4 implemented; `receivables.collections` meets all of its own evidence
+  requirements on real data; remaining: the `operational_freshness` decision and the separate controlled promotion
+  (reconciliation reference, certification, `GENERATION_BOUND_API_EVIDENCE` under its gate). Report
+  `docs/accuracy/m8_d072_cari_first_metric.md`. STOP after review; no R5B2.
+- [ ] **Stok / Satış report date from the original file name (D-072 D1, owner rule already confirmed) — separate
+  checkpoint, not started.** Implement the confirmed rule for the Stok and Satış slots; never infer one Satış report
+  date from a historical range file name (a range is a period; ambiguous names stay refused / unknown).
 - [ ] **M8-R5B1 (D-071) — Cari interpretation: draft PR (branch `claude/m8-r5b1-cari-interpretation`), awaiting
   planner independent review; NOT merged, NOT deployed.** Invoice-age buckets are no longer treated as overdue; collection
   actions, risk list, win-back debt claim, AI overdue facts and scenario basis withdrawn; signed balances, invoice age and
