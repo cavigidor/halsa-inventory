@@ -1335,3 +1335,28 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   source-wide reconciliation and Veri Kontrol findings are unchanged and still shown. No metric certified;
   `GENERATION_BOUND_API_EVIDENCE` False; 33 metrics, 0 VERIFIED. `POLICY_VERSION` → `m8-cari-d072` (labels and date
   provenance change the page; old pages need the existing controlled refresh). D-071 overdue withdrawals unchanged.
+
+### D-073 · 2026-11-01 · First single-metric promotion of `receivables.collections` — PREPARED; freshness policy PROPOSED, owner approval PENDING (not in force)
+- **Status:** engineering preparation only. The freshness clause below is a **proposal awaiting the owner's explicit
+  approval**; it is not an approved owner decision, and nothing is certified until that approval is recorded here (an
+  "Owner approval" line with its date) by the activation change.
+- **Proposed owner policy (pending):** current Cari account balances are shown only while the Cari report is at most
+  **45 days** old, counted from the report date of D-072 D1 (the date in the original file name; the upload date only
+  when the name has none). The 5 Oct 2026 export: eligible through 19 Nov 2026, withheld from 20 Nov 2026 (46 days).
+  A newly uploaded, independently validated monthly report is judged by its own file-name date. Implemented as the
+  metric-specific, **unapproved** definition `cari_balance_freshness` (`max_age_days = 45`); `validate_register`
+  requires the metric's `max_source_age_days` to equal it. Every other operational metric keeps the general
+  `operational_freshness` (unapproved, unchanged).
+- **Prepared now (inert while the policy is unapproved):** `receivables.collections` — REAL-DATA removed and replaced
+  by the counts-only reconciliation reference `accuracy.CARI_RECONCILIATION_REF` (owner-local real-data acceptance
+  2026-11-02 UTC, `docs/accuracy/m8_d073_cari_promotion.md` §4); approval references D-069, D-071, D-072, D-073;
+  regression tests named in the register. The retired refresh count `overdue_total` is now bound to the withdrawn
+  `receivables.risk` (never un-redacted by certifying the factual list). `validate_register` refuses a `PENDING…`
+  reconciliation reference. Production stays: 33 metrics, 0 VERIFIED, `GENERATION_BOUND_API_EVIDENCE` False.
+- **Activation (after the owner's sign-off; exactly three changes, proved by `tests/fixtures/d073_activation.py`):**
+  `cari_balance_freshness` approved with decision_ref D-073; `receivables.collections` certified VERIFIED;
+  `GENERATION_BOUND_API_EVIDENCE = True`. No other metric, permission or calculation changes.
+- **Disclosure:** once active, the factual Cari list is visible to anyone with the link (viewer level, D-060 / D-061);
+  the row is in `docs/m8_cp1_access.md` §6 and needs the owner's sign-off before any hosting.
+- **Unchanged:** D-069 Option B (the 7 strict FAIL / 20 OPEN stay recorded and shown); D-071 withdrawals; D-072 rules;
+  access levels; Stok / Satış dates (separate checkpoint); R5B2; hosting.

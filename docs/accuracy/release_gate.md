@@ -503,3 +503,12 @@ passwords or production exposure. `GENERATION_BOUND_API_EVIDENCE` remains False 
 **Deferred:** row-level isolation of negative/duplicate SKUs, explicit source dates and father accounting definitions,
 review of each metric's exact dependencies, owner-local acceptance, independent PR review, and the separately
 approved future certification PR. Do not infer a passing specific stock SKU from this diagnostic alone.
+
+### D-073 — first single-metric promotion, prepared (2026-11-01; owner approval of the freshness policy PENDING)
+§8.3 steps 1–5 were repeated on the real exports for `receivables.collections` (owner-local, 2026-11-02 UTC): the
+upload / publish / restart flow binds every core source, the restart re-derives the same `core_id`, and `GET /` carries
+the status `generation_id`. Step 6 is prepared, not applied: the reconciliation reference is recorded
+(`accuracy.CARI_RECONCILIATION_REF`), REAL-DATA is removed for this metric only, and the activation (approve
+`cari_balance_freshness` with D-073, certify VERIFIED, `GENERATION_BOUND_API_EVIDENCE = True`) waits for the owner's
+explicit approval of the proposed 45-day Cari policy. §4: "each analysis the owner wants on day one" and the
+disclosure-inventory sign-off stay open. Report: `docs/accuracy/m8_d073_cari_promotion.md`.

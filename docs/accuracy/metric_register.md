@@ -86,7 +86,7 @@ tests are owner-local `local_data`). Nothing below claims a real-data reconcilia
 | `customers.order_size` | Sipariş Büyüklüğü tab | — | NOT_VERIFIED | no |
 | `finance.margin` | Kâr Marjı tab | — | **INVALID** (DQ-1) | no |
 | `receivables.risk` | Riskli Müşteri tab (withdrawn, D-071) | via `context.full` (empty) | **INVALID** (CARI-OVERDUE-UNSUPPORTED) | no |
-| `receivables.collections` | "Cari Bakiye (fatura yaşı)" tab (D-071; no stat card) | via `context.full` (no rows, no actions) | NOT_VERIFIED | no |
+| `receivables.collections` | "Cari Bakiye (fatura yaşı)" tab (D-071; no stat card) | via `context.full` (no rows, no actions) | NOT_VERIFIED (D-073 prepared; freshness approval pending) | no |
 | `actions.real_decline` | (AI Aksiyon Merkezi / Günlük Satış reason) | via actions | NOT_VERIFIED | no |
 | `actions.queue` | ✨ AI Aksiyon Merkezi list | `GET /api/agent/actions` | INVALID (dependencies) | no |
 | `ai.interpretation` | AI comments | `POST …/enrich`, `POST …/analyze` | NOT_VERIFIED/INVALID | no |
@@ -246,13 +246,20 @@ unchanged certified ceilings, explicit retirement blocker and unavailable totals
   identified columns = calculated columns; the USD column neither required nor read) → mapping established. An explicit `false` declaration
   still wins. No workbook-native total row exists in this export and none is invented.
 - **Not derived (D-071):** overdue amount, due date, collection priority, customer risk, repayment warning.
-- **Definition approval:** `cari_account_class` approved by D-072; `operational_freshness` (45 days, provisional) open.
-- **Regression tests:** `tests/test_domain_rules.py::test_receivable_aging`,
-  `test_kapali_kept_in_cari_balances_and_no_risk_classification`, `tests/test_m8_r5b1_cari_interpretation.py`,
-  `tests/test_m8_d072_cari_first_metric.py`.
-- **State:** NOT_VERIFIED (REAL-DATA, unapproved `operational_freshness`). **Shown:** no. Promotion is a separate,
-  planner-accepted step: reconciliation reference replaces REAL-DATA, freshness approved, certified VERIFIED, and
-  `GENERATION_BOUND_API_EVIDENCE` per its own release gate. Real-data evidence: `docs/accuracy/m8_d072_cari_first_metric.md`.
+- **Definition approval:** `cari_account_class` approved by D-072. Freshness (D-073, **proposed — owner approval
+  pending**): the metric-specific `cari_balance_freshness` — 45 days from the Cari report date (the file-name date;
+  the 5 Oct 2026 export is eligible through 19 Nov 2026 and withheld from 20 Nov); `max_source_age_days = 45` must
+  equal the policy (validate_register). Every other operational metric keeps the general `operational_freshness`.
+- **Regression tests:** `tests/test_m8_d073_cari_promotion.py`, `tests/test_m8_d072_cari_first_metric.py`,
+  `tests/test_m8_r5b1_cari_interpretation.py`, `tests/test_domain_rules.py::test_receivable_aging`,
+  `::test_kapali_kept_in_cari_balances_and_no_risk_classification` (in the register's `regression_tests`).
+- **Reconciliation reference (D-073):** owner-local real-data acceptance 2026-11-02 UTC — Cari `672fac2f5bf6`,
+  `core_id` `371248e21e96c6f6`, 824 / 824 balances independently reproduced (0 mismatches, 0 unknown), mapping
+  approved, date 2026-10-05 from the file name, 796 × 120 / 28 × 320, scoped problems 0; REAL-DATA removed.
+  Approval references D-069, D-071, D-072, D-073.
+- **State:** NOT_VERIFIED (only `DEF:cari_balance_freshness`). **Shown:** no. Activation after the owner's sign-off is
+  exactly three changes (`tests/fixtures/d073_activation.py`): approve `cari_balance_freshness` (D-073), certify
+  VERIFIED, `GENERATION_BOUND_API_EVIDENCE = True`. Report: `docs/accuracy/m8_d073_cari_promotion.md`.
 
 ### `actions.real_decline` — Reel Satış Düşüşü
 - **Function:** `services/context.build_context` + `services/growth.calculate_real_growth` +

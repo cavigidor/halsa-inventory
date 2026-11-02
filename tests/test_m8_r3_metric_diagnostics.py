@@ -225,7 +225,9 @@ def test_missing_dates_totals_mapping_and_definitions_block(tmp_path):
             assert not {"Kaynak toplamlarının mutabakatı yapılmadı.", "Kaynak eşlemesinin onayı bilinmiyor."} & texts
         else:
             assert {"Kaynak toplamlarının mutabakatı yapılmadı.", "Kaynak eşlemesinin onayı bilinmiyor."} <= texts
-        assert "operational_freshness" in {x["key"] for x in dm["unapproved_definitions"]}
+        # D-073: the Cari list has its own (pending) freshness policy; every other metric keeps the general one
+        fresh = "cari_balance_freshness" if k == "receivables.collections" else "operational_freshness"
+        assert fresh in {x["key"] for x in dm["unapproved_definitions"]}
         assert dm["gate_state"] != "verified" and dm["certification_permitted"] is False
 
 

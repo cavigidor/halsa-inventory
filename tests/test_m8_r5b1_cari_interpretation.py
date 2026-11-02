@@ -326,7 +326,9 @@ def test_register_withholds_and_promotes_nothing():
     g = ACC.current_gate()
     risk, coll = g.decide("receivables.risk"), g.decide("receivables.collections")
     assert risk.state == ACC.State.INVALID and CARI.OVERDUE_RETIRED_CODE in risk.codes
-    assert not coll.displayable and "REAL-DATA" in coll.codes          # D-072 removed CARI-ACCOUNT-CLASS / CARI-FX
+    # D-072 removed CARI-ACCOUNT-CLASS / CARI-FX; D-073 replaced REAL-DATA by the reconciliation reference — the
+    # pending owner approval of the Cari freshness policy keeps the list withheld
+    assert not coll.displayable and "DEF:cari_balance_freshness" in coll.codes and "REAL-DATA" not in coll.codes
     assert "OVERDUE-DEF" not in coll.codes and "DEF:overdue_definition" not in coll.codes
     assert not ACC.DEFINITIONS["overdue_definition"].approved
     assert ACC.DEFINITIONS["cari_account_class"].approved and ACC.DEFINITIONS["cari_account_class"].decision_ref == "D-072"

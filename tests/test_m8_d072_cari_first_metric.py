@@ -417,7 +417,9 @@ def test_production_gate_leaves_only_promotion_items_for_the_cari_metric(tmp_pat
     gate = ACC.current_gate(today=TODAY).bound_to(m.core_snapshot())
     d = gate.decide("receivables.collections")
     assert d.state == ACC.State.NOT_VERIFIED
-    assert set(d.codes) == {"REAL-DATA", "DEF:operational_freshness"}   # no source, date, class or FX problem left
+    # no source, date, class or FX problem left; D-073 replaced REAL-DATA by the reconciliation reference, so only the
+    # pending owner approval of the Cari freshness policy remains
+    assert set(d.codes) == {"DEF:cari_balance_freshness"}
     ev = m.record("aging").evidence
     scoped = ev.problems(ACC.REGISTER["receivables.collections"].requires[0])
     assert scoped == [] and set(ev.problems()) >= set(scoped)            # the strict judgement is computed unchanged
@@ -427,15 +429,10 @@ def test_production_gate_leaves_only_promotion_items_for_the_cari_metric(tmp_pat
 
 @pytest.mark.production_gate
 def test_a_controlled_promotion_would_display_exactly_this_metric(tmp_path, monkeypatch):
-    """TEST-ONLY register copy: the separate promotion step (REAL-DATA → reconciliation ref, freshness approved,
+    """TEST-ONLY register copy: the D-073 activation set (tests/fixtures/d073_activation.py: freshness approved,
     certified VERIFIED) applied to this metric only. Production refuses it while the evidence flag is False."""
-    reg = dict(ACC.REGISTER)
-    reg["receivables.collections"] = dataclasses.replace(
-        reg["receivables.collections"], blockers=(), certified=ACC.State.VERIFIED, approval_refs=("D-072",),
-        regression_tests=("tests/test_m8_d072_cari_first_metric.py",), reconciliation_ref="synthetic")
-    defs = dict(ACC.DEFINITIONS)
-    defs["operational_freshness"] = dataclasses.replace(defs["operational_freshness"], approved=True,
-                                                        decision_ref="D-999")
+    from tests.fixtures import d073_activation as ACT
+    reg, defs = ACT.activated()
     ACC.validate_register(reg, defs, production=False)
     with pytest.raises(ACC.RegisterError):
         ACC.validate_register(reg, defs, production=True)
