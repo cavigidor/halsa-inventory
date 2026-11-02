@@ -41,6 +41,7 @@ from services import store as ST
 from services import vkm as V
 from services import vkm_store as VS
 from services.entity import ContextRepository
+from tests import release_state as REL
 from tests.fixtures import synthetic_erp as SE
 from tests.test_m8_accuracy2b import book, products
 
@@ -515,9 +516,9 @@ def test_review_and_acknowledgement_never_change_gate_evidence_or_manifest(base_
     assert decisions() == d0
     assert json.dumps(base_manifest.to_dict(), sort_keys=True, default=str) == manifest_before
     assert all(s != ACC.State.VERIFIED for s, _, _ in d0.values())
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
+    REL.assert_release_state()                    # D-073: one certified metric, flag True
     ACC.validate_register()
-    assert all(m.certified != ACC.State.VERIFIED for m in ACC.REGISTER.values())
+    assert REL.certified_keys() == list(REL.CERTIFIED)
 
 
 def test_vkm_modules_never_write_evidence_or_the_gate():
@@ -802,7 +803,7 @@ def test_logging_in_and_reviewing_never_reveal_or_certify_a_metric(http):
         c.post(f"/api/vkm/issues/{i['issue_id']}/review", json={"action": "kabul_edildi", "vkm_generation": j["vkm_generation"]})
     st = c.get("/api/accuracy/status").json()
     assert all(m["state"] != "verified" for m in st["metrics"])
-    assert st["generation_bound_api_evidence"] is False
+    assert st["generation_bound_api_evidence"] is True
 
 
 # ---------------------------------------------------------------------------------------------

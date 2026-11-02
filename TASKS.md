@@ -4,13 +4,15 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-6 are merged; **Milestone 7 is COMPLETE** (PR #24, squash merge `de7eb43`; D-047). M8 production-readiness planning is merged (PR #26). **Owner directive 2026-10-18: NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION.** M8-ACCURACY is merged (PR #27, `a28b2b9`); M8-ACCURACY-2 technical foundation is merged (PR #28, `5baa92a`), and M8-ACCURACY-2B corrective foundation is merged (PR #29, `4ad8d8a`). The first owner-local reconciliation completed with core FAIL and Kredi NOT RUN; no business metric may be promoted without approved provenance, business definitions and per-metric reconciliation. All subsequent checkpoints use Claude Code. **Owner requirement 2026-10-22 (D-060, revised by D-061):** browser web app; three access levels — public viewer (no password), financial viewer (shared financial password, read-only Yönetim finances), owner (separate password, all changes); implemented and merged as M8-CP1, PR #30 (`a03efbf`), local only, not deployed.
 
 ## Current
-- [ ] **M8 first VERIFIED metric — `receivables.collections` promotion (D-073): draft PR (branch
-  `claude/m8-cari-verified-promotion`), awaiting planner review AND the owner's explicit approval of the proposed
-  45-day Cari freshness policy; NOT merged, NOT deployed, NOT activated.** Prepared: metric-specific unapproved policy,
-  reconciliation reference (owner-local acceptance PASS), approval refs, regression tests, REAL-DATA removed.
-  Activation after sign-off = approve the policy (D-073) + certify VERIFIED + `GENERATION_BOUND_API_EVIDENCE = True`.
-  Owner sign-off on the Cari row of the disclosure inventory before any hosting. Report
+- [ ] **M8 first VERIFIED metric — `receivables.collections` (D-073, owner-approved 60-day Cari freshness): draft PR
+  #43 (branch `claude/m8-cari-verified-promotion`), activated on the branch, awaiting ChatGPT's final code-only merge
+  review; NOT merged, NOT deployed.** Policy approved (60 days), certified VERIFIED, `GENERATION_BOUND_API_EVIDENCE`
+  True, `POLICY_VERSION` `m8-cari-d073`; owner-local acceptance PASS on the final code. Report
   `docs/accuracy/m8_d073_cari_promotion.md`. STOP after review.
+- [ ] **Access / launch checkpoint (owner requirement 2026-11-01; not started):** one site-wide password to enter the
+  website, a separate password for the sensitive financial sections, owner-only administration / Excel uploads /
+  edits. Replaces the legacy D-061 public viewer for any hosting; decide where the account-level Cari list (D-073)
+  sits (site password or financial password). No hosting or external deployment until done and approved.
 - [x] **M8 first Cari metric (D-072) — MERGED: PR #42 squash-merged as `5e3656d` (2026-11-01; planner-approved, code
   only; reviewed head `fcfdc33`; `main` CI `41375523440` 1978 passed / 7 skipped / 1 xfailed; not deployed).** Owner
   decisions D1–D4 implemented. Report `docs/accuracy/m8_d072_cari_first_metric.md`.

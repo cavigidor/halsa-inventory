@@ -409,39 +409,30 @@ def test_rederivation_after_restart_is_identical(tmp_path):
 
 
 # ---------------------------------------------------------------------------------------------
-# the metric-specific release gate (D-069 Option B) — production register unchanged
+# the metric-specific release gate (D-069 Option B) — production register (D-073: this metric certified)
 # ---------------------------------------------------------------------------------------------
 @pytest.mark.production_gate
-def test_production_gate_leaves_only_promotion_items_for_the_cari_metric(tmp_path):
+def test_production_gate_verifies_the_cari_metric_on_its_own_evidence(tmp_path):
     m = _manifest(_folder(tmp_path / "f"))
     gate = ACC.current_gate(today=TODAY).bound_to(m.core_snapshot())
     d = gate.decide("receivables.collections")
-    assert d.state == ACC.State.NOT_VERIFIED
-    # no source, date, class or FX problem left; D-073 replaced REAL-DATA by the reconciliation reference, so only the
-    # pending owner approval of the Cari freshness policy remains
-    assert set(d.codes) == {"DEF:cari_balance_freshness"}
+    # no source, date, class or FX problem; D-073 replaced REAL-DATA by the reconciliation reference and approved the
+    # Cari freshness policy — the factual list is VERIFIED on its own scoped evidence
+    assert d.state == ACC.State.VERIFIED and d.codes == ()
     ev = m.record("aging").evidence
     scoped = ev.problems(ACC.REGISTER["receivables.collections"].requires[0])
     assert scoped == [] and set(ev.problems()) >= set(scoped)            # the strict judgement is computed unchanged
-    assert len(ACC.REGISTER) == 33 and not any(x.certified == ACC.State.VERIFIED for x in ACC.REGISTER.values())
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False and ACC.POLICY_VERSION == "m8-cari-d072"
+    assert len(ACC.REGISTER) == 33
+    assert [k for k, x in ACC.REGISTER.items() if x.certified == ACC.State.VERIFIED] == ["receivables.collections"]
+    assert ACC.GENERATION_BOUND_API_EVIDENCE is True and ACC.POLICY_VERSION == "m8-cari-d073"
 
 
 @pytest.mark.production_gate
-def test_a_controlled_promotion_would_display_exactly_this_metric(tmp_path, monkeypatch):
-    """TEST-ONLY register copy: the D-073 activation set (tests/fixtures/d073_activation.py: freshness approved,
-    certified VERIFIED) applied to this metric only. Production refuses it while the evidence flag is False."""
-    from tests.fixtures import d073_activation as ACT
-    reg, defs = ACT.activated()
-    ACC.validate_register(reg, defs, production=False)
-    with pytest.raises(ACC.RegisterError):
-        ACC.validate_register(reg, defs, production=True)
-    monkeypatch.setattr(ACC, "REGISTER", reg)
-    monkeypatch.setattr(ACC, "DEFINITIONS", defs)
+def test_the_production_register_displays_exactly_this_metric(tmp_path):
     folder = _folder(tmp_path / "f")
     m = _manifest(folder)
     gate = ACC.current_gate(today=TODAY).bound_to(m.core_snapshot())
-    shown = {k for k in reg if gate.decide(k).displayable}
+    shown = {k for k in ACC.REGISTER if gate.decide(k).displayable}
     assert shown == {"receivables.collections"}
     late = ACC.current_gate(today=dt.date(2026, 9, 1)).bound_to(m.core_snapshot())
     assert not late.decide("receivables.collections").displayable      # older than the freshness limit → withheld

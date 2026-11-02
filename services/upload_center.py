@@ -882,7 +882,8 @@ class UploadCenter:
                 ("Stok Eritme", "stock.clearance_buyers"), ("Geri Kazanım", "customers.winback"),
                 ("Büyüme / Küçülme", "customers.momentum"), ("Sipariş Büyüklüğü", "customers.order_size"),
                 ("Kâr Marjı", "finance.margin"), ("Riskli Müşteri", "receivables.risk"),
-                ("Tahsilat", "receivables.collections"), ("Günlük Satış", ACC.PANEL_METRIC["sq"]),
+                ("Cari Bakiye (fatura yaşı)", "receivables.collections"),  # D-071 / D-073: the factual list
+                ("Günlük Satış", ACC.PANEL_METRIC["sq"]),
                 ("Müşteri 360", ACC.PANEL_METRIC["c360"]), ("Fırsatlar", ACC.PANEL_METRIC["opp"]),
                 ("AI Aksiyon Merkezi", ACC.PANEL_METRIC["ai"]), ("Yönetim · Kredi", "owner.kredi"),
                 ("Yönetim · Gider/Gelir", "owner.gider_gelir"), ("Yönetim · Bütçe", "owner.butce")]

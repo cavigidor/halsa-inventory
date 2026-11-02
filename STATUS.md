@@ -1,19 +1,24 @@
 # STATUS.md — current checkpoint
 
-**2026-11-01 — M8 first VERIFIED metric, `receivables.collections` (D-073): promotion PREPARED — draft PR, NOT merged,
-NOT deployed; the 45-day Cari freshness policy awaits the owner's explicit approval.**
-- Branch `claude/m8-cari-verified-promotion` from `main` @ `5e3656d`. Prepared (inert): metric-specific freshness
-  definition `cari_balance_freshness` (45 days from the file-name report date, **unapproved**); REAL-DATA replaced by
-  the counts-only reconciliation reference; approval refs D-069 / D-071 / D-072 / D-073; regression tests named; the
-  retired `overdue_total` refresh count bound to the withdrawn risk metric. Production: 33 metrics, **0 VERIFIED**,
-  `GENERATION_BOUND_API_EVIDENCE` False; the gate withholds the list only for `DEF:cari_balance_freshness`.
-- Activation after the owner's sign-off = exactly three changes (`tests/fixtures/d073_activation.py`): approve the
-  policy (D-073), certify VERIFIED, set the flag. Tested with the real gate / builder / app: only this metric becomes
-  displayable; 32 stay withheld; 5 Oct report eligible through 19 Nov, withheld from 20 Nov.
-- Owner-local real-data acceptance (Mac, 2026-11-02 UTC): PASS — core `371248e21e96c6f6`, 824 / 824 reproduced,
-  restart same core, page generation = API generation, strict FAIL 7 / 20 OPEN and Veri Kontrol 17 unchanged.
-- Tests: full suite (browser + JS required, AI disabled) **1996 passed, 7 skipped, 1 xfailed** (`main` 1978 + 18 new);
-  focused 416 passed / 1 skipped / 1 xfailed. Report: `docs/accuracy/m8_d073_cari_promotion.md`.
+**2026-11-01 — M8 first VERIFIED metric, `receivables.collections` (D-073, owner-approved 60-day Cari freshness):
+ACTIVATED in draft PR #43 — NOT merged, NOT deployed, no hosting.**
+- Branch `claude/m8-cari-verified-promotion` from `main` @ `5e3656d`. D-073 (owner, 2026-11-01): 60 days from the Cari
+  report date (file-name date; upload date when the name has none, D-072 D1); the 5 Oct export is shown through
+  4 Dec and withheld from 5 Dec. `cari_balance_freshness` approved (D-073, 60 days) for this metric only; the global
+  `operational_freshness` (45 days, unapproved) and the other 32 metrics unchanged.
+- Production register: 33 metrics, **exactly one certified VERIFIED** (`receivables.collections`), REAL-DATA replaced
+  by the counts-only reconciliation reference, `GENERATION_BOUND_API_EVIDENCE` **True** after the owner-local §8.3
+  acceptance, `POLICY_VERSION` `m8-cari-d073` (pages of `m8-cari-d072` refused until rebuilt). Certification is a
+  ceiling: the list is shown only on fresh, generation-bound, scoped evidence. D-071 withdrawals unchanged.
+- Owner-local real-data acceptance (Mac, final code, 2026-11-02 04:02 UTC): PASS — originals = copies (Stok
+  `63602ae3e8bf`, Satış `be1d895e426b`, Cari `672fac2f5bf6`); core `01d305886628f6c6`; 824 / 824 reproduced;
+  1 verified / 4 not_verified / 28 invalid; restart same core; page generation = API generation; 4 Dec shown, 5 Dec
+  withheld; strict FAIL 7 / 20 OPEN and Veri Kontrol 17 unchanged.
+- Access: the D-061 public viewer is the legacy local arrangement; the owner's launch requirement (site password +
+  financial password + owner-only administration) is a separate checkpoint; the Cari account list is flagged there.
+- Tests: full suite (browser + JS required, AI disabled) on the final tree: **2003 passed, 7 skipped, 1 xfailed**
+  (`main` 1978 + 22 D-073 + 3 net from the predecessor-policy cases; GitHub CI on the exact head: see the PR).
+  Report: `docs/accuracy/m8_d073_cari_promotion.md`.
 
 **2026-11-01 — M8 first Cari metric (D-072): owner decisions implemented — MERGED: PR #42 squash-merged as `5e3656d`
 (reviewed head `fcfdc33`; `main` CI run `41375523440`: 1978 passed / 7 skipped / 1 xfailed; not deployed). This

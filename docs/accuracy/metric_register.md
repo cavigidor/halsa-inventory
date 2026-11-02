@@ -86,7 +86,7 @@ tests are owner-local `local_data`). Nothing below claims a real-data reconcilia
 | `customers.order_size` | Sipariş Büyüklüğü tab | — | NOT_VERIFIED | no |
 | `finance.margin` | Kâr Marjı tab | — | **INVALID** (DQ-1) | no |
 | `receivables.risk` | Riskli Müşteri tab (withdrawn, D-071) | via `context.full` (empty) | **INVALID** (CARI-OVERDUE-UNSUPPORTED) | no |
-| `receivables.collections` | "Cari Bakiye (fatura yaşı)" tab (D-071; no stat card) | via `context.full` (no rows, no actions) | NOT_VERIFIED (D-073 prepared; freshness approval pending) | no |
+| `receivables.collections` | "Cari Bakiye (fatura yaşı)" tab (D-071; no stat card) | via `context.full` (no rows, no actions) | **VERIFIED** (D-073; while fresh and bound) | yes (on fresh, bound evidence) |
 | `actions.real_decline` | (AI Aksiyon Merkezi / Günlük Satış reason) | via actions | NOT_VERIFIED | no |
 | `actions.queue` | ✨ AI Aksiyon Merkezi list | `GET /api/agent/actions` | INVALID (dependencies) | no |
 | `ai.interpretation` | AI comments | `POST …/enrich`, `POST …/analyze` | NOT_VERIFIED/INVALID | no |
@@ -246,10 +246,11 @@ unchanged certified ceilings, explicit retirement blocker and unavailable totals
   identified columns = calculated columns; the USD column neither required nor read) → mapping established. An explicit `false` declaration
   still wins. No workbook-native total row exists in this export and none is invented.
 - **Not derived (D-071):** overdue amount, due date, collection priority, customer risk, repayment warning.
-- **Definition approval:** `cari_account_class` approved by D-072. Freshness (D-073, **proposed — owner approval
-  pending**): the metric-specific `cari_balance_freshness` — 45 days from the Cari report date (the file-name date;
-  the 5 Oct 2026 export is eligible through 19 Nov 2026 and withheld from 20 Nov); `max_source_age_days = 45` must
-  equal the policy (validate_register). Every other operational metric keeps the general `operational_freshness`.
+- **Definition approval:** `cari_account_class` approved by D-072; freshness `cari_balance_freshness` approved by
+  **D-073 (owner, 2026-11-01): 60 days** from the Cari report date (the file-name date; the upload date when the name
+  has none, D-072 D1). The 5 Oct 2026 export is eligible through 4 Dec 2026 and withheld from 5 Dec;
+  `max_source_age_days = 60` must equal the policy (validate_register). Every other operational metric keeps the
+  general, unapproved `operational_freshness` (45 days) unchanged.
 - **Regression tests:** `tests/test_m8_d073_cari_promotion.py`, `tests/test_m8_d072_cari_first_metric.py`,
   `tests/test_m8_r5b1_cari_interpretation.py`, `tests/test_domain_rules.py::test_receivable_aging`,
   `::test_kapali_kept_in_cari_balances_and_no_risk_classification` (in the register's `regression_tests`).
@@ -257,9 +258,11 @@ unchanged certified ceilings, explicit retirement blocker and unavailable totals
   `core_id` `371248e21e96c6f6`, 824 / 824 balances independently reproduced (0 mismatches, 0 unknown), mapping
   approved, date 2026-10-05 from the file name, 796 × 120 / 28 × 320, scoped problems 0; REAL-DATA removed.
   Approval references D-069, D-071, D-072, D-073.
-- **State:** NOT_VERIFIED (only `DEF:cari_balance_freshness`). **Shown:** no. Activation after the owner's sign-off is
-  exactly three changes (`tests/fixtures/d073_activation.py`): approve `cari_balance_freshness` (D-073), certify
-  VERIFIED, `GENERATION_BOUND_API_EVIDENCE = True`. Report: `docs/accuracy/m8_d073_cari_promotion.md`.
+- **State:** **certified VERIFIED (D-073)** — the only one. **Shown:** only while the runtime evidence holds (fresh,
+  generation-bound, mapping, independent reproduction, no problem in its own inputs); otherwise withheld again
+  automatically, never shown as zero. `GENERATION_BOUND_API_EVIDENCE = True`. Access: account-level financial
+  disclosure flagged for the access / launch checkpoint (`docs/m8_cp1_access.md`). Report:
+  `docs/accuracy/m8_d073_cari_promotion.md`.
 
 ### `actions.real_decline` — Reel Satış Düşüşü
 - **Function:** `services/context.build_context` + `services/growth.calculate_real_growth` +

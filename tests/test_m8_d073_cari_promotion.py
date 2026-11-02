@@ -1,9 +1,9 @@
-"""D-073 (prepared, owner approval PENDING): controlled VERIFIED promotion of `receivables.collections` only.
+"""D-073 (owner-approved 2026-11-01): `receivables.collections` is the first and only VERIFIED metric.
 
-Production state stays withheld (the 45-day Cari freshness policy is not yet approved). The activation set — approve
-`cari_balance_freshness` (D-073), certify the metric VERIFIED, `GENERATION_BOUND_API_EVIDENCE = True` — is applied by
-tests/fixtures/d073_activation.py to the REAL production module, so the real gate, the real register validation, the
-real dashboard builder and the real app routes decide. Synthetic data only (invented codes, names and amounts).
+Every test here runs the PRODUCTION register, definitions and gate (`production_gate`), the real dashboard builder and
+the real app routes: certified VERIFIED is only a ceiling — fresh (60 days from the file-name report date, or the
+upload date when the name has none), generation-bound, scoped evidence is still required on every request.
+Synthetic data only (invented codes, names and amounts).
 """
 import dataclasses
 import datetime as dt
@@ -25,7 +25,6 @@ from services import owner_auth as AUTH
 from services import refresh as RF
 from tests import accuracy_harness as H
 from tests import auth_harness as AH
-from tests.fixtures import d073_activation as ACT
 from tests.fixtures import synthetic_erp as SE
 from tests.test_m8_cp1_access import FIN_HASH, FIN_PASSWORD, HASH, PASSWORD
 from tests.test_m8_cp3_upload_center import H as HDR, new_batch, publish, srv, upload, validate  # noqa: F401
@@ -80,63 +79,70 @@ def _built(folder, m, gate, out):
 
 
 # ---------------------------------------------------------------------------------------------
-# 1. production register: prepared, inert, and nothing else changed
+# 1. production register: exactly this metric certified, everything else unchanged
 # ---------------------------------------------------------------------------------------------
+def _pre_activation():
+    """The production register / definitions as prepared before the owner's D-073 approval (for comparisons)."""
+    reg, defs = dict(ACC.REGISTER), dict(ACC.DEFINITIONS)
+    reg[KEY] = dataclasses.replace(reg[KEY], certified=ACC.State.NOT_VERIFIED)
+    defs[FRESH] = dataclasses.replace(defs[FRESH], approved=False, decision_ref=None)
+    return reg, defs
+
+
+FRESH = "cari_balance_freshness"
+
+
 @pytest.mark.production_gate
-def test_production_register_is_prepared_but_promotes_nothing():
+def test_production_register_certifies_only_the_cari_list():
     m = ACC.REGISTER[KEY]
-    assert m.certified == ACC.State.NOT_VERIFIED and m.blockers == ()            # REAL-DATA replaced by the ref
-    assert m.definitions == ("cari_account_class", "cari_balance_freshness") and m.max_source_age_days == 45
+    assert m.certified == ACC.State.VERIFIED and m.blockers == ()               # REAL-DATA replaced by the ref
+    assert m.definitions == ("cari_account_class", FRESH) and m.max_source_age_days == 60
     assert m.approval_refs == ("D-069", "D-071", "D-072", "D-073")
     assert m.reconciliation_ref == ACC.CARI_RECONCILIATION_REF and m.reconciliation_ref.startswith("D-073")
+    assert "core_id 371248e21e96c6f6" in m.reconciliation_ref and "824/824" in m.reconciliation_ref
     assert not re.search(r"Sentetik|[A-ZÇĞİÖŞÜ]{3,} [A-ZÇĞİÖŞÜ]{3,}", m.reconciliation_ref)   # counts only
     for ref in m.regression_tests:                                                # every named test exists
         path, _, fn = ref.partition("::")
         assert os.path.exists(path), ref
         assert not fn or f"def {fn}(" in open(path, encoding="utf-8").read(), ref
-    fresh = ACC.DEFINITIONS["cari_balance_freshness"]
-    assert fresh.approved is False and fresh.decision_ref is None and fresh.max_age_days == 45
-    assert ACC.DEFINITIONS["operational_freshness"].approved is False
-    # unrelated metrics keep the general (unapproved) freshness policy and their own limits — unchanged
-    for k, x in ACC.REGISTER.items():
-        if k != KEY and x.temporal == "operational" and x.sources:
-            assert "operational_freshness" in x.definitions and "cari_balance_freshness" not in x.definitions, k
+    fresh = ACC.DEFINITIONS[FRESH]
+    assert (fresh.approved, fresh.decision_ref, fresh.max_age_days) == (True, "D-073", 60)
+    assert ACC.DEFINITIONS["operational_freshness"].approved is False            # the global setting is untouched
+    assert ACC.DEFAULT_OPERATIONAL_MAX_AGE_DAYS == 45
+    for k, x in ACC.REGISTER.items():                                             # the other 32: unchanged
+        if k == KEY:
+            continue
+        assert x.certified != ACC.State.VERIFIED, k
+        if x.temporal == "operational" and x.sources:
+            assert "operational_freshness" in x.definitions and FRESH not in x.definitions, k
             assert x.max_source_age_days == ACC.DEFAULT_OPERATIONAL_MAX_AGE_DAYS, k
-    assert len(ACC.REGISTER) == 33 and not any(x.certified == ACC.State.VERIFIED for x in ACC.REGISTER.values())
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False and ACC.POLICY_VERSION == "m8-cari-d072"
-    d = ACC.current_gate().decide(KEY)
-    assert not d.displayable and "DEF:cari_balance_freshness" in d.codes and "REAL-DATA" not in d.codes
+    assert len(ACC.REGISTER) == 33
+    assert [k for k, x in ACC.REGISTER.items() if x.certified == ACC.State.VERIFIED] == [KEY]
+    assert ACC.GENERATION_BOUND_API_EVIDENCE is True and ACC.POLICY_VERSION == "m8-cari-d073"
+    ACC.validate_register()                                                       # the production rules pass
+    assert ACC.current_gate().decide(KEY).codes == ("NO-EVIDENCE:aging",)         # no evidence → withheld
 
 
-@pytest.mark.production_gate
-def test_production_gate_withholds_the_metric_on_fresh_real_shaped_evidence(tmp_path):
-    """Everything is established except the pending owner approval: the decision names exactly that."""
-    m = _manifest(_folder(tmp_path / "f", cari_name=NAME, snapshot=OCT5, aging=_cari()), today=dt.date(2026, 11, 1))
-    d = _gate(m, dt.date(2026, 11, 1)).decide(KEY)
-    assert d.state == ACC.State.NOT_VERIFIED and set(d.codes) == {"DEF:cari_balance_freshness"}
+def test_activation_is_exactly_three_changes_from_the_prepared_state():
+    reg, defs = _pre_activation()
+    assert {k for k in reg if reg[k] != ACC.REGISTER[k]} == {KEY}
+    assert {k for k in defs if defs[k] != ACC.DEFINITIONS[k]} == {FRESH}
+    assert dataclasses.replace(ACC.REGISTER[KEY], certified=ACC.State.NOT_VERIFIED) == reg[KEY]
+    assert ACC.GENERATION_BOUND_API_EVIDENCE is True                              # the third change
 
 
-def test_activation_is_exactly_three_changes():
-    reg, defs = ACT.activated()
-    changed_metrics = {k for k in reg if reg[k] != ACC.REGISTER[k]}
-    changed_defs = {k for k in defs if defs[k] != ACC.DEFINITIONS[k]}
-    assert changed_metrics == {KEY} and changed_defs == {"cari_balance_freshness"}
-    assert dataclasses.replace(reg[KEY], certified=ACC.State.NOT_VERIFIED) == ACC.REGISTER[KEY]
-    assert (defs["cari_balance_freshness"].approved, defs["cari_balance_freshness"].decision_ref) == (True, "D-073")
-    assert dataclasses.replace(defs["cari_balance_freshness"], approved=False, decision_ref=None) == \
-        ACC.DEFINITIONS["cari_balance_freshness"]
-
-
-def test_production_validation_accepts_the_full_activation_and_refuses_every_partial_one(monkeypatch):
-    reg, defs = ACT.activated()
-    monkeypatch.setattr(ACC, "GENERATION_BOUND_API_EVIDENCE", True)
-    ACC.validate_register(reg, defs, production=True)                              # complete activation: valid
+def test_production_validation_refuses_every_incomplete_state(monkeypatch):
+    reg, defs = dict(ACC.REGISTER), dict(ACC.DEFINITIONS)
+    pre_reg, pre_defs = _pre_activation()
+    ACC.validate_register(pre_reg, pre_defs, production=True)                      # prepared state: valid
     with pytest.raises(ACC.RegisterError, match="unapproved definitions"):         # certified, policy not approved
-        ACC.validate_register(reg, dict(ACC.DEFINITIONS), production=True)
+        ACC.validate_register(reg, pre_defs, production=True)
+    for days in (45, 59, 61):                                                      # code ≠ approved policy
+        bad = dict(reg)
+        bad[KEY] = dataclasses.replace(reg[KEY], max_source_age_days=days)
+        with pytest.raises(ACC.RegisterError, match="differs from the cari_balance_freshness policy"):
+            ACC.validate_register(bad, defs, production=True)
     bad = dict(reg)
-    bad[KEY] = dataclasses.replace(reg[KEY], max_source_age_days=46)               # code ≠ approved policy
-    with pytest.raises(ACC.RegisterError, match="differs from the cari_balance_freshness policy"):
-        ACC.validate_register(bad, defs, production=True)
     bad[KEY] = dataclasses.replace(reg[KEY], reconciliation_ref="PENDING-OWNER-LOCAL-ACCEPTANCE")
     with pytest.raises(ACC.RegisterError, match="real-data reconciliation"):
         ACC.validate_register(bad, defs, production=True)
@@ -146,47 +152,73 @@ def test_production_validation_accepts_the_full_activation_and_refuses_every_par
     bad[KEY] = dataclasses.replace(reg[KEY], definitions=("cari_account_class",))  # no freshness policy at all
     with pytest.raises(ACC.RegisterError, match="freshness"):
         ACC.validate_register(bad, defs, production=True)
-    monkeypatch.setattr(ACC, "GENERATION_BOUND_API_EVIDENCE", False)              # flag not set
-    with pytest.raises(ACC.RegisterError, match="generation-bound evidence"):
-        ACC.validate_register(reg, defs, production=True)
     for k in ACC.REGISTER:                                                         # no other metric can be promoted
         if k == KEY:
             continue
         other = dict(reg)
         other[k] = dataclasses.replace(reg[k], certified=ACC.State.VERIFIED)
-        monkeypatch.setattr(ACC, "GENERATION_BOUND_API_EVIDENCE", True)
         with pytest.raises(ACC.RegisterError):
             ACC.validate_register(other, defs, production=True)
+    monkeypatch.setattr(ACC, "GENERATION_BOUND_API_EVIDENCE", False)              # without the flag: refused
+    with pytest.raises(ACC.RegisterError, match="generation-bound evidence"):
+        ACC.validate_register(reg, defs, production=True)
+
+
+@pytest.mark.production_gate
+def test_production_gate_verifies_fresh_scoped_evidence(tmp_path):
+    m = _manifest(_folder(tmp_path / "f", cari_name=NAME, snapshot=OCT5, aging=_cari()), today=dt.date(2026, 11, 1))
+    d = ACC.current_gate(today=dt.date(2026, 11, 1)).bound_to(m.core_snapshot()).decide(KEY)
+    assert d.state == ACC.State.VERIFIED and d.codes == ()
 
 
 # ---------------------------------------------------------------------------------------------
-# 2. freshness: 45 days from the file-name date
+# 2. freshness: 60 days from the file-name date (or the upload date when the name has none)
 # ---------------------------------------------------------------------------------------------
-@pytest.mark.parametrize("today,shown", [(dt.date(2026, 10, 5), True), (dt.date(2026, 11, 1), True),
-                                         (dt.date(2026, 11, 19), True), (dt.date(2026, 11, 20), False),
+@pytest.mark.production_gate
+@pytest.mark.parametrize("today,shown", [(dt.date(2026, 10, 5), True), (dt.date(2026, 11, 20), True),
+                                         (dt.date(2026, 12, 4), True), (dt.date(2026, 12, 5), False),
                                          (dt.date(2027, 3, 1), False)])
-def test_the_5_october_report_is_eligible_through_19_november_only(tmp_path, today, shown):
-    reg, defs = ACT.activated()
+def test_the_5_october_report_is_eligible_through_4_december_only(tmp_path, today, shown):
     m = _manifest(_folder(tmp_path / "f", cari_name=NAME, snapshot=OCT5, aging=_cari()), today=today)
     assert m.record("aging").evidence.report_date == OCT5
     assert m.record("aging").evidence.report_date_origin == "filename"
-    d = _gate(m, today, reg, defs).decide(KEY)
+    assert (dt.date(2026, 12, 4) - OCT5).days == 60 and (dt.date(2026, 12, 5) - OCT5).days == 61
+    d = ACC.current_gate(today=today).bound_to(m.core_snapshot()).decide(KEY)
     assert d.displayable is shown
     if not shown:
         assert d.state == ACC.State.NOT_VERIFIED and d.codes == ("SRC:aging",)
         assert any("güncel değil" in r for r in d.reasons_tr)
 
 
+@pytest.mark.production_gate
+@pytest.mark.parametrize("age,shown", [(0, True), (60, True), (61, False)])
+def test_the_upload_date_fallback_gets_the_same_60_day_rule(tmp_path, age, shown):
+    """D-072 D1 (already owner-approved): a name WITHOUT a date → the upload calendar date, with provenance."""
+    up = dt.date(2026, 10, 20)
+    m = _manifest(_folder(tmp_path / "f", cari_name="Cari raporu.xlsx", snapshot=up, origin="upload_date",
+                          aging=_cari()), today=up + dt.timedelta(days=age))
+    ev = m.record("aging").evidence
+    assert (ev.report_date, ev.report_date_origin) == (up, "upload_date")
+    snap = m.core_snapshot()
+    g = ACC.current_gate(today=up + dt.timedelta(days=age), snapshot=snap, expected_generation=snap.generation_id)
+    assert g.decide(KEY).displayable is shown
+    other = ACC.current_gate(today=up, snapshot=snap, expected_generation="another-generation")
+    assert not other.decide(KEY).displayable                                       # still generation-bound
+
+
+@pytest.mark.production_gate
 def test_a_report_dated_in_the_future_is_invalid(tmp_path):
-    reg, defs = ACT.activated()
     m = _manifest(_folder(tmp_path / "f", cari_name=NAME, snapshot=OCT5, aging=_cari()), today=dt.date(2026, 10, 4))
-    assert _gate(m, dt.date(2026, 10, 4), reg, defs).decide(KEY).state == ACC.State.INVALID
+    assert ACC.current_gate(today=dt.date(2026, 10, 4)).bound_to(m.core_snapshot()).decide(KEY).state == \
+        ACC.State.INVALID
 
 
+@pytest.mark.production_gate
 def test_unrelated_metrics_keep_their_freshness_behaviour(tmp_path):
-    reg, defs = ACT.activated()
+    pre_reg, pre_defs = _pre_activation()
     m = _manifest(_folder(tmp_path / "f", cari_name=NAME, snapshot=OCT5, aging=_cari()), today=dt.date(2026, 11, 1))
-    g, base = _gate(m, dt.date(2026, 11, 1), reg, defs), _gate(m, dt.date(2026, 11, 1))
+    g = ACC.current_gate(today=dt.date(2026, 11, 1)).bound_to(m.core_snapshot())
+    base = ACC.Gate(pre_reg, pre_defs, None, dt.date(2026, 11, 1)).bound_to(m.core_snapshot())
     for k in ACC.REGISTER:
         if k == KEY:
             continue
@@ -194,16 +226,15 @@ def test_unrelated_metrics_keep_their_freshness_behaviour(tmp_path):
         # the only possible difference: a dependent no longer lists the (now verified) Cari list as a reason
         assert set(base.decide(k).codes) - set(g.decide(k).codes) <= {f"DEP:{KEY}"}, k
         assert set(g.decide(k).codes) <= set(base.decide(k).codes), k
-        if "operational_freshness" in reg[k].definitions:
+        if "operational_freshness" in ACC.REGISTER[k].definitions:
             assert "DEF:operational_freshness" in g.decide(k).codes, k
 
 
 # ---------------------------------------------------------------------------------------------
-# 3. activated: only this metric, factual content, no overdue, USD never in a TL balance
+# 3. production: only this metric, factual content, no overdue, USD never in a TL balance
 # ---------------------------------------------------------------------------------------------
 @pytest.mark.production_gate
-def test_activated_production_gate_verifies_only_the_cari_list(tmp_path, monkeypatch):
-    ACT.activate(monkeypatch)
+def test_production_gate_verifies_only_the_cari_list(tmp_path, monkeypatch):
     today = dt.date(2026, 11, 1)
     folder = _folder(tmp_path / "f", cari_name=NAME, snapshot=OCT5, aging=_cari())
     m = _manifest(folder, today=today)
@@ -238,7 +269,6 @@ def test_activated_production_gate_verifies_only_the_cari_list(tmp_path, monkeyp
 
 @pytest.mark.production_gate
 def test_usd_values_never_change_a_tl_balance_or_the_decision(tmp_path, monkeypatch):
-    ACT.activate(monkeypatch)
     today = dt.date(2026, 11, 1)
     out = []
     for i, fx in enumerate(({}, {"120.01.0001": -88_888.88, "120.01.0002": 1e9, "900.00.0005": 5.0})):
@@ -256,7 +286,6 @@ def test_usd_values_never_change_a_tl_balance_or_the_decision(tmp_path, monkeypa
 
 @pytest.mark.production_gate
 def test_refresh_report_never_unredacts_an_overdue_total(monkeypatch):
-    ACT.activate(monkeypatch)
     gate = ACC.current_gate()                                    # verified list possible; the overdue total never
     rep = ACC.redact_refresh_report({"counts": {"overdue_total": 7, "products": 3}}, gate)
     assert rep["counts"]["overdue_total"] is None
@@ -269,7 +298,6 @@ def test_refresh_report_never_unredacts_an_overdue_total(monkeypatch):
 # ---------------------------------------------------------------------------------------------
 @pytest.mark.production_gate
 def test_missing_changed_mismatched_or_unbound_evidence_blocks_the_metric(tmp_path, monkeypatch):
-    ACT.activate(monkeypatch)
     today = dt.date(2026, 11, 1)
     folder = _folder(tmp_path / "f", cari_name=NAME, snapshot=OCT5, aging=_cari())
     m = _manifest(folder, today=today)
@@ -305,13 +333,13 @@ def test_missing_changed_mismatched_or_unbound_evidence_blocks_the_metric(tmp_pa
 # ---------------------------------------------------------------------------------------------
 # 5. the real app: upload → publish → dashboard / API agree; stale; new month; rollback; restart; permissions
 # ---------------------------------------------------------------------------------------------
-def _publish_cari(s, day, frame, stem):
+def _publish_cari(s, day, frame, stem, label=None):
     path = s.src / f"{stem}.xlsx"
     frame.to_excel(path, index=False)
     bid, asg = new_batch(s), {}
-    for slot, name, label in (("stock", SE_FILES["stock"], None), ("sales", SE_FILES["sales"], None),
-                              ("aging", path.name, f"Cari {day.isoformat()}.xlsx")):
-        r = upload(s, bid, name, label=label)
+    for slot, name, lab in (("stock", SE_FILES["stock"], None), ("sales", SE_FILES["sales"], None),
+                            ("aging", path.name, label or f"Cari {day.isoformat()}.xlsx")):
+        r = upload(s, bid, name, label=lab)
         assert r.status_code == 201, r.text
         asg[r.json()["file"]["file_id"]] = {"slot": slot, "declarations": {}}
     _, b = validate(s, bid, asg)
@@ -328,9 +356,38 @@ def _served(c):
 from tests.test_m8_cp3_upload_center import FILES as SE_FILES  # noqa: E402
 
 
+def _at(monkeypatch, day):
+    """The production gate as of `day` (time passing); nothing else changes."""
+    monkeypatch.setattr(ACC, "current_gate", lambda today=None, snapshot=None, expected_generation=None:
+                        H.production_gate(today=day, snapshot=snapshot, expected_generation=expected_generation))
+
+
+@pytest.mark.production_gate
+def test_app_a_name_without_a_date_uses_the_upload_date_and_the_same_60_days(srv, monkeypatch):
+    s, today = srv, dt.date.today()
+    _, pj = publish(s, _publish_cari(s, today, _cari(), "cari_nd", label="Cari raporu.xlsx"))
+    assert pj["batch"]["status"] == "published", pj
+    r, st = _served(s.c)
+    aging = next(x for x in st["sources"] if x["key"] == "aging")
+    assert aging["bound"] and aging["declared"]["date_origin"] == "upload_date"
+    assert aging["declared"]["snapshot_date"] == today.isoformat()
+    assert r.status_code == 200 and GEN.dashboard_markers(r.content)[1] == (KEY,)
+    assert r.headers["X-Halsa-Generation"] == st["generation_id"]
+    assert "yükleme tarihi" in _data_blob(r.text)["modules"]["collections"]["note"]      # provenance shown
+    _at(monkeypatch, today + dt.timedelta(days=60))
+    assert s.c.get("/").status_code == 200
+    _at(monkeypatch, today + dt.timedelta(days=61))
+    assert s.c.get("/").status_code == 503
+    # an impossible or ambiguous name date is still refused, never guessed
+    bid = new_batch(s)
+    for bad in ("Cari 31 Şubat 2026.xlsx", "Cari 1 Ekim 2026 - 5 Ekim 2026.xlsx"):
+        fid = upload(s, bid, "cari_nd.xlsx", label=bad).json()["file"]["file_id"]
+        rv = s.c.post(f"/api/uploads/{bid}/validate", json={"assignments": {fid: {"slot": "aging", "declarations": {}}}})
+        assert rv.status_code == 422 and rv.json()["detail"]["error_code"] == "cari_date_ambiguous", bad
+
+
 @pytest.mark.production_gate
 def test_app_serves_one_generation_on_page_and_api_and_withholds_when_stale(srv, monkeypatch):
-    ACT.activate(monkeypatch)
     s, today = srv, dt.date.today()
     day = today - dt.timedelta(days=10)
     _, pj = publish(s, _publish_cari(s, day, _cari(), "cari_a"))
@@ -351,10 +408,11 @@ def test_app_serves_one_generation_on_page_and_api_and_withholds_when_stale(srv,
         resp = s.c.post(path, json={}) if path == "/api/scenario" else s.c.get(path)
         assert resp.status_code == 409, path
 
-    # time passes: 46 days after the report date the SAME page is no longer authorized → unavailable, never zero
-    later = today + dt.timedelta(days=36)
-    monkeypatch.setattr(ACC, "current_gate", lambda today=None, snapshot=None, expected_generation=None:
-                        H.production_gate(today=later, snapshot=snapshot, expected_generation=expected_generation))
+    # time passes: day 60 after the report date is still served; on day 61 the SAME page is no longer authorized →
+    # unavailable, never zero
+    _at(monkeypatch, day + dt.timedelta(days=60))
+    assert s.c.get("/").status_code == 200
+    _at(monkeypatch, day + dt.timedelta(days=61))
     r2, st2 = _served(s.c)
     assert r2.status_code == 503 and r2.headers["X-Halsa-Dashboard"] == "not_authorized"
     assert {x["key"]: x["state"] for x in st2["metrics"]}[KEY] == "not_verified"
@@ -370,7 +428,6 @@ def test_app_serves_one_generation_on_page_and_api_and_withholds_when_stale(srv,
 
 @pytest.mark.production_gate
 def test_new_month_rebinds_rollback_keeps_and_restart_never_serves_an_obsolete_page(srv, monkeypatch):
-    ACT.activate(monkeypatch)
     s, today = srv, dt.date.today()
     _, pj = publish(s, _publish_cari(s, today - dt.timedelta(days=30), _cari(), "cari_a"))
     assert pj["batch"]["status"] == "published"
@@ -429,7 +486,6 @@ def test_new_month_rebinds_rollback_keeps_and_restart_never_serves_an_obsolete_p
 
 @pytest.mark.production_gate
 def test_permissions_are_unchanged_by_the_promotion(srv, monkeypatch):
-    ACT.activate(monkeypatch)
     s = srv
     _, pj = publish(s, _publish_cari(s, dt.date.today() - dt.timedelta(days=5), _cari(), "cari_a"))
     assert pj["batch"]["status"] == "published"

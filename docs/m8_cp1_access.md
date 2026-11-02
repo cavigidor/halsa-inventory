@@ -1,12 +1,21 @@
 # M8-CP1 — Web access: public viewer, financial viewer, owner (D-060, revised by D-061)
 
-**Status:** implemented and tested locally (synthetic data), PR #30. **Not deployed.** Accuracy gate unchanged: no
-metric is VERIFIED and `GENERATION_BOUND_API_EVIDENCE = False`.
+**Status:** implemented and tested locally (synthetic data), PR #30. **Not deployed.** Since D-073 (2026-11-01) one
+metric, the factual Cari list (`receivables.collections`), is VERIFIED-certified and `GENERATION_BOUND_API_EVIDENCE =
+True`; it is shown only on fresh, generation-bound evidence.
+
+> **Legacy local arrangement vs the required protected launch (2026-11-01).** The model below (D-060 / D-061: a public
+> viewer without a password) is what is implemented today, for local use. It is **not** the approved hosting
+> arrangement. The owner's current launch requirement is: **one password to enter the website**, a **separate password
+> for the sensitive financial sections**, and **owner-only administration, Excel uploads and edits**. Nothing here
+> approves public-by-link disclosure of Cari account names and balances: the account-level Cari list (row D-073 in §6)
+> is flagged for the separate access / launch checkpoint, which must implement the site-wide password before any
+> hosting. No hosting or external deployment is authorized.
 
 Halsa Analysis is ONE **browser-based web application** (existing FastAPI + HTML/JS + SQLite). Nobody installs
 anything.
 
-## 1. Access model (owner-approved 2026-10-22, D-061)
+## 1. Access model (owner-approved 2026-10-22, D-061 — legacy local arrangement; see the note above)
 
 | Level | How | Can |
 |---|---|---|
@@ -18,7 +27,7 @@ No usernames, no accounts. The financial password can never create an owner sess
 financial view without the financial password.
 
 **No login reveals an unverified number.** The accuracy gate applies identically at every level; today every
-analytical metric and every financial section is withheld for all three.
+analytical metric except the VERIFIED Cari list (D-073) and every financial section is withheld for all three.
 
 ## 2. Route permissions (every route; `services/access.py`)
 
@@ -133,7 +142,7 @@ python -m services.owner_auth status                    # both roles configured?
 | D-070 Stock retirement notice and signed-ERP-balance caveat (fixed policy text; no new source values) | ✔ | ✔ | ✔ |
 | D-071 Cari notice: invoice age is not overdue, sign meaning, 320 = supplier (fixed policy text; no new source values). Cari balance fields (signed balance, account class, direction, oldest invoice month, `overdue: null`) belong to the analytical row below | ✔ | ✔ | ✔ |
 | D-072 Cari notes: 120 = Müşteri / 320 = Satıcı labels, USD-column note (fixed text), and the Cari report date with its provenance (the date and "dosya adındaki tarih" / "yükleme tarihi"; the original file name itself is shown only in the owner's upload preview) — part of the Cari analytical row, withheld until VERIFIED | notice today | same | same |
-| **D-073 (prepared, not active): the factual Cari list once `receivables.collections` is VERIFIED** — per Cari account: code, recorded name, representative code, class (Müşteri (120) / Satıcı (320) / Sınıflandırılmadı), exact signed TL balance, sign wording, oldest invoice month; the report date with its provenance; fixed notes (no overdue, USD apart). No totals, ranking or overdue. Becomes visible to anyone with the link at activation — **owner sign-off on this row is required before any hosting** (D-060) | notice today; ✔ once VERIFIED | same | same |
+| **D-073: the factual Cari list (`receivables.collections`, VERIFIED-certified; shown only while its evidence is fresh — 60 days — and bound)** — per Cari account: code, recorded name, representative code, class (Müşteri (120) / Satıcı (320) / Sınıflandırılmadı), exact signed TL balance, sign wording, oldest invoice month; the report date with its provenance; fixed notes (no overdue, USD apart). No totals, ranking or overdue. **Account-level financial disclosure — FLAGGED for the access / launch checkpoint:** under the legacy local model it is viewer-level (no password); public-by-link disclosure is **not** approved; the required launch puts it behind the site-wide password (and the checkpoint decides whether it needs the financial password) | ✔ (legacy local model only; not approved for hosting) | ✔ | ✔ |
 | Analytical tables, action queue, drawer facts, Günlük Satış, Customer 360 profile, Fırsatlar, fair history | notice today; ✔ once VERIFIED | same | same |
 | Customer directory (code + recorded name) — **approved** | ✔ | ✔ | ✔ |
 | CRM follow-ups, contacts, **notes, owner labels, legacy memory text** — **approved** | ✔ | ✔ | ✔ |

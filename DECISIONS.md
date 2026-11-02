@@ -1336,27 +1336,32 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   `GENERATION_BOUND_API_EVIDENCE` False; 33 metrics, 0 VERIFIED. `POLICY_VERSION` → `m8-cari-d072` (labels and date
   provenance change the page; old pages need the existing controlled refresh). D-071 overdue withdrawals unchanged.
 
-### D-073 · 2026-11-01 · First single-metric promotion of `receivables.collections` — PREPARED; freshness policy PROPOSED, owner approval PENDING (not in force)
-- **Status:** engineering preparation only. The freshness clause below is a **proposal awaiting the owner's explicit
-  approval**; it is not an approved owner decision, and nothing is certified until that approval is recorded here (an
-  "Owner approval" line with its date) by the activation change.
-- **Proposed owner policy (pending):** current Cari account balances are shown only while the Cari report is at most
-  **45 days** old, counted from the report date of D-072 D1 (the date in the original file name; the upload date only
-  when the name has none). The 5 Oct 2026 export: eligible through 19 Nov 2026, withheld from 20 Nov 2026 (46 days).
-  A newly uploaded, independently validated monthly report is judged by its own file-name date. Implemented as the
-  metric-specific, **unapproved** definition `cari_balance_freshness` (`max_age_days = 45`); `validate_register`
-  requires the metric's `max_source_age_days` to equal it. Every other operational metric keeps the general
-  `operational_freshness` (unapproved, unchanged).
-- **Prepared now (inert while the policy is unapproved):** `receivables.collections` — REAL-DATA removed and replaced
-  by the counts-only reconciliation reference `accuracy.CARI_RECONCILIATION_REF` (owner-local real-data acceptance
-  2026-11-02 UTC, `docs/accuracy/m8_d073_cari_promotion.md` §4); approval references D-069, D-071, D-072, D-073;
-  regression tests named in the register. The retired refresh count `overdue_total` is now bound to the withdrawn
-  `receivables.risk` (never un-redacted by certifying the factual list). `validate_register` refuses a `PENDING…`
-  reconciliation reference. Production stays: 33 metrics, 0 VERIFIED, `GENERATION_BOUND_API_EVIDENCE` False.
-- **Activation (after the owner's sign-off; exactly three changes, proved by `tests/fixtures/d073_activation.py`):**
-  `cari_balance_freshness` approved with decision_ref D-073; `receivables.collections` certified VERIFIED;
-  `GENERATION_BOUND_API_EVIDENCE = True`. No other metric, permission or calculation changes.
-- **Disclosure:** once active, the factual Cari list is visible to anyone with the link (viewer level, D-060 / D-061);
-  the row is in `docs/m8_cp1_access.md` §6 and needs the owner's sign-off before any hosting.
-- **Unchanged:** D-069 Option B (the 7 strict FAIL / 20 OPEN stay recorded and shown); D-071 withdrawals; D-072 rules;
-  access levels; Stok / Satış dates (separate checkpoint); R5B2; hosting.
+### D-073 · 2026-11-01 · First VERIFIED metric: `receivables.collections` (Cari list), 60-day Cari freshness (owner decision)
+- **Owner approval (2026-11-01, relayed in the PR #43 review):** current Cari account balances are shown only while
+  the Cari report is at most **60 days** old, counted from the report date of D-072 D1. This supersedes the 45-day
+  proposal of the first PR #43 draft. The 5 Oct 2026 export: eligible through **4 Dec 2026** (day 60), withheld from
+  **5 Dec 2026** (day 61). A newly uploaded, independently validated monthly report is judged by its own date.
+- **No-date fallback (D-072 D1, already owner-approved, not re-asked):** when the original file name has no parseable
+  date, the upload calendar date is the report date, with its provenance recorded and shown; it gets the same 60-day
+  rule and stays generation-bound. An impossible or ambiguous date in a name is still refused (422), never guessed.
+- **Scope:** `receivables.collections` only — definition `cari_balance_freshness` (approved, D-073, `max_age_days =
+  60`), metric `max_source_age_days = 60` (`validate_register` requires the two to agree and at most one freshness
+  policy per metric). The global `operational_freshness` (unapproved; `DEFAULT_OPERATIONAL_MAX_AGE_DAYS = 45`) and
+  every other metric's limit are unchanged.
+- **Promotion (D-069 Option B, §2 of `docs/accuracy/release_gate.md`):** REAL-DATA replaced by the counts-only
+  reconciliation reference `accuracy.CARI_RECONCILIATION_REF` (owner-local real-data acceptance, report §4); approval
+  references D-069, D-071, D-072, D-073; named regression tests; certified **VERIFIED** — a ceiling: every request still
+  needs fresh, generation-bound, scoped evidence (report date, field mapping `cari_balance_fields_v2`, independent
+  reproduction, no problem in its own inputs). `GENERATION_BOUND_API_EVIDENCE = True` after the owner-local §8.3
+  steps 1–5 passed on the real exports for this release. The retired `overdue_total` refresh count is bound to the
+  withdrawn `receivables.risk`; `validate_register` refuses a `PENDING…` reconciliation reference.
+  `POLICY_VERSION` → `m8-cari-d073`: a page built under `m8-cari-d072` (always without the Cari list) is refused and
+  must be rebuilt by the controlled refresh / restart re-publication.
+- **Production state:** 33 metrics; exactly one VERIFIED-certified (`receivables.collections`); the other 32 keep their
+  ceilings and are withheld. D-071 withdrawals unchanged (no overdue total, urgency, risk or recommendations). The 7
+  strict FAIL / 20 OPEN and Veri Kontrol findings stay recorded and shown.
+- **Access — not decided here:** the owner's current launch requirement is a site-wide password, a separate password
+  for the sensitive financial sections, and owner-only administration / uploads / edits. The implemented D-061 model
+  (public viewer without a password) is the **legacy local arrangement**, not the approved hosting arrangement, and is
+  no approval of public-by-link disclosure of Cari account names and balances. The account-level Cari list is flagged
+  for the separate access / launch checkpoint; no hosting or external deployment is authorized.

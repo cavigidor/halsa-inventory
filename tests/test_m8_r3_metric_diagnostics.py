@@ -25,6 +25,7 @@ import pytest
 
 from scripts import reconcile_sources as RS
 from services import accuracy as ACC
+from tests import release_state as REL
 from services import generation as GEN
 from services import metric_diagnostics as MD
 from services import refresh as RF
@@ -145,7 +146,7 @@ def test_states_match_the_production_gate(tmp_path, make):
 
 def test_a_gate_verified_synthetic_metric_is_still_not_certifiable(tmp_path, promoted):  # noqa: F811
     # a SYNTHETIC register copy certifies stock.reorder; with full declarations its gate decision may be VERIFIED —
-    # the release prerequisites (flag off and app checks) still refuse certification under Option B
+    # the release prerequisites (the app checks this command cannot evaluate) still refuse certification under Option B
     d = folder_clean(tmp_path)
     selection(d)
     m, served, diag = diag_of(d)
@@ -154,8 +155,9 @@ def test_a_gate_verified_synthetic_metric_is_still_not_certifiable(tmp_path, pro
         "stock.reorder").state.value
     assert dm["certification_permitted"] is False
     unmet = {p["code"] for p in dm["release_prerequisites"] if p["met"] is not True}
-    assert {"generation_bound_api_evidence", "app_refresh_and_restart_binding"} <= unmet
+    assert "app_refresh_and_restart_binding" in unmet
     prereq = {p["code"]: p["met"] for p in dm["release_prerequisites"]}
+    assert prereq["generation_bound_api_evidence"] is True                 # D-073: the flag is set
     assert "kredi_reconciliation_not_fail" not in prereq
     assert prereq["metric_source_dependencies_clear"] is True
     assert "EVET" not in "\n".join(MD.render_tr(diag))
@@ -225,9 +227,11 @@ def test_missing_dates_totals_mapping_and_definitions_block(tmp_path):
             assert not {"Kaynak toplamlarının mutabakatı yapılmadı.", "Kaynak eşlemesinin onayı bilinmiyor."} & texts
         else:
             assert {"Kaynak toplamlarının mutabakatı yapılmadı.", "Kaynak eşlemesinin onayı bilinmiyor."} <= texts
-        # D-073: the Cari list has its own (pending) freshness policy; every other metric keeps the general one
-        fresh = "cari_balance_freshness" if k == "receivables.collections" else "operational_freshness"
-        assert fresh in {x["key"] for x in dm["unapproved_definitions"]}
+        # D-073: the Cari list's own freshness policy is approved; every other metric keeps the general, unapproved one
+        if k == "receivables.collections":
+            assert dm["unapproved_definitions"] == []
+        else:
+            assert "operational_freshness" in {x["key"] for x in dm["unapproved_definitions"]}
         assert dm["gate_state"] != "verified" and dm["certification_permitted"] is False
 
 
@@ -371,9 +375,9 @@ def test_nothing_is_promoted_or_written(tmp_path, capsys):
     assert _snapshot_tree(d) == tree_before and not list(Path(d).glob("*.json")) and not list(Path(d).glob("*.db"))
     assert not (Path(d) / "reconciliation").exists()
     assert ACC.REGISTER == reg_before and ACC.DEFINITIONS == defs_before
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
+    REL.assert_release_state()                    # D-073: one certified metric, flag True
     ACC.validate_register()
-    assert all(m.certified != ACC.State.VERIFIED for m in ACC.REGISTER.values())
+    assert REL.certified_keys() == list(REL.CERTIFIED)
 
 
 # ---------------------------------------------------------------------------------------------

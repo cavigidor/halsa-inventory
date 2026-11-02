@@ -11,6 +11,7 @@ import pytest
 
 from services import access as AX
 from services import accuracy as ACC
+from tests import release_state as REL
 from services import owner_auth as AUTH
 from services import store as ST
 from tests.fixtures import fair_synth as FX
@@ -281,8 +282,8 @@ def test_owner_login_grants_financial_viewing_and_administration(app_env):
 # 10 --------------------------------------------------------------------------------------------
 @pytest.mark.production_gate
 def test_accuracy_gate_withholds_unverified_metrics_from_every_level(app_env):
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
-    assert not any(m.certified == ACC.State.VERIFIED for m in ACC.REGISTER.values())
+    REL.assert_release_state()                    # D-073: one certified metric, flag True
+    assert REL.certified_keys() == list(REL.CERTIFIED)
     anon, fin, owner = app_env(), finance_client(app_env), owner_client(app_env)
     for cl in (anon, fin, owner):
         for p in ("/api/agent/actions", "/api/sales-queue", "/api/opportunities/summary"):
