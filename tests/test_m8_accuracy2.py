@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 import app as APP
 import dashboard_builder as db
 from services import accuracy as ACC
+from tests import release_state as REL
 from services import generation as GEN
 from services import refresh as RF
 from services import source_validation as SV
@@ -554,10 +555,10 @@ def test_dq5_and_dq6_remain_open():
 # ---------------------------------------------------------------------------------------------
 # promotion rules (Task 8) and AI (16)
 # ---------------------------------------------------------------------------------------------
-def test_no_production_metric_is_verified_and_the_flag_stays_off():
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
+def test_only_the_d073_metric_is_certified_and_the_flag_is_set_after_acceptance():
+    REL.assert_release_state()                    # D-073: one certified metric, flag True
     ACC.validate_register()
-    assert all(m.certified != S for m in ACC.REGISTER.values())
+    assert [k for k, m in ACC.REGISTER.items() if m.certified == S] == list(REL.CERTIFIED)
     assert not ACC.DEFINITIONS["operational_freshness"].approved
     assert not ACC.DEFINITIONS["kredi_durum"].approved
 

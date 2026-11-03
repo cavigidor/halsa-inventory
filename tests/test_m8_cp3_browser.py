@@ -193,7 +193,8 @@ def test_owner_uploads_validates_previews_and_publishes_from_the_fixed_page(brow
                   "Gizli kalan analizler", "Eksik kaynak bilgileri", "bilinmiyor (beyan edilmedi)", "30 Haziran 2026",
                   "Değişiklikleri Yayınla"):
             assert t in prev, t
-        assert "Gösterilir (doğrulanmış)" not in prev                        # nothing becomes visible
+        # D-073: only the factual Cari list (fresh report, upload-date fallback) becomes visible; nothing else
+        assert prev.count("Gösterilir (doğrulanmış)") == 1 and "Cari Bakiye (fatura yaşı)" in prev
         oks = page.eval_on_selector_all('#up .up-preview .up-chip[data-found="true"]', "els => els.map(e => e.textContent)")
         assert oks and all(t.startswith("✓ ") for t in oks)                  # found columns keep their tick
         assert not page.query_selector_all('#up .up-preview .up-chip[data-found="null"]')

@@ -13,6 +13,7 @@ from services.agent import BusinessActionAgent
 from services.ai.mock_provider import MockProvider
 from services.entity import ContextRepository
 from services.stock_policy import RETIREMENT_CODE
+from tests import release_state as REL
 from tests.fixtures import synthetic_erp as SE
 from tests.fixtures.xlsx_synth import F, write_xlsx
 from tests.test_m8_accuracy import client  # noqa: F401 — real API gate, real synthetic source context
@@ -132,8 +133,8 @@ def test_no_sales_is_not_discontinued_and_no_recommendation_total_is_zero(synthe
     assert stats['low'] is stats['over'] is stats['overstock_value'] is None
     text = (tmp_path / 'page.html').read_text()
     assert 'Kapsama minseviye altında' not in text and 'Negatif kapsama = fazla satılmış' not in text
-    assert not any(m.certified == ACC.State.VERIFIED for m in ACC.REGISTER.values())
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
+    assert REL.certified_keys() == list(REL.CERTIFIED)
+    REL.assert_release_state()                    # D-073: one certified metric, flag True
     for key in ('stock.reorder', 'stock.overstock'):
         decision = ACC.current_gate().decide(key)
         assert not decision.displayable and RETIREMENT_CODE in decision.codes

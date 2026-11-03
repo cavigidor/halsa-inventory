@@ -24,6 +24,7 @@ from xml.sax.saxutils import unescape
 import pytest
 
 from services import accuracy as ACC
+from tests import release_state as REL
 from services import generation as GEN
 from services import refresh as RF
 from services import source_validation as SV
@@ -253,4 +254,4 @@ def test_generation_evidence_and_gate_ignore_the_phantom_row(tmp_path):
     da, db_ = gate(ma).decide("receivables.collections"), gate(mb).decide("receivables.collections")
     assert da.state == db_.state and da.reasons_tr == db_.reasons_tr and da.codes == db_.codes
     assert not any("tutar alanında boş hücre" in r for r in db_.reasons_tr)     # the T1 symptom is absent
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
+    REL.assert_release_state()                    # D-073: one certified metric, flag True

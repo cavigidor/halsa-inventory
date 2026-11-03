@@ -20,6 +20,7 @@ import pytest
 
 import dashboard_builder as db
 from services import accuracy as ACC
+from tests import release_state as REL
 from services import generation as GEN
 from services import source_validation as SV
 from services.importers.excel import column_index
@@ -234,5 +235,5 @@ def test_stock_code_authority_is_no_longer_a_static_blocker_and_nothing_is_verif
         codes = {b.code for b in ACC.REGISTER[k].blockers}
         assert "STOCK-CODE-AUTHORITY" not in codes and "STOCK-REPORT-SCOPE" in codes, k
         assert "STOCK-DATE" in codes and ACC.B_REAL.code in codes, k
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
-    assert all(m.certified is not S for m in ACC.REGISTER.values())
+    REL.assert_release_state()                    # D-073: one certified metric (not a stock metric), flag True
+    assert all(ACC.REGISTER[k].certified is not S for k in ("stock.reorder", "stock.overstock", "stock.product_counts"))

@@ -29,6 +29,7 @@ from services import generation as GEN
 from services import store as ST
 from services import vkm as V
 from services import vkm_store as VS
+from tests import release_state as REL
 from tests.fixtures import synthetic_erp as SE
 from tests.test_m8_accuracy2b import HEAD, book, products
 from tests.test_m8_vkm import (by_check, dump, events, finance, http, insync, manifest_of, observe_core,  # noqa: F401
@@ -412,8 +413,8 @@ def test_out_of_sync_and_resync_never_change_the_gate(http, monkeypatch):
     assert c.post("/api/vkm/sync", json={}).status_code == 200
     gate = ACC.current_gate()
     assert {k: (gate.decide(k).state, gate.decide(k).codes) for k in ACC.REGISTER} == before
-    assert not any(gate.decide(k).state == ACC.State.VERIFIED for k in ACC.REGISTER)
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
+    assert not any(gate.decide(k).state == ACC.State.VERIFIED for k in ACC.REGISTER if k not in REL.CERTIFIED)
+    REL.assert_release_state()                    # D-073: one certified metric, flag True
 
 
 def test_observer_failure_is_logged_without_content(tmp_path, monkeypatch, caplog):

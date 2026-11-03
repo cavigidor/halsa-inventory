@@ -21,6 +21,7 @@ import pytest
 
 import app as APP
 from services import accuracy as ACC
+from tests import release_state as REL
 from services import generation as GEN
 from services import refresh as RF
 from services import request_pin as RP
@@ -128,8 +129,8 @@ def assert_refused_stale_and_b_kept(s, pj, b_state):
     assert all(n.startswith("yukleme-") and n.encode() not in named for n in gone), gone
     assert {k: v for k, v in b_state["source_bytes"].items() if k in after["source_bytes"]} == after["source_bytes"]
     assert B_STOCK in after["data_folder"] and B_STOCK.encode() in named
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
-    assert not [m for m in after["metrics"] if m["state"] == "verified"]
+    REL.assert_release_state()                    # D-073: one certified metric, flag True
+    assert not REL.verified_outside_certified(after["metrics"])
     with APP.app.state.uploads._lock, UC.ST._conn() as c:             # the refusal is in the append-only history
         ev = [(e["event"], json.loads(e["detail"] or "{}").get("code"))
               for e in c.execute("SELECT * FROM upload_event WHERE batch_id=? ORDER BY event_id", (pj["batch"]["batch_id"],))]
@@ -174,7 +175,7 @@ def test_after_a_stale_refusal_a_fresh_preview_of_the_same_files_publishes(srv, 
     st = s.c.get("/api/accuracy/status").json()
     assert st["core_id"] not in (b_core, None)
     assert all(x["bound"] for x in st["sources"] if x["key"] in ("stock", "sales", "aging"))
-    assert not [m for m in st["metrics"] if m["state"] == "verified"]
+    assert not REL.verified_outside_certified(st["metrics"])
 
 
 # ---------------------------------------------------------------------------------------------

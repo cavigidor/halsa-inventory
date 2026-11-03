@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 import app as APP
 import dashboard_builder as db
 from services import accuracy as ACC
+from tests import release_state as REL
 from services import refresh as RF
 from services import store as ST
 from services.agent import BusinessActionAgent
@@ -93,16 +94,17 @@ def gate(metrics, evidence=None, definitions=None, generation=GEN, expected=GEN)
 # ---------------------------------------------------------------------------------------------
 # Part A — the register and the states
 # ---------------------------------------------------------------------------------------------
-def test_production_register_is_valid_and_nothing_is_verified_today():
+def test_production_register_is_valid_and_only_the_certified_metric_can_be_verified():
     ACC.validate_register()
+    REL.assert_release_state()                    # D-073: only receivables.collections is certified
     g = ACC.current_gate(today=TODAY)
     states = {k: g.decide(k).state for k in ACC.REGISTER}
-    assert S not in states.values(), "no metric may be VERIFIED without owner approval and real-data evidence"
+    assert S not in states.values(), "without bound evidence nothing is VERIFIED, not even a certified metric"
     # even perfectly clean evidence for every source cannot promote anything past its certification
     g2 = ACC.current_gate(today=TODAY, snapshot=snap({s: clean(s) for s in ("stock", "sales", "aging", "hedef",
                                                                             "kredi", "gider_gelir", "liste")}),
                           expected_generation=GEN)
-    assert all(not g2.decide(k).displayable for k in ACC.REGISTER)
+    assert all(not g2.decide(k).displayable for k in ACC.REGISTER if k not in REL.CERTIFIED)
 
 
 def test_known_invalid_outputs_are_classified_invalid():

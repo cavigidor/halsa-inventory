@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 import app as APP
 from services import access as AX
 from services import accuracy as ACC
+from tests import release_state as REL
 from services import context as CTX
 from services import customer360 as C360
 from services import owner_auth as AUTH
@@ -618,8 +619,8 @@ def test_protected_report_refresh(app_env, monkeypatch):
 # ---------------------------------------------------------------------------------------------
 @pytest.mark.production_gate
 def test_logging_in_never_reveals_an_unverified_metric(app_env):
-    assert not any(m.certified == ACC.State.VERIFIED for m in ACC.REGISTER.values())
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
+    assert REL.certified_keys() == list(REL.CERTIFIED)
+    REL.assert_release_state()                    # D-073: one certified metric, flag True
     anon, owner = app_env(), owner_client(app_env)
     for path in ("/api/agent/actions", "/api/sales-queue", f"/api/customer360/{FX.P[1]}",
                  "/api/opportunities/summary", "/api/fairs/history"):

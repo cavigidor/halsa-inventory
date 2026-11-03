@@ -28,11 +28,14 @@ GitHub (`cavigidor/halsa-inventory`) is the source of truth. Do not rely on chat
   in a file name is never collapsed into one report date.
 - Missing values are never zero.
 - **No verified evidence = no business conclusion (D-049).** Only outputs certified VERIFIED in `services/accuracy.py`
-  may be displayed. Never add a flag, env var or parameter that bypasses the gate; never classify a new route as
+  may be displayed (D-073: only `receivables.collections`, on fresh — 60 days — generation-bound evidence). Never add a flag, env var or parameter that bypasses the gate; never classify a new route as
   anything but a metric unless it carries no business conclusion; every new route must be listed in `ACC.ROUTES`.
 - The provider gets only a small evidence packet (`services/evidence.py`). It never gets
   Excel files, DataFrames, SQLite files, whole tables or paths.
-- **Access (D-060, D-061):** viewing the normal dashboard needs no login; the Yönetim financial projection is
+- **Access — legacy local arrangement (D-060, D-061), NOT the approved hosting model:** the owner's launch requirement
+  (2026-11-01) is one site-wide password, a separate financial password and owner-only administration / uploads /
+  edits — a separate access checkpoint; never describe public-by-link access as approved, and never host or deploy
+  without it. As implemented today: viewing the normal dashboard needs no login; the Yönetim financial projection is
   `finance_read` (financial-viewer password or owner, GET only); every state-changing, work-starting, paid-AI or
   administrative route is `owner_write` and every full-Yönetim / diagnostic read is `owner_read` in
   `services/access.py`. A financial session must never gain an owner permission. Every new route must

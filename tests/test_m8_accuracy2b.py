@@ -26,6 +26,7 @@ import pytest
 import app as APP
 import dashboard_builder as db
 from services import accuracy as ACC
+from tests import release_state as REL
 from services import generation as GEN
 from services import refresh as RF
 from services import source_validation as SV
@@ -455,10 +456,9 @@ def test_real_coverage_errors_still_withhold_reorder_but_not_by_the_join(tmp_pat
     assert coll.state != S and not any("eşleşme" in r.lower() for r in coll.reasons_tr)
 
 
-def test_no_production_metric_is_verified_and_the_flag_is_off():
+def test_only_the_d073_metric_is_certified_and_the_flag_is_on():
     ACC.validate_register()
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
-    assert all(m.certified != S for m in ACC.REGISTER.values())
+    REL.assert_release_state()                    # D-073: one certified metric, flag True
 
 
 # =============================================================================================

@@ -17,6 +17,7 @@ import pytest
 import app as APP
 import dashboard_builder as db
 from services import accuracy as ACC
+from tests import release_state as REL
 from services import generation as GEN
 from services import refresh as RF
 from tests.test_m8_accuracy2 import (SE, TODAY, promoted, refresh, selection, stock_rows, world,  # noqa: F401
@@ -274,9 +275,9 @@ def test_restart_only_serves_bytes_published_by_this_process(world, empty_publis
 
 # 7 + 8 ------------------------------------------------------------------------------------------
 def test_no_production_metric_is_verified_and_the_flag_stays_off():
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
+    REL.assert_release_state()                    # D-073: one certified metric, flag True
     ACC.validate_register()
-    assert all(m.certified != ACC.State.VERIFIED for m in ACC.REGISTER.values())
+    assert REL.certified_keys() == list(REL.CERTIFIED)
 
 
 def test_get_root_never_calls_an_ai_provider(world, empty_published, monkeypatch):

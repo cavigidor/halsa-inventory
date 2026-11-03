@@ -1,6 +1,28 @@
 # STATUS.md — current checkpoint
 
-**2026-11-01 — M8 first Cari metric (D-072): owner decisions implemented — draft PR, NOT merged, NOT deployed.**
+**2026-11-01 — M8 first VERIFIED metric, `receivables.collections` (D-073, owner-approved 60-day Cari freshness):
+ACTIVATED in draft PR #43 — NOT merged, NOT deployed, no hosting.**
+- Branch `claude/m8-cari-verified-promotion` from `main` @ `5e3656d`. D-073 (owner, 2026-11-01): 60 days from the Cari
+  report date (file-name date; upload date when the name has none, D-072 D1); the 5 Oct export is shown through
+  4 Dec and withheld from 5 Dec. `cari_balance_freshness` approved (D-073, 60 days) for this metric only; the global
+  `operational_freshness` (45 days, unapproved) and the other 32 metrics unchanged.
+- Production register: 33 metrics, **exactly one certified VERIFIED** (`receivables.collections`), REAL-DATA replaced
+  by the counts-only reconciliation reference, `GENERATION_BOUND_API_EVIDENCE` **True** after the owner-local §8.3
+  acceptance, `POLICY_VERSION` `m8-cari-d073` (pages of `m8-cari-d072` refused until rebuilt). Certification is a
+  ceiling: the list is shown only on fresh, generation-bound, scoped evidence. D-071 withdrawals unchanged.
+- Owner-local real-data acceptance (Mac, final code, 2026-11-02 04:02 UTC): PASS — originals = copies (Stok
+  `63602ae3e8bf`, Satış `be1d895e426b`, Cari `672fac2f5bf6`); core `01d305886628f6c6`; 824 / 824 reproduced;
+  1 verified / 4 not_verified / 28 invalid; restart same core; page generation = API generation; 4 Dec shown, 5 Dec
+  withheld; strict FAIL 7 / 20 OPEN and Veri Kontrol 17 unchanged.
+- Access: the D-061 public viewer is the legacy local arrangement; the owner's launch requirement (site password +
+  financial password + owner-only administration) is a separate checkpoint; the Cari account list is flagged there.
+- Tests: full suite (browser + JS required, AI disabled) on the final tree: **2003 passed, 7 skipped, 1 xfailed**
+  (`main` 1978 + 22 D-073 + 3 net from the predecessor-policy cases; GitHub CI on the exact head: see the PR).
+  Report: `docs/accuracy/m8_d073_cari_promotion.md`.
+
+**2026-11-01 — M8 first Cari metric (D-072): owner decisions implemented — MERGED: PR #42 squash-merged as `5e3656d`
+(reviewed head `fcfdc33`; `main` CI run `41375523440`: 1978 passed / 7 skipped / 1 xfailed; not deployed). This
+heading said "draft PR, NOT merged" when written; corrected 2026-11-01, body unchanged.**
 - Branch `claude/m8-cari-first-metric` from `main` @ `0604fe8`. D-072: Cari as-of date = date in the original file name
   (upload date if none, with provenance); `Toplam Döviz Bakiye` = USD, kept apart; exports authoritative (DinamikCRM),
   balances reproduced independently; 120 = Müşteri, 320 = Satıcı. Final-review corrections: Cari mapping is a
@@ -17,7 +39,10 @@
 - Tests: full suite (browser + JS required, AI disabled) **1962 passed, 7 skipped, 1 xfailed** (`main` 1926 + 33 D-072 +
   3 predecessor-policy cases); focused 389 passed / 1 xfailed. Report: `docs/accuracy/m8_d072_cari_first_metric.md`.
 
-**2026-10-31 — M8-R5B1 (D-071): Cari invoice age is not overdue debt — draft PR, NOT merged, NOT deployed.**
+**2026-10-31 — M8-R5B1 (D-071): Cari invoice age is not overdue debt — MERGED: PR #41 squash-merged as `0604fe8`
+(main CI 1926 passed / 7 skipped / 1 xfailed; not deployed). Owner-local real-data technical acceptance of D-070 and
+D-071 on the 5 Oct exports completed 2026-11-01 (all checks passed; counts in the D-072 / D-073 reports). This heading
+said "draft PR, NOT merged" when written; corrected 2026-11-01, body unchanged.**
 - Branch `claude/m8-r5b1-cari-interpretation` from `main` @ `3f24199` (fresh clone, synthetic data only, AI disabled).
   Owner-relayed father rules recorded as D-071: Cari month buckets = invoice age, not due dates; overdue depends on
   customer agreements (report not supplied); 320 = suppliers; negative balance = Halsa owes the customer.

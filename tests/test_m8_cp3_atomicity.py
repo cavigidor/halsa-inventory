@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 
 import app as APP
 from services import accuracy as ACC
+from tests import release_state as REL
 from services import generation as GEN
 from services import owner_view as OV
 from services import store as ST
@@ -129,8 +130,8 @@ def assert_failed_and_unchanged(s, before, pj):
     after = surfaces(s)
     for k in before:
         assert after[k] == before[k], k
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
-    assert not [m for m in after["metrics"] if m["state"] == "verified"]
+    REL.assert_release_state()                    # D-073: one certified metric, flag True
+    assert not REL.verified_outside_certified(after["metrics"])
 
 
 def assert_restart_serves_the_same(s, before):
@@ -324,7 +325,7 @@ def test_a_clean_publication_after_a_rollback_commits_everything_and_is_observed
     assert s.c.get("/api/vkm/issues").json()["sync"]["state"] == "in_sync"
     c360_ready(s)                                                   # the new generation's customer view
     assert "Sentetik CRM notu" in surfaces(s)["crm"] and "Sentetik Kampanya" in surfaces(s)["fairs"]
-    assert not [m for m in st["metrics"] if m["state"] == "verified"]
+    assert not REL.verified_outside_certified(st["metrics"])
 
 
 def test_held_notifications_belong_to_the_publishing_thread_only():

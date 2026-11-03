@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 import app as APP
 import dashboard_builder as db
 from services import accuracy as ACC
+from tests import release_state as REL
 from services import generation as GEN
 from services import owner_auth as AUTH
 from services import refresh as RF
@@ -179,10 +180,12 @@ def test_multi_file_upload_validates_previews_and_publishes_explicitly(srv):
     # reconciliation status, VKM delta, dashboard sections, withheld metrics
     assert {r["source"] for r in p["reconciliation"]} >= {"stock", "sales", "aging", "kredi"}
     assert p["vkm"]["counts"]["new"] > 0 and p["vkm"]["sources"]
-    assert p["sections"]["metrics_verified"] == 0 and p["sections"]["metrics_withheld"] == len(ACC.REGISTER)
-    assert all(not t["displayable_after"] for t in p["sections"]["tabs"])
+    # D-073: the fresh Cari report (upload-date fallback, D-072 D1) makes exactly the factual Cari list displayable
+    assert p["sections"]["metrics_verified"] == 1 and p["sections"]["metrics_withheld"] == len(ACC.REGISTER) - 1
+    assert [t["metric"] for t in p["sections"]["tabs"] if t["displayable_after"]] == list(REL.CERTIFIED)
+    assert {t["title"] for t in p["sections"]["tabs"] if t["displayable_after"]} == {"Cari Bakiye (fatura yaşı)"}
     assert p["as_of"]["candidate"] == "2026-06-30" and "gözlenen" in p["as_of"]["note"]
-    assert p["generation_bound_api_evidence"] is False and p["ai_used"] is False
+    assert p["generation_bound_api_evidence"] is True and p["ai_used"] is False
     # the preview changed nothing live
     assert live_files(s) == before and vkm_counts()["dq_observation"] == 0
     assert not any(cfg.configured for cfg in APP.app.state.owner.configs().values())
@@ -190,10 +193,10 @@ def test_multi_file_upload_validates_previews_and_publishes_explicitly(srv):
     r, pj = publish(s, bid)
     assert r.status_code == 202 and pj["state"] == "done" and pj["batch"]["status"] == "published"
     assert pj["kind"] == "publish" and pj["batch"]["published_at"]
-    # dashboard, generation, explicit selections — every source bound, every metric still withheld
+    # dashboard, generation, explicit selections — every source bound, every metric but the D-073 Cari list withheld
     assert s.c.get("/").status_code == 200
     st = s.c.get("/api/accuracy/status").json()
-    assert st["selection_origin"] == "explicit" and st["generation_bound_api_evidence"] is False
+    assert st["selection_origin"] == "explicit" and st["generation_bound_api_evidence"] is True
     srcs = {x["key"]: x for x in st["sources"]}
     assert set(srcs) == {"stock", "sales", "liste", "aging", "kredi", "gider_gelir", "butce"}
     assert all(x["bound"] for x in srcs.values())
@@ -201,7 +204,9 @@ def test_multi_file_upload_validates_previews_and_publishes_explicitly(srv):
     assert srcs["aging"]["declared"]["snapshot_date"] == dt.date.today().isoformat()       # D-072 D1 upload-date fallback
     assert srcs["aging"]["declared"]["date_origin"] == "upload_date"
     assert {srcs[k]["selection_origin"] for k in ("kredi", "gider_gelir", "butce")} == {"upload"}
-    assert {m["state"] for m in st["metrics"]} <= {"not_verified", "invalid", "unavailable"}
+    assert {m["state"] for m in st["metrics"] if m["key"] not in REL.CERTIFIED} <= {"not_verified", "invalid",
+                                                                                   "unavailable"}
+    assert not REL.verified_outside_certified(st["metrics"])                      # D-073: only the Cari list
     sel = json.load(open(s.data / GEN.SELECTION_FILE))
     assert sel["schema"] == GEN.SELECTION_SCHEMA and set(sel["core"]) == {"stock", "sales", "aging"}
     assert sel["core"]["aging"] == {"file": sel["core"]["aging"]["file"], "snapshot_date": dt.date.today().isoformat(),
@@ -728,9 +733,9 @@ def test_publication_never_promotes_a_metric_and_payloads_carry_no_values(srv):
     body = json.dumps(b, ensure_ascii=False) + json.dumps(s.c.get("/api/uploads").json(), ensure_ascii=False)
     assert not [x for x in SECRETS if x in body]
     _, pj = publish(s, bid)
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is False
+    REL.assert_release_state()                    # D-073: one certified metric, flag True
     st = s.c.get("/api/accuracy/status").json()
-    assert not [m for m in st["metrics"] if m["state"] == "verified"]
+    assert not REL.verified_outside_certified(st["metrics"])
     assert s.c.get("/api/sales-queue").status_code == ACC.WITHHELD_HTTP_STATUS
     html = s.c.get("/").text
     assert '<button class="tab" data-t="up" hidden>Dosya Yükleme</button>' in html
