@@ -1,7 +1,8 @@
-"""M8-CP1 (D-060) in a real browser (Playwright + Chromium, real FastAPI server, synthetic data).
+"""M8-CP1 / CP1B (D-060, D-061, D-074) in a real browser (Playwright + Chromium, real FastAPI server, synthetic data).
 
-The father's experience: open the link, no login, every tab navigable, nothing changeable. The owner's experience:
-log in once through /giris, change data, log out. The server uses the REAL owner login (no harness).
+The father's experience (D-074): open the link → one Turkish site-password page → the dashboard, every tab navigable,
+nothing changeable; the financial password once more for Yönetim. The owner's experience: log in once through /giris,
+change data, log out. Logging out ends viewing too. The server uses the REAL logins (no harness).
 """
 import pytest
 
@@ -12,22 +13,49 @@ from tests.test_m7_fair_browser import _get, browser, fair_server  # noqa: F401 
 TABS = ["sq", "c360", "opp", "fair", "crm", "own", "ai"]
 
 
-def viewer_page(browser):
-    ctx = browser.new_context(viewport={"width": 1280, "height": 900})       # NO owner cookie
+def anon_page(browser):
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})       # no cookie at all
     page = ctx.new_page()
     page.errors = []
     page.on("pageerror", lambda e: page.errors.append(str(e)))
     return page
 
 
-def test_father_opens_the_link_and_navigates_without_login(browser, tmp_path):
+def viewer_page(browser):
+    """D-074: a browser that already entered the shared website password (no owner / financial session)."""
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    BA.authorize_viewer(ctx)
+    page = ctx.new_page()
+    page.errors = []
+    page.on("pageerror", lambda e: page.errors.append(str(e)))
+    return page
+
+
+def _site_login(page, password):
+    page.fill("#pw", password)
+    page.click("#b")
+
+
+def test_father_enters_the_site_password_once_and_navigates(browser, tmp_path):
     with fair_server(tmp_path) as srv:
-        page = viewer_page(browser)
+        page = anon_page(browser)
         r = page.goto(srv["base"] + "/")
-        assert r.status == 200 and page.url.rstrip("/") == srv["base"]          # no redirect to a login page
-        page.wait_for_selector('#halsa-access[data-mode="viewer"]')
+        assert r.status == 401 and page.url.rstrip("/") == srv["base"]          # same address, password page
+        assert "Site şifresi" in page.inner_text("main") and page.is_visible("#pw")
+        assert "const DATA" not in page.content() and page.query_selector(".tab") is None   # no business data
+        assert page.get_attribute('main a[href="/giris"]', "href") == "/giris"
+        _site_login(page, "yanlis-parola-0000")
+        page.wait_for_function("() => document.getElementById('m').textContent === 'Şifre hatalı.'")
+        assert page.input_value("#pw") == ""
+        _site_login(page, BA.TEST_VIEWER_PASSWORD)
+        page.wait_for_selector('#halsa-access[data-mode="viewer"]')              # the same page, now the dashboard
+        assert page.url.rstrip("/") == srv["base"]
+        cookies = {c["name"]: c for c in page.context.cookies()}
+        assert cookies["halsa_owner"]["httpOnly"] and cookies["halsa_owner"]["sameSite"] == "Strict"
         bar = page.inner_text("#halsa-access")
-        assert "Görüntüleme modu" in bar and page.get_attribute("#halsa-access a", "href") == "/giris"
+        assert "Görüntüleme (site girişi)" in bar and page.get_attribute("#halsa-access a", "href") == "/giris"
+        page.reload()                                                           # entered once per session
+        page.wait_for_selector('#halsa-access[data-mode="viewer"]')
         tabs = page.eval_on_selector_all(".tab", "els => els.map(e => e.dataset.t)")
         assert tabs[-7:] == TABS
         assert page.is_hidden('.tab[data-t="up"]')                              # M8-CP3: owner-only upload tab
@@ -42,6 +70,42 @@ def test_father_opens_the_link_and_navigates_without_login(browser, tmp_path):
         page.wait_for_selector("#own .ow-login:not([hidden])")
         assert page.is_hidden('#own [data-sec="kredi"]')
         assert page.errors == []
+
+
+def test_a_bookmarked_section_opens_after_the_site_password(browser, tmp_path):
+    with fair_server(tmp_path) as srv:
+        page = anon_page(browser)
+        assert page.goto(srv["base"] + "/#yonetim").status == 401
+        _site_login(page, BA.TEST_VIEWER_PASSWORD)
+        page.wait_for_selector("#own.on .ow-login:not([hidden])")               # bookmark kept: Yönetim, locked
+        assert page.url == srv["base"] + "/#yonetim" and page.is_hidden('#own [data-sec="kredi"]')
+        assert page.errors == []
+
+
+def test_logout_and_revocation_end_viewing(browser, tmp_path):
+    import urllib.request
+    with fair_server(tmp_path) as srv:
+        page = viewer_page(browser)
+        page.goto(srv["base"] + "/")
+        page.wait_for_selector('#halsa-access[data-mode="viewer"]')
+        page.click("#halsa-access button")                                      # Çıkış yap
+        page.wait_for_selector("#pw")                                           # back to the site-password page
+        assert "halsa_owner" not in {c["name"] for c in page.context.cookies()}
+        assert page.query_selector(".tab") is None
+        BA._viewer_sessions.pop(srv["base"], None)                              # that cookie is gone: a new login
+        page2 = viewer_page(browser)                                            # another device, then revoked
+        page2.goto(srv["base"] + "/")
+        page2.wait_for_selector('#halsa-access[data-mode="viewer"]')
+        req = urllib.request.Request(srv["base"] + "/api/auth/viewer-sessions/revoke", data=b"{}", method="POST",
+                                     headers={**BA.headers(srv["base"]), "Content-Type": "application/json",
+                                              "X-StockAgent": "1"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            assert r.status == 200
+        page2.click('.tab[data-t="crm"]')                                        # the next data call is refused…
+        page2.wait_for_selector("#pw", timeout=15000)                           # …and the page shows the password
+        page2.reload()
+        page2.wait_for_selector("#pw")
+        assert page2.query_selector(".tab") is None
 
 
 def test_father_cannot_change_anything_and_is_told_why(browser, tmp_path):
@@ -75,7 +139,7 @@ def test_father_cannot_change_anything_and_is_told_why(browser, tmp_path):
 
 def test_owner_logs_in_changes_data_and_logs_out(browser, tmp_path):
     with fair_server(tmp_path) as srv:
-        page = viewer_page(browser)
+        page = anon_page(browser)                                               # the owner needs no site password
         page.goto(srv["base"] + "/giris")
         page.fill("#pw", "yanlis-parola-0000")
         page.click("#b")
@@ -97,7 +161,7 @@ def test_owner_logs_in_changes_data_and_logs_out(browser, tmp_path):
         page.click('.tab[data-t="own"]')
         page.wait_for_selector("#own .ow-bar:not([hidden])")                    # Yönetim opens for the owner
         page.click("#halsa-access button")                                      # Çıkış yap
-        page.wait_for_selector('#halsa-access[data-mode="viewer"]')
+        page.wait_for_selector("#pw")                                           # D-074: logged out = nothing visible
         assert "halsa_owner" not in {c["name"] for c in page.context.cookies()}
         assert page.errors == []
 
@@ -146,9 +210,8 @@ def test_father_unlocks_yonetim_with_the_financial_password_read_only(browser, t
         page.wait_for_selector("#ai .aic")
         assert page.eval_on_selector_all("#ai .aic", "els => els.map(e => e.dataset.id)") == before
         page.click("#halsa-access button")                                     # Çıkış yap
-        page.wait_for_selector('#halsa-access[data-mode="viewer"]')
-        page.click('.tab[data-t="own"]')
-        page.wait_for_selector("#own .ow-login:not([hidden])")                  # locked again
+        page.wait_for_selector("#pw")                                          # D-074: the site-password page
+        assert page.query_selector("#own") is None                             # nothing financial remains
         assert page.errors == []
 
 

@@ -16,7 +16,7 @@ from services import owner_auth as AUTH
 from services import store as ST
 from tests.fixtures import fair_synth as FX
 from tests.test_m8_cp1_access import (FIN_HASH, FIN_PASSWORD, HASH, OWNER_WRITES, PASSWORD, _bodies, _db_dump,  # noqa: F401
-                                      _fill, app_env, login, owner_client, world)
+                                      _fill, app_env, login, owner_client, viewer_client, world)
 
 pytestmark = pytest.mark.production_auth
 
@@ -60,9 +60,16 @@ def _sessions():
 
 
 # 1 ---------------------------------------------------------------------------------------------
-def test_anonymous_viewers_still_see_the_regular_dashboard(app_env):
-    cl = app_env()
-    assert cl.get("/").status_code != 401
+def test_site_and_financial_sessions_see_the_regular_dashboard_anonymous_does_not(app_env):
+    anon = app_env()
+    assert anon.get("/").status_code == 401                             # D-074: the site-password page
+    assert anon.get("/api/fairs/campaigns").status_code == 401
+    for cl in (viewer_client(app_env), finance_client(app_env)):
+        assert cl.get("/").status_code != 401
+        _regular_reads(cl)
+
+
+def _regular_reads(cl):
     for p in ("/api/agent/actions", "/api/sales-queue", f"/api/crm/customers/{FX.P[1]}", "/api/fairs/campaigns",
               "/api/crm/followups?mode=all", f"/api/customer360/search?q={FX.P[1][:7]}"):
         r = cl.get(p)
@@ -284,7 +291,7 @@ def test_owner_login_grants_financial_viewing_and_administration(app_env):
 def test_accuracy_gate_withholds_unverified_metrics_from_every_level(app_env):
     REL.assert_release_state()                    # D-073: one certified metric, flag True
     assert REL.certified_keys() == list(REL.CERTIFIED)
-    anon, fin, owner = app_env(), finance_client(app_env), owner_client(app_env)
+    anon, fin, owner = viewer_client(app_env), finance_client(app_env), owner_client(app_env)   # D-074: site viewer
     for cl in (anon, fin, owner):
         for p in ("/api/agent/actions", "/api/sales-queue", "/api/opportunities/summary"):
             r = cl.get(p)

@@ -29,8 +29,9 @@ class OwnerLogin(BaseModel):
 class OwnerSession(BaseModel):
     configured: bool                      # is an owner password hash configured on this server?
     finance_configured: bool = False      # D-061: is a financial-viewer password hash configured?
-    authenticated: bool                   # any session (owner or financial viewer)
-    role: Optional[Literal["owner", "finance"]] = None
+    viewer_configured: bool = False       # D-074: is the shared website (viewer) password hash configured?
+    authenticated: bool                   # any session (owner, financial viewer or website viewer)
+    role: Optional[Literal["owner", "finance", "viewer"]] = None
     csrf_token: Optional[str] = None      # only to the session's own same-origin page
     expires_at: Optional[str] = None
     idle_expires_at: Optional[str] = None

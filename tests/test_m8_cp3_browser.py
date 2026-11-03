@@ -63,13 +63,14 @@ def upload_server(tmp_path):
     proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(port)],
                             cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
     base = f"http://127.0.0.1:{port}"
+    BA.starting(base)                                                       # a replacement server may reuse the port
     try:
         deadline = time.monotonic() + 60
         while True:
             if proc.poll() is not None:
                 pytest.fail("server exited early:\n" + open(tmp_path / "server.log").read()[-3000:])
             try:
-                if _status(base + "/api/health")[0] == 200:
+                if _status(base + "/api/health", BA.probe_headers(base + "/api/health"))[0] == 200:   # D-074: a session
                     break
             except Exception:
                 pass
@@ -161,7 +162,8 @@ def test_reused_server_address_gets_a_fresh_owner_session(browser, tmp_path, mon
 def test_owner_uploads_validates_previews_and_publishes_from_the_fixed_page(browser, tmp_path):
     with upload_server(tmp_path) as srv:
         base = srv["base"]
-        assert _status(base + "/")[0] == 404                                # fresh server: nothing published
+        assert _status(base + "/")[0] == 401                                # D-074: anonymous → password page
+        assert _status(base + "/", BA.headers(base))[0] == 404              # fresh server: nothing published
         page = owner_page(browser, base)
         page.goto(base + "/yukleme")
         page.wait_for_selector('#up[data-access="owner"] .up-owner:not([hidden])')
@@ -200,7 +202,7 @@ def test_owner_uploads_validates_previews_and_publishes_from_the_fixed_page(brow
         assert not page.query_selector_all('#up .up-preview .up-chip[data-found="null"]')
         assert "sütunlar denetlenemedi" not in prev
         assert not [s for s in SECRETS if s in prev]
-        assert _status(base + "/")[0] == 404                                # the preview published nothing
+        assert _status(base + "/", BA.headers(base))[0] == 404              # the preview published nothing
         page.click("#up .up-publish")
         assert page.is_visible("#up .up-confirm")
         page.click("#up .up-yes")
@@ -301,13 +303,16 @@ def test_invalid_upload_shows_turkish_errors_and_cannot_be_published(browser, tm
         assert "✓" not in "".join(t for t, _, _ in unk)
         assert "sütunlar denetlenemedi" in prev
         assert page.query_selector("#up .up-publish") is None
-        assert _status(base + "/")[0] == 404
+        assert _status(base + "/", BA.headers(base))[0] == 404
 
 
 def test_viewers_and_financial_viewers_cannot_use_the_upload_center(browser, tmp_path):
     with upload_server(tmp_path) as srv:
         base = srv["base"]
-        for page in (anon_page(browser), anon_page(browser, finance_cookie(base), base)):
+        nobody = anon_page(browser)                                           # D-074: anonymous → password page only
+        assert nobody.goto(base + "/yukleme").status == 401 and nobody.is_visible("#pw")
+        assert nobody.query_selector("#up") is None
+        for page in (anon_page(browser, BA.viewer_login(base)[0], base), anon_page(browser, finance_cookie(base), base)):
             page.goto(base + "/yukleme")
             page.wait_for_selector("#up .up-viewer:not([hidden])")
             assert page.is_hidden("#up .up-owner")
@@ -339,7 +344,7 @@ def test_viewer_does_not_see_the_tab_on_the_dashboard(browser, tmp_path):
         page.click("#up .up-publish")
         page.click("#up .up-yes")
         page.wait_for_selector("#up .up-state.ok", timeout=60000)
-        vp = anon_page(browser)
+        vp = anon_page(browser, BA.viewer_login(base)[0], base)               # a website viewer
         vp.goto(base + "/")
         vp.wait_for_selector("#halsa-access:not([hidden])")
         time.sleep(0.3)

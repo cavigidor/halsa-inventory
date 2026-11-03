@@ -1,7 +1,25 @@
 # STATUS.md — current checkpoint
 
+**2026-11-03 — M8-CP1B (D-074): website password in front of everything — draft PR, NOT merged, NOT deployed.**
+- Branch `claude/m8-cp1b-site-password` from `main` @ `a2fe7bf` (D-073 merged as PR #43; merged-main CI 2003 passed /
+  7 skipped / 1 xfailed). D-074 retires the D-060 / D-061 public viewer: three passwords (website viewer, financial
+  viewer, owner), no accounts. Anonymous visitors get only the Turkish site-password page (any bookmarked page, same
+  address) and `/giris`; every data API answers 401 `site_auth_required`; missing website hash → refused
+  (`site_not_configured`), never public.
+- New role `viewer` (`HALSA_VIEWER_PASSWORD_HASH`, sessions cap 20, throttling, `revoke-sessions --viewer`, owner
+  `POST /api/auth/viewer-sessions/revoke`), login `POST /api/auth/viewer-login`; access level `public` = `/giris` only;
+  financial / owner sessions open the dashboard; no login downgrades; logout ends viewing. Write permissions, the
+  financial projection, owner-only reads, calculations and the accuracy gate unchanged (33 metrics, only
+  `receivables.collections` certified, 60 days, flag True, policy `m8-cari-d073`).
+- The VERIFIED Cari list is behind the website password: everyone with it can read account-level balances — the level
+  for a hosted site remains an open owner question. Report / matrix / setup / inventory: `docs/m8_cp1_access.md`.
+- Tests: full suite (browser + JS required, AI disabled) **2042 passed, 7 skipped, 1 xfailed** (`main` 2003 + 34 CP1B
+  + 5 browser / access cases). Owner-local acceptance on the real exports (role by role): PASS —
+  `docs/m8_cp1_access.md` §7.
+
 **2026-11-01 — M8 first VERIFIED metric, `receivables.collections` (D-073, owner-approved 60-day Cari freshness):
-ACTIVATED in draft PR #43 — NOT merged, NOT deployed, no hosting.**
+ACTIVATED — MERGED: PR #43 squash-merged as `a2fe7bf` (merged-main CI 2003 passed / 7 skipped / 1 xfailed; not
+deployed). This heading said "draft PR, NOT merged" when written; corrected 2026-11-03, body unchanged.**
 - Branch `claude/m8-cari-verified-promotion` from `main` @ `5e3656d`. D-073 (owner, 2026-11-01): 60 days from the Cari
   report date (file-name date; upload date when the name has none, D-072 D1); the 5 Oct export is shown through
   4 Dec and withheld from 5 Dec. `cari_balance_freshness` approved (D-073, 60 days) for this metric only; the global

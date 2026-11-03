@@ -50,6 +50,8 @@ PASSWORD = "sentetik-vkm-yonetici-parolasi"          # synthetic test value
 HASH = AUTH.hash_password(PASSWORD, n=2 ** 14)
 FIN_PASSWORD = "sentetik-vkm-finans-parolasi"        # synthetic test value
 FIN_HASH = AUTH.hash_password(FIN_PASSWORD, n=2 ** 14)
+VIEW_PASSWORD = "sentetik-vkm-site-parolasi"         # synthetic test value (D-074 website viewer)
+VIEW_HASH = AUTH.hash_password(VIEW_PASSWORD, n=2 ** 14)
 CANARY_AMOUNT = 987654.32
 CANARY_NOTE = "KANARYA-NOT-Sentetik-Musteri-7781 özel not"
 
@@ -609,6 +611,7 @@ def test_dashboard_has_the_vkm_tab_before_the_server_driven_tabs(base_manifest, 
 def http(tmp_path, monkeypatch, caplog):
     monkeypatch.setenv(AUTH.PASSWORD_ENV, HASH)
     monkeypatch.setenv(AUTH.FINANCE_PASSWORD_ENV, FIN_HASH)
+    monkeypatch.setenv(AUTH.VIEWER_PASSWORD_ENV, VIEW_HASH)
     f = write_folder(str(tmp_path / "d"), stock=products(dup=True), dup_sales=2)
     observe_core(manifest_of(f))
     rec = dataclasses.replace(kredi_record(), validation={**kredi_record().validation, "closed_with_positive_remaining": 2})
@@ -635,6 +638,15 @@ def http(tmp_path, monkeypatch, caplog):
 def owner(make):
     c = make()
     r = c.post("/api/auth/login", json={"password": PASSWORD})
+    assert r.status_code == 200
+    c.headers["X-CSRF-Token"] = r.json()["csrf_token"]
+    return c
+
+
+def viewer(make):
+    """D-074: a browser that entered the shared website password."""
+    c = make()
+    r = c.post("/api/auth/viewer-login", json={"password": VIEW_PASSWORD})
     assert r.status_code == 200
     c.headers["X-CSRF-Token"] = r.json()["csrf_token"]
     return c
@@ -673,7 +685,8 @@ def test_viewer_summary_is_allow_listed_and_free_of_private_detail(http):
     iid = owner_c.get("/api/vkm/issues").json()["issues"][0]["issue_id"]
     g = owner_c.get("/api/vkm/issues").json()["vkm_generation"]
     assert owner_c.post(f"/api/vkm/issues/{iid}/notes", json={"note": CANARY_NOTE, "vkm_generation": g}).status_code == 200
-    for c in (http(), finance(http), owner_c):
+    assert http().get("/api/vkm/summary").status_code == 401              # D-074: anonymous sees nothing
+    for c in (viewer(http), finance(http), owner_c):
         r = c.get("/api/vkm/summary")
         assert r.status_code == 200
         j = r.json()

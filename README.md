@@ -74,17 +74,20 @@ python -m services.refresh                # validate + publish dashboard.html an
 uvicorn app:app --host 127.0.0.1          # local only; dashboard at http://127.0.0.1:8000/ (no /docs since M8-CP1)
 ```
 
-## Access: public viewer, financial viewer, owner (M8-CP1, D-060 / D-061)
-Halsa Analysis is a browser web app. **The normal dashboard needs no password.** The Yönetim financial sections
-(Kredi, Gider/Gelir, Bütçe) need the shared **financial viewing password** (read-only). Changing anything (refresh,
-CRM / follow-ups, fairs, actions, AI drafts) and the full Yönetim need the **owner password**:
+## Access: website viewer, financial viewer, owner (M8-CP1 / CP1B, D-060 / D-061 / D-074)
+Halsa Analysis is a browser web app. **Nothing is viewable without a password (D-074).** The normal dashboard needs the
+shared **website password**; the Yönetim financial sections (Kredi, Gider/Gelir, Bütçe) also need the shared
+**financial viewing password** (read-only). Changing anything (uploads, refresh, CRM / follow-ups, fairs, actions, AI
+drafts) and the full Yönetim need the **owner password**:
 ```bash
-python -m services.owner_auth hash-password             # owner     → HALSA_OWNER_PASSWORD_HASH=…   (PRIVATE .env)
+python -m services.owner_auth hash-password --viewer    # website   → HALSA_VIEWER_PASSWORD_HASH=…  (PRIVATE .env)
+python -m services.owner_auth hash-password             # owner     → HALSA_OWNER_PASSWORD_HASH=…   (must differ)
 python -m services.owner_auth hash-password --finance   # financial → HALSA_FINANCE_PASSWORD_HASH=… (must differ)
-python -m services.owner_auth status                    # both configured? open sessions per role
-python -m services.owner_auth revoke-sessions [--owner|--finance]
+python -m services.owner_auth status                    # all configured? open sessions per role
+python -m services.owner_auth revoke-sessions [--owner|--finance|--viewer]
 ```
-Restart the server. Owner: `http://127.0.0.1:8000/giris`. Financial viewer: `http://127.0.0.1:8000/#yonetim`.
+Restart the server. Everyone: `http://127.0.0.1:8000/` (site password). Owner: `http://127.0.0.1:8000/giris`.
+Financial viewer: the Yönetim tab or `http://127.0.0.1:8000/#yonetim`.
 Passwords are accepted only over HTTPS or on this computer (`127.0.0.1`). Never commit a hash.
 **Do not host this publicly** before the remaining sign-off items in `docs/m8_cp1_access.md` §6.
 
