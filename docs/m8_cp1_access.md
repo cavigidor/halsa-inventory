@@ -87,7 +87,8 @@ Allow-list schemas `FinanceCari` / `FinanceCariRow` (extra fields forbidden): `g
 `report_date` with its `report_date_origin` and fixed `date_note`, `count`, and per account `code`, `name`, `rep`,
 exact signed `balance`, `oldest` (invoice month), `account_class` / `class_label` (Müşteri (120) / Satıcı (320) /
 Sınıflandırılmadı), `direction` / `direction_label`. No totals, ranking, overdue, priority or risk. Computed by the
-unchanged `m_collections` from the accepted generation's aging bytes after their SHA-256 matches the manifest;
+unchanged `m_collections` from the accepted generation's aging bytes; every request re-reads the selected Cari file
+and checks its SHA-256 against the manifest before returning any row, cached or not;
 `no-store`; `X-Halsa-Generation` equals the page's. Withheld (409 `accuracy_withheld`) for every role when the
 evidence is stale (day 61), unbound, changed or missing. A website session: 401 `finance_auth_required`.
 
@@ -249,10 +250,13 @@ months (raw HTML, inline JSON, script); anonymous → 401; website viewer → pa
 search / profile / status, CRM, fairs, opportunities, VKM summary, health, session, `/yukleme`…); financial viewer and
 owner → the exact signed balances of every account, `no-store`, the page's generation, no overdue / priority / risk
 keys; logout, owner "end financial sessions", idle expiry and a changed financial password → 401; day 60 shown, day 61
-withheld for every role (409); changed aging bytes under the accepted generation → withheld, restored bytes → shown;
+withheld for every role (409); with a **warm row cache** (not cleared by the test) changed aging bytes under the
+accepted generation → withheld, the exact original bytes → shown again, a missing selected file → the neutral 409
+(no file name, path or server error);
 a new monthly report → a new generation, the old rows never again; Customer 360 Cari balance / invoice-age month /
-sign are `null` + `finance_required` for anonymous and website sessions, intact for financial and owner sessions (the
-real endpoint applies it); the financial password still gives no upload / owner right, the owner still uploads (201).
+sign are `null` + `finance_required` for anonymous and website sessions, intact for financial and owner sessions —
+also through the real endpoint as schema-valid 200 responses (synthetic Customer 360 workbooks), where every
+nonfinancial field is identical for the three roles; the financial password still gives no upload / owner right, the owner still uploads (201).
 Updated: D-072 / D-073 / R5B1 / CP1 finance / R5A predecessor-policy tests (`m8-cari-d073` pages refused live and
 after restart). Browser: `test_m8_cp1_browser.py::test_cari_list_needs_the_financial_password_in_the_browser`
 (website viewer: notice, no rows, no code in the page; financial password in Yönetim → the same tab shows every row

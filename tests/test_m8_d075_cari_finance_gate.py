@@ -7,6 +7,7 @@ decide (`production_gate`; real sessions after the owner's publication). Synthet
 """
 import datetime as dt
 import json
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -220,18 +221,37 @@ def test_stale_changed_or_replaced_evidence_is_withheld_for_every_role(srv, monk
             assert r.status_code == ACC.WITHHELD_HTTP_STATUS and r.json()["detail"]["error_code"] == "accuracy_withheld"
             _no_cari_records(r.text)
         monkeypatch.setattr(ACC, "current_gate", H.production_gate)   # back to today
-        assert f.get("/api/finance/cari").status_code == 200
-        # the stored Cari bytes change on disk under the accepted generation → withheld (never recomputed)
+        warm = f.get("/api/finance/cari")                             # populates the row cache for this generation
+        assert warm.status_code == 200 and warm.json()["rows"]
         sel = json.load(open(s.data / GEN.SELECTION_FILE))["core"]["aging"]["file"]
-        APP._CARI_CACHE.clear()
-        original = (s.data / sel).read_bytes()
-        (s.data / sel).write_bytes(original + b"x")
-        for c in (f, o):
+        src = s.data / sel
+        original = src.read_bytes()
+
+        def withheld(c):
             r = c.get("/api/finance/cari")
-            assert r.status_code == ACC.WITHHELD_HTTP_STATUS
+            assert r.status_code == ACC.WITHHELD_HTTP_STATUS, r.text
+            assert r.json()["detail"]["error_code"] == ACC.WITHHELD_CODE
+            assert set(r.json()["detail"]) <= {"error_code", "message"}       # the fixed neutral answer only
+            assert sel not in r.text and str(s.data) not in r.text and "Traceback" not in r.text
             _no_cari_records(r.text)
-        (s.data / sel).write_bytes(original)
-        assert f.get("/api/finance/cari").status_code == 200
+
+        # the selected Cari bytes change on disk under the accepted generation; the WARM cache is not cleared by the
+        # test: every request re-verifies the current file against the manifest before any (cached) row is returned
+        src.write_bytes(original + b"x")
+        for c in (f, o):
+            withheld(c)
+        src.write_bytes(original)                                     # the exact original bytes: shown again
+        back = f.get("/api/finance/cari")
+        assert back.status_code == 200 and back.json()["rows"] == warm.json()["rows"]
+        # the selected file is missing (still a warm cache): fail closed, no server error, no private detail
+        hidden = s.data.parent / (sel + ".moved")
+        os.replace(src, hidden)
+        try:
+            for c in (f, o):
+                withheld(c)
+        finally:
+            os.replace(hidden, src)
+        assert f.get("/api/finance/cari").json()["rows"] == warm.json()["rows"]
     # a new monthly report: a new generation; the previous rows are never served again
     monkeypatch.setattr(AUTH, "request_session", AH.harness_request_session)    # the owner publishes (harness)
     new = _cari(amounts={"120.01.0001": {"Mart-2026": -1200.0}})
@@ -269,32 +289,57 @@ def test_customer360_cari_fields_follow_the_financial_password(role, redacted):
         assert ag["balance"] == -1500.25 and ag["oldest_bucket"] == "Mart-2026" and "finance_required" not in ag
 
 
-def test_customer360_endpoint_applies_the_redaction(monkeypatch):
-    """The real endpoint (harness accuracy gate so the withheld profile route runs) with a website-viewer session."""
+@pytest.fixture(scope="module")
+def c360_world(tmp_path_factory):
+    """The synthetic Customer 360 workbooks (tests/fixtures/c360_synth.py: invented 910.xx codes) with a real context,
+    a real Customer 360 repository and the accuracy harness gate, so the real endpoint answers a schema-valid 200."""
+    from services import context as CTX
     from services import customer360 as C360
-    monkeypatch.setattr(APP, "_c360_snapshot", lambda c360: type("S", (), {"signature": None})())
-    monkeypatch.setattr(C360, "customer_detail", lambda *a, **k: _det())
-    monkeypatch.setattr(APP.CRM, "customer_view", lambda *a, **k: None)
-    monkeypatch.setattr(APP.FC, "customer360_campaigns", lambda *a, **k: [])
-    monkeypatch.setattr(APP, "_same_source_opportunities", lambda *a, **k: None)
-    calls = []
-    real = APP._c360_cari_redacted
-    monkeypatch.setattr(APP, "_c360_cari_redacted", lambda det, sess: calls.append(sess) or real(det, sess))
-    viewer_sess = AUTH.Session("t", "c", 0.0, 9e9, 9e9, AUTH.ROLE_VIEWER)
-    monkeypatch.setattr(AUTH, "request_session", lambda request: viewer_sess)
+    from services.entity import ContextRepository
+    from tests.fixtures import c360_synth as F
+    data = F.write_all(str(tmp_path_factory.mktemp("c360_d075")))
+    ctx = CTX.build_context(data, inflation_rate=0.40)
+    repo = ContextRepository(data_folder=data, context=ctx)
+    return repo, C360.Customer360Repository(data, repo, background=False)
 
-    class _Repo:
-        def current(self):
-            return None
-    APP.app.dependency_overrides[APP.get_repo] = lambda: _Repo()
-    APP.app.dependency_overrides[APP.get_c360] = lambda: type("C", (), {"signature_for": lambda self, ctx: None})()
+
+C360_CODE = "910.00.0001"            # synthetic: one own account with a positive balance + a zero-balance account
+FIN_FIELDS = ("balance", "oldest_bucket", "direction", "direction_label")
+
+
+def _c360_as(role, c360_world, monkeypatch):
+    repo, c360 = c360_world
+    sess = AUTH.Session("t", "c", 0.0, 9e9, 9e9, role)
+    monkeypatch.setattr(AUTH, "request_session", lambda request: sess)
+    APP.app.dependency_overrides[APP.get_repo] = lambda: repo
+    APP.app.dependency_overrides[APP.get_c360] = lambda: c360
     try:
-        with TestClient(APP.app, base_url="https://testserver", headers=HDR, raise_server_exceptions=False) as c:
-            r = c.get("/api/customer360/120.01.0001")             # the fake profile is incomplete → 500 after redaction
+        with TestClient(APP.app, base_url="https://testserver", headers=HDR) as c:
+            r = c.get(f"/api/customer360/{C360_CODE}")
     finally:
         APP.app.dependency_overrides.clear()
-    assert calls and calls[0].role == AUTH.ROLE_VIEWER
-    if r.status_code == 200:                                         # schema-validated response
-        ag = r.json()["receivables"]["accounts"][0]["aging"]
-        assert ag["balance"] is None and ag["finance_required"] is True
-    assert "1500.25" not in r.text and "Mart-2026" not in r.text
+    assert r.status_code == 200, r.text                                # the real, schema-validated response
+    return r.json()
+
+
+def test_customer360_endpoint_redacts_cari_fields_for_website_viewers(c360_world, monkeypatch):
+    """The real endpoint, schema-valid 200 responses for the same customer: the website viewer gets null balance,
+    invoice month and sign (+ finance_required); the financial viewer and the owner keep them; everything else in the
+    profile (codes, names, order facts, class label, CRM, sales …) is identical for all three."""
+    fin = _c360_as(AUTH.ROLE_FINANCE, c360_world, monkeypatch)
+    own = _c360_as(AUTH.ROLE_OWNER, c360_world, monkeypatch)
+    web = _c360_as(AUTH.ROLE_VIEWER, c360_world, monkeypatch)
+    assert fin == own
+    accs = {a["account_code"]: a for a in fin["receivables"]["accounts"]}
+    assert accs["910.00.0001"]["aging"]["balance"] == 2000.0 and accs["910.00.0001"]["aging"]["direction"] == "debit"
+    assert accs["910.00.0001"]["aging"]["oldest_bucket"] and accs["910.00.0001"]["aging"]["direction_label"]
+    assert all(a["aging"]["finance_required"] is False for a in accs.values())
+    for a in web["receivables"]["accounts"]:
+        ag = a["aging"]
+        assert ag["finance_required"] is True and all(ag[k] is None for k in FIN_FIELDS)
+        assert ag["present_in_file"] is True and ag["class_label"] == accs[a["account_code"]]["aging"]["class_label"]
+    strip = lambda d: {**d, "receivables": {**d["receivables"], "accounts": [
+        {**a, "aging": {k: v for k, v in a["aging"].items() if k not in FIN_FIELDS + ("finance_required",)}}
+        for a in d["receivables"]["accounts"]]}}
+    assert strip(web) == strip(fin)                                     # nonfinancial content unchanged
+    assert "2000.0" not in json.dumps(web["receivables"])

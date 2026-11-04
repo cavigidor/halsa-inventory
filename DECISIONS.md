@@ -1409,8 +1409,10 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
     website session gets 401 `finance_auth_required`, anonymous 401 `site_auth_required`) and a **`metric` route of
     `receivables.collections`** in `ACC.ROUTES` (the accuracy middleware answers 409 `accuracy_withheld` unless the
     metric is displayable on the served generation's fresh, bound evidence). The rows are computed by the unchanged
-    `m_collections` from the **aging bytes of the accepted generation**, read only after their SHA-256 matches the
-    manifest (changed / missing bytes → 409, never recomputed from other bytes); cached per (core id, aging sha);
+    `m_collections` from the **aging bytes of the accepted generation**: **every request** re-reads the currently
+    selected Cari file and checks its SHA-256 against the manifest before any row — cached or new — is returned
+    (changed / missing / unreadable file → the neutral 409, never recomputed from other bytes); the per-(core id, sha)
+    cache only saves recomputing rows for just-verified bytes (PR #45 review correction);
     `no-store`; `X-Halsa-Generation` = the page's generation;
   - the Cari tab fetches the list when opened (no-store); 401 → the financial-password notice with a link to Yönetim;
     409 → the withheld notice; after the financial login in Yönetim the same tab loads the list (no second login);

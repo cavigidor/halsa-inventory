@@ -16,6 +16,12 @@
 - Tests: full suite (browser + JS required, AI disabled) **2057 passed, 7 skipped, 1 xfailed** (`main` 2042 + 15 D-075 cases). Owner-local acceptance on the real exports:
   PASS — the restart over the D-073 page never served it; after the owner's re-publication website viewer 0 Cari codes
   / 401 on the list, financial viewer and owner 824 = independent balances (`docs/m8_cp1_access.md` §8).
+- **Review correction (ChatGPT, PR #45 @ `edfce56`):** `_cari_rows` returned cached rows before re-checking the
+  selected Cari file; now every `/api/finance/cari` request re-reads the selected file and verifies its SHA-256 against
+  the accepted manifest before returning cached or new rows (changed / missing / unreadable → neutral 409). Regression
+  with a warm cache (changed bytes, restored bytes, missing file); Customer 360 checked through the real endpoint as
+  schema-valid 200 responses by role. Focused D-075 / D-073 / D-072 / generation-integrity / access / C360: 593 passed;
+  full suite (browser + JS, AI disabled) again **2057 passed, 7 skipped, 1 xfailed**.
 
 **2026-11-03 — M8-CP1B (D-074): website password in front of everything — MERGED: PR #44 squash-merged as `2d747cd`
 (merged-main CI run 41748425195: 2042 passed / 7 skipped / 1 xfailed; not deployed). This heading said "draft PR, NOT

@@ -1502,23 +1502,27 @@ _CARI_CACHE: dict = {}                    # (core_id, aging sha256) → rows; pr
 
 
 def _cari_rows(m) -> list | None:
+    """D-075: the factual Cari rows of the accepted generation, or None (→ the neutral withheld answer).
+    EVERY call re-reads the currently selected Cari file and checks its SHA-256 against the accepted manifest before any
+    row is returned — cached or not; the cache only saves recomputing rows for bytes that were just verified."""
     rec = m.record("aging") if m is not None else None
     if rec is None or not rec.sha256:
         return None
-    key = (m.core_id, rec.sha256)
+    try:
+        paths, _, _ = GEN.select_core(DATA_FOLDER)
+        p = paths.get("aging")
+        if not p or os.path.basename(p) != rec.file:
+            return None
+        fs = GEN.FrozenSource.read("aging", p)
+    except Exception as e:                            # missing / unreadable selection or file: fail closed, no detail
+        log.info("finance/cari: source unavailable (%s)", type(e).__name__)
+        return None
+    if fs.sha256 != rec.sha256:                       # not the bytes this generation was accepted from
+        return None
+    key = (m.core_id, fs.sha256)
     with _CARI_LOCK:
         if key in _CARI_CACHE:
             return _CARI_CACHE[key]
-    paths, _, _ = GEN.select_core(DATA_FOLDER)
-    p = paths.get("aging")
-    if not p or os.path.basename(p) != rec.file:
-        return None
-    try:
-        fs = GEN.FrozenSource.read("aging", p)
-    except OSError:
-        return None
-    if fs.sha256 != rec.sha256:                       # the file is not the bytes this generation was accepted from
-        return None
     import dashboard_builder as db
     rows, _ = db.m_collections(None, GEN.frames_from_frozen({"aging": fs})["aging"])
     with _CARI_LOCK:
