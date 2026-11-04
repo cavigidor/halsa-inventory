@@ -28,6 +28,8 @@ import unicodedata
 import zipfile
 from dataclasses import dataclass
 
+from services import paths as PATHS
+
 MAX_BYTES = int(os.environ.get("UPLOAD_MAX_BYTES") or 96 * 1024 * 1024)            # the real sales export is ~40 MB
 MAX_UNCOMPRESSED = int(os.environ.get("UPLOAD_MAX_UNCOMPRESSED") or 3 * 1024 ** 3)
 MAX_PART_UNCOMPRESSED = int(os.environ.get("UPLOAD_MAX_PART_UNCOMPRESSED") or 2 * 1024 ** 3)
@@ -198,7 +200,7 @@ class BlobStore:
             if existed:
                 os.remove(tmp)
             else:
-                os.replace(tmp, dest)
+                PATHS.durable_replace(tmp, dest)        # M8-CP2: an acknowledged upload is on disk
             return StoredFile(sha, size, stored_name(sha), dest, parts, total, existed)
         finally:
             if os.path.exists(tmp):

@@ -126,6 +126,23 @@ No public deployment until accepted. CI: unauthenticated read/write uniformly de
 **CP2 — Deployable persistent runtime:** host-compatible startup, paths and single-writer setup, persistent SQLite/
 uploads, health/readiness, safe process restart, staging env, no embedded secrets. Do not claim durability without
 actual host volume and backup configuration. CI: temp persisted mount + restart test.
+*(2026-11-03, D-076: implemented code-only — draft PR, not deployed. Details: `docs/m8_cp2_hosting.md`.)*
+- **Minimum hosting architecture:** one web service (Render paid web service, Frankfurt, **Standard 2 GB** — the real
+  workload peaks at ≈ 1.0 GB, so 512 MB is too small), one process / one Uvicorn worker, one persistent disk, TLS at
+  the host's proxy, **Auto-Deploy Off** (reviewed commits are deployed by hand), health check `/livez`.
+- **Paths:** `HALSA_DATA_ROOT=/var/data/halsa` (on the disk) → `data/`, `uploads/`, `state/agent_state.db`,
+  `published/dashboard.html`; the server refuses to start if any persistent path is outside it.
+- **Startup:** `sh deploy/start_hosted.sh` (`$PORT`, proxy headers from `FORWARDED_ALLOW_IPS=*` on Render, `.env`
+  ignored, AI off); the three password hashes only as private host environment variables.
+- **Persistence (synthetic, CI):** empty disk → owner upload / validate / publish → CRM change → stop / start → the
+  session, workbooks, selection, accepted generation, CRM and upload history survive; a changed source or a broken
+  manifest after a restart shows nothing (fail closed).
+- **Backups:** `python -m services.backup create|verify|restore` (consistent SQLite copy, SHA-256 manifest, restore
+  into a new directory only), tested with a restore onto a new disk directory.
+- **Outstanding production checklist (CP8 + owner):** provider / region decision under KVKK, disclosure-inventory
+  sign-off and network-gate decision; create the service and disk; production password hashes; off-instance
+  encrypted daily backup (restic or age → EU object store) and a hosted restore drill; owner's real upload; father's
+  bookmark test from Istanbul.
 
 **CP3 — Owner-only upload UX and staging** *(2026-10-25, D-065: implemented as the Excel Upload Center "Dosya Yükleme"
 — `docs/m8_cp3_upload_center.md`. It also covers the explicit, generation-bound publication of one validated report set

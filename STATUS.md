@@ -1,6 +1,27 @@
 # STATUS.md — current checkpoint
 
-**2026-11-03 — D-075: account-level Cari balances need the financial password — draft PR, NOT merged, NOT deployed.**
+**2026-11-03 — M8-CP2 (D-076): minimal hosting-ready runtime — draft PR, NOT merged, NOT deployed.**
+- Branch `claude/m8-cp2-hosting-runtime` from `main` @ `4e02872` (D-075 merged as PR #45; merged-main CI run
+  41766654465: 2057 passed / 7 skipped / 1 xfailed). Code only: no hosting account, service, disk, domain, password,
+  backup destination or deployment connection was created.
+- One mounted directory `HALSA_DATA_ROOT` (data / uploads / state DB / published page; startup refuses a persistent
+  path outside it); fsync'ed atomic publication writes; `deploy/start_hosted.sh` (one Uvicorn worker, `$PORT`, proxy
+  headers only from `FORWARDED_ALLOW_IPS`, `.env` ignored, AI off); public data-free `GET /livez` (no session / SQLite
+  / context access); `python -m services.backup create|verify|restore` (SQLite online backup, SHA-256 manifest,
+  restore into a new directory only).
+- Host assessment: Render paid web service, Frankfurt, persistent disk, Auto-Deploy Off, health `/livez` — fits; the
+  instance must be **Standard 2 GB** (real workload peak ≈ 1.0 GB measured read-only on copies of the real exports).
+- Synthetic persistence acceptance with the real start command: empty disk → upload / validate / publish → CRM change
+  → stop / start → session, workbooks, selection, generation, CRM, upload history survive; changed source or broken
+  manifest → nothing served; backup taken while running and restored onto a new directory serves the same generation.
+- Unchanged: D-074 / D-075, 33 metrics / 1 VERIFIED (60 days), flag True, policy `m8-cari-d075`, D-071, owner-only
+  writes. Report: `docs/m8_cp2_hosting.md`.
+- Tests: full suite (browser + JS required, AI disabled) **2073 passed, 7 skipped, 1 xfailed** (`main` 2057 + 16 CP2).
+
+**2026-11-03 — D-075: account-level Cari balances need the financial password — MERGED: PR #45 squash-merged as
+`4e02872` (approved head `a30f075`, tree `45db222`; merged-main CI run 41766654465: 2057 passed / 7 skipped /
+1 xfailed; not deployed). This heading said "draft PR, NOT merged, NOT deployed" when written; corrected 2026-11-03,
+body unchanged.**
 - Branch `claude/m8-d075-cari-finance-gate` from `main` @ `2d747cd` (D-074 merged as PR #44; merged-main CI 2042
   passed / 7 skipped / 1 xfailed). Owner decision D-075 (2026-11-03): website viewer = dashboard without account-level
   Cari balances; financial viewer = + the VERIFIED Cari list + Yönetim finances; owner = everything. D-074 roles and

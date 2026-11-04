@@ -29,6 +29,7 @@ from services import owner_view as OV
 from services import accuracy as ACC
 from services import generation as GEN
 from services import request_pin as RP  # noqa: E402
+from services import paths as PATHS
 from services import action_sources  # noqa: F401  (registers the built-in deterministic sources)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -235,6 +236,8 @@ async def _access_control(request: Request, call_next):
     if tpl is None or method == "OPTIONS":
         return _security_headers(request, await call_next(request), None)     # router answers 404 / 405
     lv = AX.level(method, tpl)
+    if (method, tpl) in AX.NO_SESSION and lv == AX.PUBLIC:              # M8-CP2: liveness never reads the session store
+        return _security_headers(request, await call_next(request), lv)
     if lv is None:
         return _security_headers(request, _deny(403, "access_unclassified",
                                                 "Bu uç erişim kaydında sınıflandırılmadı."), None)
@@ -311,6 +314,10 @@ def _warm_up(repo, c360=None):
 
 @app.on_event("startup")
 def _startup():
+    # M8-CP2: with HALSA_DATA_ROOT (hosted), every persistent path must be inside the mounted directory — refuse to
+    # start otherwise (a path on the ephemeral disk would silently lose data at the next deploy)
+    PATHS.check({"DATA_FOLDER": DATA_FOLDER, "UPLOAD_DIR": UPLOAD_DIR, "AGENT_DB": ST.DB_PATH,
+                 "DASHBOARD_PATH": DASHBOARD_PATH})
     ST.init_db()
     # M8-ACCURACY-2: restore the published generation only if the dashboard and every source still match it
     app.state.generations = GEN.GenerationStore()
@@ -467,8 +474,8 @@ def _republish_dashboard(manifest, paths, frames):
                 return
             GEN.write_manifest(mstaged, GEN.Manifest(cur.created_at, cur.core, (), cur.joins, cur.selection_origin,
                                                      cur.policy_version, digest))
-            os.replace(staged, dash)
-            os.replace(mstaged, GEN.manifest_path(dash))
+            PATHS.durable_replace(staged, dash)
+            PATHS.durable_replace(mstaged, GEN.manifest_path(dash))
             published = store.set_dashboard(cur.core_id, digest) is not None
         log.info("dashboard re-published after restart (generation %s)", manifest.core_id[:12])
     except Exception as e:
@@ -699,6 +706,14 @@ def auth_finance_sessions_revoke(request: Request):
 def auth_viewer_sessions_revoke(request: Request):
     """Owner only (middleware): end every website-viewer session (D-074); owner and financial sessions stay."""
     return {"revoked": AUTH.revoke_all(AUTH.ROLE_VIEWER)}
+
+
+@app.api_route("/livez", methods=["GET", "HEAD"], include_in_schema=False)
+def livez():
+    """M8-CP2: host liveness probe. Public, constant: the process is up and answering. It reads nothing (no session,
+    no SQLite, no context, no source, no generation, no configuration) and changes nothing. Readiness and data state
+    stay behind a session (`/api/health`)."""
+    return JSONResponse({"status": "ok"}, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/giris", include_in_schema=False)

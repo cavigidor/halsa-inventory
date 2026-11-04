@@ -1434,3 +1434,28 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **Known behaviour:** after a restart, until the warm-up has rebuilt the served context, `/api/finance/cari` answers
   409 (no served fingerprints yet) — fail-closed; the warm-up builds the context at startup.
 - **Not decided / not done:** hosting, TLS, production password provisioning, KVKK review. No deployment.
+
+### D-076 · 2026-11-03 · Hosting-ready runtime: one mounted data root, `/livez`, one-worker start, consistent backups (M8-CP2; engineering, not a hosting approval)
+- **Context:** the owner wants one HTTPS link for himself (US) and his father (Istanbul); CP2 prepares the code only.
+  No hosting resource, deployment, password or backup destination is created; deployment stays a separate,
+  owner-authorized checkpoint (CP8).
+- **Decision:**
+  - **one persistent directory** `HALSA_DATA_ROOT` (`services/paths.py`) holds data / uploads / state DB / published
+    page; with a root, every persistent path and configured input workbook must be absolute and inside it, or the
+    server refuses to start (no silent data loss on an ephemeral disk); no root = unchanged local behaviour;
+  - atomic writes keep staging next to the target; `durable_replace` adds file + directory fsync to the publication,
+    upload, manifest, selection and re-publication renames;
+  - **one process, one Uvicorn worker**, started by `deploy/start_hosted.sh` (`$PORT`, `0.0.0.0`, proxy headers only
+    from `FORWARDED_ALLOW_IPS`, unset → logins refused behind a proxy; `.env` ignored; AI off by default);
+  - **`GET /livez`**: public, constant `{"status":"ok"}`, answered without any session / SQLite / context / gate /
+    provider access; `/api/health` stays `viewer`;
+  - **backup** `python -m services.backup create|verify|restore`: SQLite online backup + integrity check, files under
+    the publication lock with before/after digest check, SHA-256 manifest, restore only into a new empty directory;
+  - default host candidate **Render paid web service, Frankfurt, persistent disk, Auto-Deploy Off, health path
+    `/livez`**; minimum instance **Standard (2 GB)** — measured peak ≈ 1.0 GB on copies of the real exports, so
+    Starter (512 MB) is insufficient. No other blocker found.
+- **Unchanged:** D-074 / D-075 access, 33 metrics with only `receivables.collections` VERIFIED (60 days),
+  `GENERATION_BOUND_API_EVIDENCE = True`, policy `m8-cari-d075`, D-071 withdrawals, owner-only writes.
+- **Still required before real-data launch:** owner decisions (provider / region under KVKK, disclosure inventory,
+  network gate), the host itself, production passwords, an off-instance encrypted backup schedule and a hosted
+  restore drill (`docs/m8_cp2_hosting.md` §6, §8).

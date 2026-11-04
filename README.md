@@ -86,7 +86,9 @@ python -m services.owner_auth hash-password --finance   # financial → HALSA_FI
 python -m services.owner_auth status                    # all configured? open sessions per role
 python -m services.owner_auth revoke-sessions [--owner|--finance|--viewer]
 ```
-Restart the server. Everyone: `http://127.0.0.1:8000/` (site password). Owner: `http://127.0.0.1:8000/giris`.
+Restart the server. Everyone: `http://127.0.0.1:8000/` (site password).
+Hosting readiness (M8-CP2, D-076; not deployed): one mounted directory `HALSA_DATA_ROOT`, start command
+`sh deploy/start_hosted.sh`, liveness `GET /livez`, backups `python -m services.backup` — `docs/m8_cp2_hosting.md`. Owner: `http://127.0.0.1:8000/giris`.
 Financial viewer: the Yönetim tab or `http://127.0.0.1:8000/#yonetim`.
 Passwords are accepted only over HTTPS or on this computer (`127.0.0.1`). Never commit a hash.
 **Do not host this publicly** before the remaining sign-off items in `docs/m8_cp1_access.md` §6.

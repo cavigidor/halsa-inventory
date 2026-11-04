@@ -1,7 +1,8 @@
 """M8-CP1 / CP1B (D-060, D-061, D-074): who may call which route. One table, enforced by one middleware in app.py.
 
 Levels
-- ``public``      no session needed: only the fixed owner-login page (no data). The login / session endpoints are
+- ``public``      no session needed: only the fixed owner-login page (no data) and the M8-CP2 host liveness probe
+                  ``GET /livez`` (a constant body; no session lookup at all). The login / session endpoints are
                   ``auth``. Nothing else is reachable without a password (D-074 supersedes the D-060 public viewer).
 - ``viewer``      D-074: any live session — the shared website (viewer) password, the financial-viewer password or
                   the owner password. Read-only: it never changes a human decision (action status, CRM, fair
@@ -33,11 +34,15 @@ LEVELS = (PUBLIC, VIEWER, FINANCE_READ, OWNER_READ, OWNER_WRITE, AUTH)
 # D-074: the HTML pages that answer an anonymous visitor with the site-password page (API routes answer JSON 401)
 HTML_PAGES = frozenset({"/", "/yukleme"})
 MUTATING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+# M8-CP2: public routes answered WITHOUT reading the session store (no cookie lookup, no SQLite access, no
+# idle-timer update): the hosting provider's liveness probe
+NO_SESSION = frozenset({("GET", "/livez")})
 
 ACCESS: dict[tuple[str, str], str] = {
     # --- the dashboard and its login page ---
     ("GET", "/"): VIEWER,                                        # only the published, gate-authorized bytes
     ("GET", "/giris"): PUBLIC,                                   # fixed owner-login page (no data)
+    ("GET", "/livez"): PUBLIC,                                   # M8-CP2: host liveness; constant body, no data
     # --- owner session ---
     ("GET", "/api/auth/session"): AUTH,                          # anonymous → {authenticated: false}
     ("POST", "/api/auth/login"): AUTH,                           # owner password; throttled; HTTPS or loopback only

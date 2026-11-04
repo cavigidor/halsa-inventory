@@ -199,6 +199,12 @@ Yönetim financial projection), owner (separate password; everything incl.
 every change). Anonymous visitors see only the site-password page (D-074 retired the public viewer). The accuracy gate
 applies to all three alike. Hosting prerequisites and open exposure questions: `docs/m8_cp1_access.md` §5–§6.
 
+## Hosted runtime (D-076, M8-CP2; not deployed)
+One process, one Uvicorn worker (single writer: in-process publish lock + SQLite), one persistent mounted directory
+`HALSA_DATA_ROOT` holding `data/`, `uploads/`, `state/agent_state.db` and `published/` (`services/paths.py`; startup
+refuses a persistent path outside it). Start command `deploy/start_hosted.sh`; public data-free liveness `GET /livez`;
+consistent backup / isolated restore `python -m services.backup`. Details: `docs/m8_cp2_hosting.md`.
+
 ## Privacy boundary
 GitHub holds code, tests, prompts, schemas, docs, synthetic fixtures, CI and config templates.
 The Mac holds the real Excel exports, SQLite state, `.env` and keys, `agent_context.json`, and

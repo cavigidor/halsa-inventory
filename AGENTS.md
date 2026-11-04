@@ -27,13 +27,17 @@ GitHub (`cavigidor/halsa-inventory`) is the source of truth. Do not rely on chat
   (else the upload date, with provenance); Stok / Satış implementation is a separate checkpoint, and a historical range
   in a file name is never collapsed into one report date.
 - Missing values are never zero.
+- **Persistent state (D-076):** everything the app must keep lives under `HALSA_DATA_ROOT` when it is set (data,
+  uploads, SQLite, published page; `services/paths.py`); never write persistent or staging files elsewhere (code
+  directory, `/tmp`), stage atomic writes next to their target and keep one process / one worker (single writer).
 - **No verified evidence = no business conclusion (D-049).** Only outputs certified VERIFIED in `services/accuracy.py`
   may be displayed (D-073: only `receivables.collections`, on fresh — 60 days — generation-bound evidence). Never add a flag, env var or parameter that bypasses the gate; never classify a new route as
   anything but a metric unless it carries no business conclusion; every new route must be listed in `ACC.ROUTES`.
 - The provider gets only a small evidence packet (`services/evidence.py`). It never gets
   Excel files, DataFrames, SQLite files, whole tables or paths.
 - **Access (D-074, revising D-060 / D-061):** nothing is viewable without a session. Anonymous visitors get only the
-  Turkish site-password page and the owner-login page (`public`: `/giris` only). `viewer` routes need any session —
+  Turkish site-password page, the owner-login page and the data-free liveness probe (`public`: `/giris`, and
+  `/livez` — D-076: constant body, answered without any session / SQLite / context access; never add data to it). `viewer` routes need any session —
   the shared website password, the financial password or the owner password; never add a public data route, and
   never fall back to public viewing when a hash is missing. Hosting / deployment is still a separate, unauthorized
   checkpoint. **Account-level Cari balances need the financial password (D-075):** never embed Cari rows (or any

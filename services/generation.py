@@ -41,6 +41,8 @@ import json
 import os
 import re
 import tempfile
+
+from services import paths as PATHS
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Mapping
@@ -236,6 +238,7 @@ def write_json_atomic(path: str, doc: Mapping[str, Any]) -> None:
             os.fsync(fh.fileno())
         os.chmod(tmp, 0o600)
         os.replace(tmp, path)
+        PATHS.fsync_dir(d)                              # M8-CP2: the rename itself survives a host restart
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
@@ -761,7 +764,7 @@ def write_manifest(path: str, manifest: Manifest) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(manifest.to_dict(), fh, ensure_ascii=False, indent=1)
-        os.replace(tmp, path)
+        PATHS.durable_replace(tmp, path)                # M8-CP2: fsync file + directory
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
