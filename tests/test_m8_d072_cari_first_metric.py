@@ -424,7 +424,7 @@ def test_production_gate_verifies_the_cari_metric_on_its_own_evidence(tmp_path):
     assert scoped == [] and set(ev.problems()) >= set(scoped)            # the strict judgement is computed unchanged
     assert len(ACC.REGISTER) == 33
     assert [k for k, x in ACC.REGISTER.items() if x.certified == ACC.State.VERIFIED] == ["receivables.collections"]
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is True and ACC.POLICY_VERSION == "m8-cari-d073"
+    assert ACC.GENERATION_BOUND_API_EVIDENCE is True and ACC.POLICY_VERSION == "m8-cari-d075"
 
 
 @pytest.mark.production_gate

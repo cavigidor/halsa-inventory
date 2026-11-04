@@ -265,7 +265,7 @@ def test_c360_wording_change_leaves_values_schema_and_gate_unchanged(c360_shared
     for code in ("910.00.0001", "910.00.0002", "910.00.0003"):
         for acc in C360.customer_detail(snap, code)["receivables"]["accounts"]:
             ag = acc["aging"]
-            assert set(ag) == set(C360Aging.model_fields)                        # API schema unchanged
+            assert set(ag) == set(C360Aging.model_fields) - {"finance_required"}   # D-075 flag: redaction only
             C360Aging(**ag)
     g = ACC.current_gate()
     assert not g.decide("customer360.profile").displayable
@@ -297,7 +297,10 @@ def test_dashboard_shows_factual_balances_and_no_overdue_outputs(synthetic_dir, 
     coll = mods["collections"]
     assert coll["title"] == "Cari Bakiye (fatura yaşı)"
     assert [c["k"] for c in coll["cols"]] == ["name", "rep", "class_label", "balance", "direction_label", "oldest"]
-    assert {r["code"] for r in coll["rows"]} >= {"900.00.0005", "900.00.0007"}      # zero and KAPALI kept
+    assert coll["rows"] == [] and coll["finance"] == 1          # D-075: Cari rows are never embedded in the page
+    paths = DB.select_sources(synthetic_dir)
+    rows, _ = DB.m_collections(paths["aging"])                   # what GET /api/finance/cari serves
+    assert {r["code"] for r in rows} >= {"900.00.0005", "900.00.0007"}      # zero and KAPALI kept
     assert mods["risk"]["rows"] == [] and mods["risk"]["note"] == CARI.OVERDUE_RETIRED_REASON
     assert all(c["k"] != "overdue" for c in mods["winback"]["cols"])
     labels = [s[0] if isinstance(s, list) else s for s in data.get("stats", [])]
@@ -437,9 +440,13 @@ def test_cari_table_shows_fractional_lira_in_the_browser(tmp_path):
     folder = SE.write_all(str(tmp_path / "data"))
     _decimal_frame().to_excel(os.path.join(folder, SE.AGING_FILE), index=False)
     out = tmp_path / "page.html"
-    DB.build(folder, str(out))                                    # algorithm harness: the Cari module is embedded
+    DB.build(folder, str(out))                                    # algorithm harness: the Cari module is VERIFIED
     html = out.read_text(encoding="utf-8")
     assert "fmtMoneyExact(b)" in html                             # the Customer 360 card uses the exact formatter
+    # D-075: the page embeds no Cari rows; the tab loads them from GET /api/finance/cari (here: the exact rows the
+    # endpoint computes, served to the page by the browser's request interception)
+    rows, _ = DB.m_collections(os.path.join(folder, SE.AGING_FILE))
+    assert "1250.25" not in html and "7250.75" not in html
     with sync_playwright() as pw:
         try:
             b = pw.chromium.launch()
@@ -450,8 +457,14 @@ def test_cari_table_shows_fractional_lira_in_the_browser(tmp_path):
         page = b.new_page()
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
-        page.goto(out.as_uri())
+        page.route("http://halsa.test/", lambda rt: rt.fulfill(body=html, content_type="text/html; charset=utf-8"))
+        page.route("http://halsa.test/api/finance/cari", lambda rt: rt.fulfill(
+            json={"generation_id": "g", "core_id": "c", "date_note": "", "count": len(rows), "rows": rows}))
+        page.route("http://halsa.test/api/**", lambda rt: rt.fulfill(status=404, json={}) if
+                   "/api/finance/cari" not in rt.request.url else rt.fallback())
+        page.goto("http://halsa.test/")
         page.click('.tab[data-t="collections"]')
+        page.wait_for_selector('#collections[data-finance="open"] tbody tr')
         cells = page.eval_on_selector_all("#collections tbody tr", "trs => trs.map(t => t.innerText)")
         b.close()
     text = "\n".join(cells)

@@ -446,6 +446,8 @@ class C360Aging(BaseModel):
     overdue: None = None                                  # never derived from invoice age (agreement report missing)
     overdue_status: Literal["unavailable"] = "unavailable"
     confidence: C360Confidence
+    # D-075: balance / invoice-age month / sign removed for a session without the financial password
+    finance_required: bool = False
 
 
 class C360InvoiceAccount(BaseModel):
@@ -1507,6 +1509,32 @@ class FinanceButce(FinanceSourceHead):
     warning: str
     data: Optional[ButceHealth] = None
     withheld: Optional[WithheldNotice] = None
+
+
+class FinanceCariRow(BaseModel):
+    """D-075 allow-list: one Cari account (the dashboard module's columns). No overdue, priority or risk field."""
+    model_config = ConfigDict(extra="forbid")
+    code: str
+    name: str
+    rep: str
+    balance: Optional[float] = None                       # exact signed balance as exported; None = unknown
+    oldest: str                                           # oldest month with a non-zero amount (invoice age), or "—"
+    account_class: Literal["customer", "supplier", "unconfirmed"]
+    class_label: str
+    direction: Optional[Literal["debit", "credit", "zero"]] = None
+    direction_label: Optional[str] = None
+
+
+class FinanceCari(BaseModel):
+    """D-075: GET /api/finance/cari — financial viewer or owner, VERIFIED only, bound to the served generation."""
+    model_config = ConfigDict(extra="forbid")
+    generation_id: str
+    core_id: str
+    report_date: Optional[str] = None
+    report_date_origin: Optional[str] = None
+    date_note: str
+    count: int
+    rows: list[FinanceCariRow]
 
 
 class FinanceOverview(_OwnerOut):

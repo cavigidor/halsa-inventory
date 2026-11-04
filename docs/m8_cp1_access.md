@@ -1,14 +1,19 @@
-# M8-CP1 / CP1B — Web access: website viewer, financial viewer, owner (D-060, D-061, superseded for launch by D-074)
+# M8-CP1 / CP1B — Web access: website viewer, financial viewer, owner (D-060, D-061, superseded for launch by D-074; D-075)
 
-**Status:** CP1 (D-060 / D-061) implemented and merged (PR #30); **CP1B (D-074) adds the website password — draft PR,
-not merged, not deployed.** One metric, the factual Cari list (`receivables.collections`), is VERIFIED-certified
-(D-073) and shown only on fresh, generation-bound evidence.
+**Status:** CP1 (D-060 / D-061) implemented and merged (PR #30); CP1B (D-074, the website password) merged (PR #44,
+`2d747cd`); **D-075 (the account-level Cari list needs the financial password) — draft PR, not merged, not
+deployed.** One metric, the factual Cari list (`receivables.collections`), is VERIFIED-certified (D-073) and shown
+only on fresh, generation-bound evidence — since D-075 only to financial-viewer and owner sessions.
 
 > **D-074 (owner requirement, 2026-11-01): nothing is viewable without a password.** The D-060 / D-061 "public viewer"
 > (open the link, no password) is retired. An anonymous visitor gets only a Turkish site-password page (and the owner
 > login page `/giris`); every page and every data API needs a session. This is the access model for the eventual
-> launch; it is **not** by itself approval to host, and it does not decide whether account-level Cari balances may be
-> shown to every holder of the website password on a hosted site (see §6 and §5).
+> launch; it is **not** by itself approval to host.
+>
+> **D-075 (owner decision, 2026-11-03): account-level Cari balances need the financial-viewer password.** The
+> published page never embeds a Cari record (same bytes for every role); the list comes only from the `finance_read`
+> metric route `GET /api/finance/cari` (§2.1b). Customer 360 removes the Cari balance, invoice-age month and sign for
+> a session without the financial password.
 
 Halsa Analysis is ONE **browser-based web application** (existing FastAPI + HTML/JS + SQLite). Nobody installs
 anything. No usernames, accounts, e-mail login, OAuth or MFA (owner decision).
@@ -18,8 +23,8 @@ anything. No usernames, accounts, e-mail login, OAuth or MFA (owner decision).
 | Level | How | Can |
 |---|---|---|
 | **Anonymous** | opens the link without a session | only the Turkish **site-password page** (any bookmarked page shows it at the same address; after the password the page itself opens) and the owner-login page `/giris` — no data, no API |
-| **1. Website viewer** | one shared **website password** (`HALSA_VIEWER_PASSWORD_HASH`), entered once per session on the site-password page | the normal read-only dashboard: every tab, the action queue, Günlük Satış, Customer 360 search, CRM / follow-ups, fair campaigns — customer names, CRM / follow-up / fair notes (approved by D-061 for viewers) — and the **VERIFIED Cari list (account-level signed balances, D-073)**; nothing changeable |
-| **2. Financial viewer** (the owner's father and other trusted financial viewers) | separate **financial viewing password**, in the Yönetim tab (the site password first, or directly — the financial session also opens the dashboard) | everything a website viewer sees + the **financial sections of Yönetim** (Kredi, Gider/Gelir, Bütçe) — **read-only**, nothing else |
+| **1. Website viewer** | one shared **website password** (`HALSA_VIEWER_PASSWORD_HASH`), entered once per session on the site-password page | the normal read-only dashboard: every tab, the action queue, Günlük Satış, Customer 360 search, CRM / follow-ups, fair campaigns — customer names, CRM / follow-up / fair notes (approved by D-061 for viewers); **not the account-level Cari balances (D-075)** — the Cari tab shows the Turkish financial-password notice; nothing changeable |
+| **2. Financial viewer** (the owner's father and other trusted financial viewers) | separate **financial viewing password**, in the Yönetim tab (the site password first, or directly — the financial session also opens the dashboard) | everything a website viewer sees + the **VERIFIED Cari list (account-level signed balances, D-073 / D-075)** and the Cari fields of Customer 360 + the **financial sections of Yönetim** (Kredi, Gider/Gelir, Bütçe) — **read-only**, nothing else |
 | **3. Owner administrator** | separate **owner password** at `/giris` (no site password needed) | everything, incl. full Yönetim (operations, system state, known issues, reload), Excel uploads, validation, publication, CRM / fair / action edits, data review and every administrative operation |
 
 The three passwords must differ (the provisioning command refuses a password already used by another role). A login
@@ -50,6 +55,7 @@ Unlisted routes → 403 for everyone. A state-changing method can never be a rea
 | `GET /api/crm/summary`, `/followups`, `/recent`, `/customers/{code}` | ✗ 401 | ✔ | ✔ | ✔ |
 | `GET /api/vkm/summary` (Veri Kontrol Merkezi counts and sync state only, allow-list `VkmPublicSummary`) | ✗ 401 | ✔ | ✔ | ✔ |
 | **`GET /api/finance/overview`** (Kredi / Gider-Gelir / Bütçe projection) | ✗ 401 | ✗ 401 | ✔ | ✔ |
+| **`GET /api/finance/cari`** (D-075: the factual Cari list; also a `metric` route — 409 unless VERIFIED on fresh, bound evidence) | ✗ 401 | ✗ 401 | ✔ | ✔ |
 | `GET /api/vkm/issues`, `GET /api/vkm/issues/{issue_id}` (issue list, locators, history, notes) | ✗ 401 | ✗ 403 | ✗ 403 | ✔ |
 | `GET /api/owner/overview`, `GET /api/owner/status` (full Yönetim, system) | ✗ 401 | ✗ 403 | ✗ 403 | ✔ |
 | `GET /api/accuracy/status`, `GET /api/context`, `GET /api/ai/calls`, `GET /api/uploads…` | ✗ 401 | ✗ 403 | ✗ 403 | ✔ |
@@ -75,6 +81,20 @@ against the allow-list schema `FinanceOverview`:
   fixed notes, `data` (financial content, withheld today) and the `withheld` notice.
 - **Removed:** source file names, error codes, failed step, issue codes, load time, reload flag; and the whole
   operations summary, system status, known issues and reload state.
+
+### 2.1b What a financial viewer receives (`GET /api/finance/cari`, D-075)
+Allow-list schemas `FinanceCari` / `FinanceCariRow` (extra fields forbidden): `generation_id`, `core_id`, the Cari
+`report_date` with its `report_date_origin` and fixed `date_note`, `count`, and per account `code`, `name`, `rep`,
+exact signed `balance`, `oldest` (invoice month), `account_class` / `class_label` (Müşteri (120) / Satıcı (320) /
+Sınıflandırılmadı), `direction` / `direction_label`. No totals, ranking, overdue, priority or risk. Computed by the
+unchanged `m_collections` from the accepted generation's aging bytes; every request re-reads the selected Cari file
+and checks its SHA-256 against the manifest before returning any row, cached or not;
+`no-store`; `X-Halsa-Generation` equals the page's. Withheld (409 `accuracy_withheld`) for every role when the
+evidence is stale (day 61), unbound, changed or missing. A website session: 401 `finance_auth_required`.
+
+**Customer 360 (`GET /api/customer360/{code}`):** for a website session (no financial password) each invoice
+account's `aging.balance`, `oldest_bucket`, `direction`, `direction_label` are `null` and `finance_required` is
+`true`; the rest of the profile (codes, names, order facts, class label, CRM) is unchanged.
 
 ### 2.2 GET side effects (audited)
 - `?retry=true` on Customer 360 status restarts a build → owner-only.
@@ -133,14 +153,15 @@ python -m services.owner_auth status                    # all three roles config
 ## 5. Remaining risks
 
 1. **Everyone with the website password reads the normal dashboard**, including customer codes / names, CRM outcomes /
-   notes / owner labels, follow-ups, fair notes and the **account-level Cari balances (D-073)**. A shared password is
+   notes / owner labels, follow-ups, fair notes (not the account-level Cari balances since D-075). A shared password is
    shared: it can be forwarded; there is no per-person audit trail (no accounts, by decision). Rotate it when someone
    should no longer see the data.
-2. **Every metric later promoted to VERIFIED becomes visible to every website-password holder.** Financial sections
-   promoted later become visible to every financial-password holder. Each promotion PR must say so.
-3. **Open exposure question (owner):** whether account-level Cari balances should stay at the website-password level
-   or move behind the financial password before hosting (§6). D-074 places them at the website level, as instructed;
-   it is not a final financial-disclosure approval for external hosting.
+2. **Every metric later promoted to VERIFIED becomes visible to every website-password holder** unless it is served
+   like the Cari list through a `finance_read` route (D-075). Financial sections and the Cari list are visible to
+   every financial-password holder. Each promotion PR must say which level it uses.
+3. **Resolved by D-075:** account-level Cari balances need the financial password. The financial password is shared
+   too (forwardable, no per-person trail); rotate it (`hash-password --finance`) when someone should no longer see
+   balances.
 4. **Lockout:** someone who can reach the site can throttle a role's login for up to 15 minutes (per role; global 20
    failures) — for the website password this blocks new viewer logins meanwhile (open sessions keep working). Single
    factor, no MFA; the site-password page is an online guessing target (scrypt + throttling).
@@ -151,7 +172,7 @@ python -m services.owner_auth status                    # all three roles config
    choose a data-free liveness probe.
 8. Not built yet: backups (CP5), hosting / TLS (CP8).
 
-## 6. Disclosure inventory — who can read what (D-074)
+## 6. Disclosure inventory — who can read what (D-074, D-075)
 
 Anonymous visitors: the fixed site-password page and the owner-login page only (no data, no API). Every row below
 needs at least the website password.
@@ -162,7 +183,7 @@ needs at least the website password.
 | D-070 Stock retirement notice and signed-ERP-balance caveat (fixed policy text; no new source values) | ✔ | ✔ | ✔ |
 | D-071 Cari notice: invoice age is not overdue, sign meaning, 320 = supplier (fixed policy text; no new source values). Cari balance fields (signed balance, account class, direction, oldest invoice month, `overdue: null`) belong to the analytical row below | ✔ | ✔ | ✔ |
 | D-072 Cari notes: 120 = Müşteri / 320 = Satıcı labels, USD-column note (fixed text), and the Cari report date with its provenance (the date and "dosya adındaki tarih" / "yükleme tarihi"; the original file name itself is shown only in the owner's upload preview) — part of the Cari analytical row, withheld until VERIFIED | notice today | same | same |
-| **D-073: the factual Cari list (`receivables.collections`, VERIFIED-certified; shown only while its evidence is fresh — 60 days — and bound)** — per Cari account: code, recorded name, representative code, class (Müşteri (120) / Satıcı (320) / Sınıflandırılmadı), exact signed TL balance, sign wording, oldest invoice month; the report date with its provenance; fixed notes (no overdue, USD apart). No totals, ranking or overdue. **D-074: behind the website password — everyone who has the website password can read these account-level balances.** Not public by link. Whether this level is acceptable for a hosted site (or the list should need the financial password) is an **open owner question**, not decided by D-074 | ✔ | ✔ | ✔ |
+| **D-073: the factual Cari list (`receivables.collections`, VERIFIED-certified; shown only while its evidence is fresh — 60 days — and bound)** — per Cari account: code, recorded name, representative code, class (Müşteri (120) / Satıcı (320) / Sınıflandırılmadı), exact signed TL balance, sign wording, oldest invoice month; the report date with its provenance; fixed notes (no overdue, USD apart). No totals, ranking or overdue. **D-075: financial password** — served only by `GET /api/finance/cari`; never embedded in the page; the Customer 360 Cari balance / invoice-age month / sign likewise | the Turkish financial-password notice, the column names, fixed notes and the Cari report date only | ✔ | ✔ |
 | Analytical tables, action queue, drawer facts, Günlük Satış, Customer 360 profile, Fırsatlar, fair history | notice today; ✔ once VERIFIED | same | same |
 | Customer directory (code + recorded name) — **approved** | ✔ | ✔ | ✔ |
 | CRM follow-ups, contacts, **notes, owner labels, legacy memory text** — **approved** | ✔ | ✔ | ✔ |
@@ -181,7 +202,8 @@ needs at least the website password.
 **Answered by the owner (D-061, D-074):** viewer visibility of customer names, CRM / follow-up / fair notes —
 approved (now for website-password holders, not the public); Yönetim financial sections — financial password,
 read-only; a website password in front of everything (D-074).
-**Open (owner):** the access level of the account-level Cari list on a hosted site (website or financial password).
+**Answered by the owner (D-075):** the account-level Cari list (and the Customer 360 Cari balance fields) needs the
+financial password.
 **Still required before public hosting (record as a dated decision):** whether to add a network gate (VPN / IP
 allow-list / access proxy) in front of public pages; the hosting region under KVKK; final CP8 checklist.
 
@@ -209,10 +231,52 @@ copies (Stok `63602ae3e8bf`, Satış `be1d895e426b`, Cari `672fac2f5bf6`, unchan
 | Role | `GET /` | Cari list | Financial projection | Owner view | Upload |
 |---|---|---|---|---|---|
 | Anonymous | 401 site-password page (3,171 bytes, no business data); 11 / 11 data APIs and pages 401; `/giris` 200 | — | 401 | 401 | 401 |
-| Website viewer | 200, displayed = `receivables.collections`, page generation = status generation | 824 rows (796 × 120, 28 × 320) | 401 `finance_auth_required` | 403 | 403 |
+| Website viewer | 200, displayed = `receivables.collections`, page generation = status generation | 824 rows (796 × 120, 28 × 320) — **before D-075**; since D-075 none (§8) | 401 `finance_auth_required` | 403 | 403 |
 | Financial viewer | 200, same | 824 rows | 200 | 403 | 403 |
 | Owner | 200, same | 824 rows | 200 | 200 | 201 |
 
 Viewer logout → `GET /` 401 (password page). Owner "end website sessions" revoked 2 sessions → the website viewer's
 next API call 401; the financial session was not refused (its CRM call answered 503 while the Customer 360 build was
 still loading — not an access refusal).
+
+## 8. D-075 acceptance — the account-level Cari list needs the financial password
+
+**Synthetic (CI):** `tests/test_m8_d075_cari_finance_gate.py` (real app, access middleware, `production_gate`, real
+sessions after the owner's publication): `/api/finance/cari` is `finance_read` and a `metric` route of
+`receivables.collections`; the published page (built by the real builder with the VERIFIED list) carries
+`rows: []`, the finance flag, the Turkish notice and none of the synthetic account codes, names, amounts or invoice
+months (raw HTML, inline JSON, script); anonymous → 401; website viewer → page without records, 401
+`finance_auth_required` on the list, and no record in 19 other viewer responses (actions, sales queue, Customer 360
+search / profile / status, CRM, fairs, opportunities, VKM summary, health, session, `/yukleme`…); financial viewer and
+owner → the exact signed balances of every account, `no-store`, the page's generation, no overdue / priority / risk
+keys; logout, owner "end financial sessions", idle expiry and a changed financial password → 401; day 60 shown, day 61
+withheld for every role (409); with a **warm row cache** (not cleared by the test) changed aging bytes under the
+accepted generation → withheld, the exact original bytes → shown again, a missing selected file → the neutral 409
+(no file name, path or server error);
+a new monthly report → a new generation, the old rows never again; Customer 360 Cari balance / invoice-age month /
+sign are `null` + `finance_required` for anonymous and website sessions, intact for financial and owner sessions —
+also through the real endpoint as schema-valid 200 responses (synthetic Customer 360 workbooks), where every
+nonfinancial field is identical for the three roles; the financial password still gives no upload / owner right, the owner still uploads (201).
+Updated: D-072 / D-073 / R5B1 / CP1 finance / R5A predecessor-policy tests (`m8-cari-d073` pages refused live and
+after restart). Browser: `test_m8_cp1_browser.py::test_cari_list_needs_the_financial_password_in_the_browser`
+(website viewer: notice, no rows, no code in the page; financial password in Yönetim → the same tab shows every row
+without another login; logout → password page); `test_m8_r5b1_cari_interpretation.py` (exact-kuruş display of the
+rows served by the endpoint); `test_m5_browser.py` (the tab renders the server-loaded table for the owner).
+
+**Owner-local (Mac, 2026-11-04 ≈01:55 UTC, D-075 code, real exports, read-only copies; throwaway passwords deleted):**
+a copy of the CP1B run published under `m8-cari-d073` (its page embedded **824 / 824** Cari codes for every website
+viewer) restarted under the D-075 code:
+
+| Step | Result |
+|---|---|
+| Restart over the `m8-cari-d073` publication | restore `evidence_mismatch`, no generation; `GET /` 503 neutral page for website / financial / owner; old page served: **no**; Cari codes in any body: 0; `/api/finance/cari` 401 (website) / 409 (financial, owner) |
+| Owner controlled refresh (re-publication) | 200, done (52 s); policy `m8-cari-d075`; core `343e0ebdca7d78ca`; 1 verified / 4 not_verified / 28 invalid; flag True; 33 metrics, Cari max age 60 |
+| Anonymous | `GET /` 401 site-password page, no data; `/api/finance/cari` 401 |
+| Website viewer | `GET /` 200, displayed = `receivables.collections`, page generation = status generation, page rows 0, **Cari codes in the raw page 0**; `/api/finance/cari` 401 `finance_auth_required`; exact balances in 12 viewer API / page responses: 0; financial projection 401; owner view 403; upload 403 |
+| Financial viewer | same page bytes; `/api/finance/cari` 200: **824** accounts (796 × 120, 28 × 320) = the independent openpyxl balances, report date 2026-10-05 (file name), `no-store`, generation = page; no overdue / priority / risk keys; projection 200; owner view 403; upload 403 |
+| Owner | identical list; owner view 200; upload 201 |
+| Logout / revocation | financial logout → 401; owner "end financial sessions" (3) → 401; the owner's own list still 200 |
+
+Customer 360 profiles: 409 (withheld by the accuracy gate) for every role today, so no Cari field is reachable there;
+the D-075 redaction applies once the profile is promoted. Originals = copies (Stok `63602ae3e8bf`, Satış
+`be1d895e426b`, Cari `672fac2f5bf6`, unchanged).

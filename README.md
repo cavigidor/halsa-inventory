@@ -76,8 +76,8 @@ uvicorn app:app --host 127.0.0.1          # local only; dashboard at http://127.
 
 ## Access: website viewer, financial viewer, owner (M8-CP1 / CP1B, D-060 / D-061 / D-074)
 Halsa Analysis is a browser web app. **Nothing is viewable without a password (D-074).** The normal dashboard needs the
-shared **website password**; the Yönetim financial sections (Kredi, Gider/Gelir, Bütçe) also need the shared
-**financial viewing password** (read-only). Changing anything (uploads, refresh, CRM / follow-ups, fairs, actions, AI
+shared **website password**; the Yönetim financial sections (Kredi, Gider/Gelir, Bütçe) and the account-level Cari
+balances (D-075) also need the shared **financial viewing password** (read-only). Changing anything (uploads, refresh, CRM / follow-ups, fairs, actions, AI
 drafts) and the full Yönetim need the **owner password**:
 ```bash
 python -m services.owner_auth hash-password --viewer    # website   → HALSA_VIEWER_PASSWORD_HASH=…  (PRIVATE .env)

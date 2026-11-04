@@ -53,7 +53,8 @@ WITHHELD_MESSAGE = "Bu analiz henüz doğrulanmadığı için gösterilmiyor."
 WITHHELD_CODE = "accuracy_withheld"
 WITHHELD_HTTP_STATUS = 409          # the resource exists; its verification state conflicts with displaying it
 MAX_REASONS_SHOWN = 4               # keep the father-facing notice short
-POLICY_VERSION = "m8-cari-d073"  # old generated pages/manifests must be refreshed (D-070, D-071, D-072, D-073)
+POLICY_VERSION = "m8-cari-d075"  # old generated pages/manifests must be refreshed (D-070 … D-073, D-075: pages of
+#   m8-cari-d073 embedded the account-level Cari rows for every viewer)
 DEFAULT_OPERATIONAL_MAX_AGE_DAYS = 45      # PROVISIONAL engineering default, not an owner-approved policy
 TEMPORAL_KINDS = ("operational", "historical")
 # M8-ACCURACY-2: the generation-bound evidence mechanism (services/generation.py) is shared by the dashboard, the API,
@@ -479,6 +480,7 @@ ROUTES: dict[tuple[str, str], tuple[str, str | tuple[str, ...] | None]] = {
     ("POST", "/api/auth/viewer-login"): ("operational", None),           # D-074 website (viewer) login
     ("POST", "/api/auth/viewer-sessions/revoke"): ("operational", None),
     ("GET", "/api/finance/overview"): ("redacted", ("owner.kredi", "owner.gider_gelir", "owner.butce")),
+    ("GET", "/api/finance/cari"): ("metric", "receivables.collections"),   # D-075: financial viewer / owner only
     ("GET", "/api/health"): ("system", None),
     ("GET", "/api/agent/categories"): ("system", None),
     ("GET", "/api/ai/calls"): ("system", None),

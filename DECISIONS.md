@@ -1393,3 +1393,44 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   hosting; whether the list should require the financial password on a hosted site remains an open owner question.
 - **Not decided / not done:** hosting, TLS, proxy headers, a data-free liveness probe for hosting (`/api/health` now
   needs a session), backups, KVKK review, and production password provisioning. No deployment is authorized.
+
+### D-075 · 2026-11-03 · Account-level Cari balances need the financial password (owner decision; resolves the D-073 / D-074 open access question)
+- **Owner decision (2026-11-03, relayed in the D-075 assignment):** account-level Cari balances require the existing
+  **financial-viewer password**. Website viewer: the normal read-only dashboard **without** account-level Cari
+  balances. Financial viewer: the normal dashboard + the complete, VERIFIED Cari list + the existing Yönetim financial
+  sections. Owner: everything + administration, uploads, publication and edits. The three D-074 roles and passwords
+  are reused; no new password, login or account model.
+- **Implementation (server-side, not display-side):**
+  - the published dashboard is the same bytes for every role, so it **never embeds a Cari record**: the
+    `collections` module carries `rows: []`, `finance: 1`, `endpoint: /api/finance/cari` and the fixed Turkish notice
+    *"Cari hesap bakiyeleri finans bilgisidir; görmek için finans görüntüleme şifresi gerekir…"*; columns, fixed notes
+    and the Cari report date (not an account record) stay in the page;
+  - new **`GET /api/finance/cari`** — `finance_read` in `services/access.py` (financial-viewer or owner session; a
+    website session gets 401 `finance_auth_required`, anonymous 401 `site_auth_required`) and a **`metric` route of
+    `receivables.collections`** in `ACC.ROUTES` (the accuracy middleware answers 409 `accuracy_withheld` unless the
+    metric is displayable on the served generation's fresh, bound evidence). The rows are computed by the unchanged
+    `m_collections` from the **aging bytes of the accepted generation**: **every request** re-reads the currently
+    selected Cari file and checks its SHA-256 against the manifest before any row — cached or new — is returned
+    (changed / missing / unreadable file → the neutral 409, never recomputed from other bytes); the per-(core id, sha)
+    cache only saves recomputing rows for just-verified bytes (PR #45 review correction);
+    `no-store`; `X-Halsa-Generation` = the page's generation;
+  - the Cari tab fetches the list when opened (no-store); 401 → the financial-password notice with a link to Yönetim;
+    409 → the withheld notice; after the financial login in Yönetim the same tab loads the list (no second login);
+    logout / revocation / expiry → the next request is refused;
+  - **Customer 360** (`GET /api/customer360/{code}`): for a session without the financial password each invoice
+    account's `aging.balance`, `oldest_bucket`, `direction`, `direction_label` are `null` and `finance_required: true`
+    (the card says "Cari bakiye: finans görüntüleme şifresi gerekir"); account code, recorded name, order facts,
+    class label and the rest of the profile are unchanged (D-061 nonfinancial disclosure kept).
+- **Audit (no other path carries Cari records):** the context / AI evidence (`/api/context` owner-only; D-071 removed
+  Cari facts), `/api/agent/*`, `/api/sales-queue` (collections reasons withdrawn by D-071), CRM, fairs, opportunities,
+  VKM summary, the finance and owner projections (no Cari section) — swept by test for the synthetic account codes,
+  names, amounts and invoice months.
+- **Old pages:** `POLICY_VERSION` → `m8-cari-d075`; every page / manifest of `m8-cari-d073` (which embedded the rows
+  for every website-password holder) is refused live and after a restart until the controlled refresh / restart
+  re-publication rebuilds it without rows.
+- **Unchanged (D-073):** calculations, 33 metrics, only `receivables.collections` VERIFIED, 60-day Cari freshness,
+  the other 32 withheld, `GENERATION_BOUND_API_EVIDENCE = True`, no overdue / priority / risk claims, exact signed
+  balances for authorized viewers; owner-only write / upload / publication rules.
+- **Known behaviour:** after a restart, until the warm-up has rebuilt the served context, `/api/finance/cari` answers
+  409 (no served fingerprints yet) — fail-closed; the warm-up builds the context at startup.
+- **Not decided / not done:** hosting, TLS, production password provisioning, KVKK review. No deployment.

@@ -4,6 +4,9 @@ Branch `claude/m8-cari-verified-promotion` from `main` @ `5e3656da88732815b3d88d
 Not merged, not deployed, no hosting. PR #39 untouched. Counts, check codes and SHA-256 / generation prefixes only;
 private evidence stays on the owner's Mac (`~/Desktop/ME/Projects/_halsa_m8_real_acceptance/`).
 
+> **Later (D-075, 2026-11-03):** the list described here is no longer embedded in the page; it is served only to
+> financial-viewer and owner sessions by `GET /api/finance/cari` (policy `m8-cari-d075`). See `docs/m8_cp1_access.md` §8.
+
 ## 1. Owner decision D-073 (2026-11-01)
 - **60 days** for current Cari account balances (supersedes the 45-day proposal of the first draft), counted from the
   Cari report date of D-072 D1. The 5 Oct 2026 export: eligible through **4 Dec 2026** (day 60), withheld from

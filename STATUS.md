@@ -1,6 +1,31 @@
 # STATUS.md — current checkpoint
 
-**2026-11-03 — M8-CP1B (D-074): website password in front of everything — draft PR, NOT merged, NOT deployed.**
+**2026-11-03 — D-075: account-level Cari balances need the financial password — draft PR, NOT merged, NOT deployed.**
+- Branch `claude/m8-d075-cari-finance-gate` from `main` @ `2d747cd` (D-074 merged as PR #44; merged-main CI 2042
+  passed / 7 skipped / 1 xfailed). Owner decision D-075 (2026-11-03): website viewer = dashboard without account-level
+  Cari balances; financial viewer = + the VERIFIED Cari list + Yönetim finances; owner = everything. D-074 roles and
+  passwords reused; no new login.
+- Server-side: the published page (same bytes for every role) embeds **no Cari record** (`rows: []`, finance flag,
+  Turkish notice); the list is served only by `GET /api/finance/cari` — `finance_read` + `metric` route of
+  `receivables.collections` (409 unless VERIFIED on fresh, bound evidence), computed by the unchanged `m_collections`
+  from the accepted generation's aging bytes after a SHA-256 match, `no-store`, page generation. Customer 360 nulls the
+  Cari balance / invoice-age month / sign without the financial password. `POLICY_VERSION` → `m8-cari-d075` (pages of
+  `m8-cari-d073`, which embedded the rows, refused live and after restart until re-published).
+- Unchanged: calculations, 33 metrics, only `receivables.collections` certified, 60 days, flag True, D-071
+  withdrawals, owner-only writes. Report / matrix / inventory / acceptance: `docs/m8_cp1_access.md` (§1, §2.1b, §6, §8).
+- Tests: full suite (browser + JS required, AI disabled) **2057 passed, 7 skipped, 1 xfailed** (`main` 2042 + 15 D-075 cases). Owner-local acceptance on the real exports:
+  PASS — the restart over the D-073 page never served it; after the owner's re-publication website viewer 0 Cari codes
+  / 401 on the list, financial viewer and owner 824 = independent balances (`docs/m8_cp1_access.md` §8).
+- **Review correction (ChatGPT, PR #45 @ `edfce56`):** `_cari_rows` returned cached rows before re-checking the
+  selected Cari file; now every `/api/finance/cari` request re-reads the selected file and verifies its SHA-256 against
+  the accepted manifest before returning cached or new rows (changed / missing / unreadable → neutral 409). Regression
+  with a warm cache (changed bytes, restored bytes, missing file); Customer 360 checked through the real endpoint as
+  schema-valid 200 responses by role. Focused D-075 / D-073 / D-072 / generation-integrity / access / C360: 593 passed;
+  full suite (browser + JS, AI disabled) again **2057 passed, 7 skipped, 1 xfailed**.
+
+**2026-11-03 — M8-CP1B (D-074): website password in front of everything — MERGED: PR #44 squash-merged as `2d747cd`
+(merged-main CI run 41748425195: 2042 passed / 7 skipped / 1 xfailed; not deployed). This heading said "draft PR, NOT
+merged, NOT deployed" when written; corrected 2026-11-03, body unchanged.**
 - Branch `claude/m8-cp1b-site-password` from `main` @ `a2fe7bf` (D-073 merged as PR #43; merged-main CI 2003 passed /
   7 skipped / 1 xfailed). D-074 retires the D-060 / D-061 public viewer: three passwords (website viewer, financial
   viewer, owner), no accounts. Anonymous visitors get only the Turkish site-password page (any bookmarked page, same

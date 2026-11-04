@@ -225,3 +225,44 @@ def test_owner_sees_full_yonetim_without_the_financial_password(browser, tmp_pat
         assert page.get_attribute("#own", "data-access") == "owner"
         assert page.is_visible('#own [data-sec="ops"]') and page.is_visible('#own [data-sec="system"]')
         assert page.is_visible("#own .ow-bar") and page.is_hidden("#own .ow-login")
+
+
+def test_cari_list_needs_the_financial_password_in_the_browser(browser, tmp_path):
+    """D-075: the website viewer's Cari tab shows only the Turkish financial-password notice (the page holds no Cari
+    record); the same browser sees the factual list after the financial password; logging out removes it."""
+    import json
+    import urllib.request
+    with fair_server(tmp_path) as srv:
+        page = viewer_page(browser)
+        page.goto(srv["base"] + "/")
+        page.wait_for_selector('#halsa-access[data-mode="viewer"]')
+        page.click('.tab[data-t="collections"]')
+        page.wait_for_selector('#collections[data-finance="locked"] .fin-gate:not([hidden])')
+        gate = page.inner_text("#collections .fin-gate")
+        assert "finans görüntüleme şifresi gerekir" in gate and "Yönetim sekmesine git" in gate
+        assert page.eval_on_selector_all("#collections tbody tr", "trs => trs.length") == 0
+        viewer_html = page.content()
+        assert page.evaluate("() => DATA.collections.rows.length") == 0
+        # the factual rows, as a financial session receives them from the server
+        cookie, _ = BA._post_login(srv["base"], "/api/auth/finance-login", BA.TEST_FINANCE_PASSWORD)
+        req = urllib.request.Request(srv["base"] + "/api/finance/cari",
+                                     headers={"Cookie": f"{BA.AUTH.COOKIE_NAME}={cookie}", "Accept": "application/json", "X-StockAgent": "1"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            rows = json.load(r)["rows"]
+        assert rows
+        for x in rows:                                                       # none of them reached the viewer
+            assert x["code"] not in viewer_html
+        page.click("#collections .fin-gate a")                               # → Yönetim, financial password
+        page.wait_for_selector("#own.on .ow-login:not([hidden])")
+        page.fill("#own .ow-pw", BA.TEST_FINANCE_PASSWORD)
+        page.click("#own .ow-unlock")
+        page.wait_for_selector('#halsa-access[data-mode="finance"]')
+        page.click('.tab[data-t="collections"]')                             # no second login
+        page.wait_for_selector('#collections[data-finance="open"] tbody tr')
+        assert page.is_hidden("#collections .fin-gate")
+        assert page.eval_on_selector_all("#collections tbody tr", "trs => trs.length") == len(rows)
+        assert rows[0]["name"] in page.inner_text("#collections")
+        page.click("#halsa-access button")                                   # Çıkış yap
+        page.wait_for_selector("#pw")
+        assert page.query_selector("#collections") is None and rows[0]["code"] not in page.content()
+        assert page.errors == []

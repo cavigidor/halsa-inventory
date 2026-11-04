@@ -36,8 +36,10 @@ GitHub (`cavigidor/halsa-inventory`) is the source of truth. Do not rely on chat
   Turkish site-password page and the owner-login page (`public`: `/giris` only). `viewer` routes need any session —
   the shared website password, the financial password or the owner password; never add a public data route, and
   never fall back to public viewing when a hash is missing. Hosting / deployment is still a separate, unauthorized
-  checkpoint, and the account-level Cari list's level on a hosted site is an open owner question. The Yönetim
-  financial projection is
+  checkpoint. **Account-level Cari balances need the financial password (D-075):** never embed Cari rows (or any
+  account code paired with an amount) in the published page, which is the same for every role; they are served only by
+  the `finance_read` metric route `GET /api/finance/cari`, and Customer 360 nulls the Cari balance fields for a
+  session without the financial password. The Yönetim financial projection is
   `finance_read` (financial-viewer password or owner, GET only); every state-changing, work-starting, paid-AI or
   administrative route is `owner_write` and every full-Yönetim / diagnostic read is `owner_read` in
   `services/access.py`. A financial session must never gain an owner permission. Every new route must

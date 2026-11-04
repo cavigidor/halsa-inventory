@@ -191,10 +191,11 @@ and `Kredi` are stale historical fields that never drive decisions as current va
 upgrades a stale field into a current fact. StockAgent models only legitimate, recorded transactions
 (D-026).
 
-## Access model (D-060, D-061, D-074)
+## Access model (D-060, D-061, D-074, D-075)
 Browser-based web application (no native app). Three passwords, no accounts: website viewer (shared site password;
-normal read-only dashboard incl. customer names, CRM / fair notes and the VERIFIED Cari list), financial viewer
-(shared financial password; + read-only Yönetim financial projection), owner (separate password; everything incl.
+normal read-only dashboard incl. customer names, CRM / fair notes — not the account-level Cari balances, D-075),
+financial viewer (shared financial password; + the VERIFIED Cari list via `GET /api/finance/cari` and the read-only
+Yönetim financial projection), owner (separate password; everything incl.
 every change). Anonymous visitors see only the site-password page (D-074 retired the public viewer). The accuracy gate
 applies to all three alike. Hosting prerequisites and open exposure questions: `docs/m8_cp1_access.md` §5–§6.
 
