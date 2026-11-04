@@ -70,6 +70,12 @@ def _gate(m, today, register=None, definitions=None):
     return ACC.Gate(reg, defs, None, today).bound_to(m.core_snapshot())
 
 
+def _endpoint_rows(folder):
+    """D-075: the rows GET /api/finance/cari serves for this folder's accepted aging bytes (the page embeds none)."""
+    paths, _, _ = GEN.select_core(folder)
+    return DB.m_collections(None, GEN.frames_from_frozen(GEN.freeze({"aging": paths["aging"]}))["aging"])[0]
+
+
 def _built(folder, m, gate, out):
     paths, _, _ = GEN.select_core(folder)
     DB.build(folder, str(out), today=gate.today, sources=paths, frames=GEN.frames_from_frozen(GEN.freeze(paths)),
@@ -118,7 +124,7 @@ def test_production_register_certifies_only_the_cari_list():
             assert x.max_source_age_days == ACC.DEFAULT_OPERATIONAL_MAX_AGE_DAYS, k
     assert len(ACC.REGISTER) == 33
     assert [k for k, x in ACC.REGISTER.items() if x.certified == ACC.State.VERIFIED] == [KEY]
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is True and ACC.POLICY_VERSION == "m8-cari-d073"
+    assert ACC.GENERATION_BOUND_API_EVIDENCE is True and ACC.POLICY_VERSION == "m8-cari-d075"   # D-075 bumped it
     ACC.validate_register()                                                       # the production rules pass
     assert ACC.current_gate().decide(KEY).codes == ("NO-EVIDENCE:aging",)         # no evidence → withheld
 
@@ -247,8 +253,8 @@ def test_production_gate_verifies_only_the_cari_list(tmp_path, monkeypatch):
     assert f'<meta name="stockagent-generation" content="{m.core_id}">' in html
     mods = data["modules"]
     coll = mods["collections"]
-    assert "withheld" not in coll
-    rows = {r["code"]: r for r in coll["rows"]}
+    assert "withheld" not in coll and coll["rows"] == [] and coll["finance"] == 1     # D-075: no rows in the page
+    rows = {r["code"]: r for r in _endpoint_rows(folder)}
     assert {c: r["balance"] for c, r in rows.items()} == EXPECTED                 # exact, signed, kuruş kept
     assert rows["120.01.0001"]["class_label"] == "Müşteri (120)"
     assert rows["120.01.0001"]["direction_label"] == "Halsa müşteriye borçlu"
@@ -257,7 +263,7 @@ def test_production_gate_verifies_only_the_cari_list(tmp_path, monkeypatch):
     assert rows["120.01.0002"]["direction_label"] == CARI.DIRECTION_LABELS["debit"]
     assert rows["900.00.0005"]["class_label"] == "Sınıflandırılmadı"
     assert "TOPLAM" not in rows                                                     # non-account row never a row
-    assert all("overdue" not in r and "usd" not in json.dumps(r).lower() for r in coll["rows"])
+    assert all("overdue" not in r and "usd" not in json.dumps(r).lower() for r in rows.values())
     assert "Cari rapor tarihi: 5 Ekim 2026 (dosya adındaki tarih (D-072))." in coll["note"]
     assert CARI.FX_NOTE in coll["note"] and CARI.OVERDUE_RETIRED_REASON in coll["note"]
     for k, mod in mods.items():                                                     # every other module withheld
@@ -275,8 +281,7 @@ def test_usd_values_never_change_a_tl_balance_or_the_decision(tmp_path, monkeypa
         folder = _folder(tmp_path / f"f{i}", cari_name=NAME, snapshot=OCT5, aging=_cari(fx=fx))
         m = _manifest(folder, today=today)
         gate = ACC.current_gate(today=today).bound_to(m.core_snapshot())
-        _, data = _built(folder, m, gate, tmp_path / f"p{i}.html")
-        out.append(([(r["code"], r["balance"], r["direction_label"]) for r in data["modules"]["collections"]["rows"]],
+        out.append(([(r["code"], r["balance"], r["direction_label"]) for r in _endpoint_rows(folder)],
                     gate.decide(KEY).state))
     assert out[0] == out[1] and out[0][1] == ACC.State.VERIFIED
     no_fx = _cari().drop(columns=[CARI.FX_COLUMN])
@@ -402,7 +407,8 @@ def test_app_serves_one_generation_on_page_and_api_and_withholds_when_stale(srv,
     aging = next(x for x in st["sources"] if x["key"] == "aging")
     assert aging["bound"] and aging["declared"]["date_origin"] == "filename"
     assert aging["declared"]["snapshot_date"] == day.isoformat()
-    rows = {x["code"]: x["balance"] for x in _data_blob(r.text)["modules"]["collections"]["rows"]}
+    assert _data_blob(r.text)["modules"]["collections"]["rows"] == []              # D-075: rows only via finance
+    rows = {x["code"]: x["balance"] for x in s.c.get("/api/finance/cari").json()["rows"]}   # (harness: owner)
     assert rows == EXPECTED
     for path in ("/api/context", "/api/agent/actions", "/api/sales-queue", "/api/scenario"):   # still withheld
         resp = s.c.post(path, json={}) if path == "/api/scenario" else s.c.get(path)
@@ -445,8 +451,7 @@ def test_new_month_rebinds_rollback_keeps_and_restart_never_serves_an_obsolete_p
     assert GEN.dashboard_markers(r2.content) == (st2["core_id"], (KEY,))
     aging = next(x for x in st2["sources"] if x["key"] == "aging")
     assert aging["declared"]["snapshot_date"] == (today - dt.timedelta(days=2)).isoformat() and aging["bound"]
-    assert {x["code"]: x["balance"] for x in _data_blob(r2.text)["modules"]["collections"]["rows"]}["120.01.0001"] \
-        == -1200.0
+    assert {x["code"]: x["balance"] for x in s.c.get("/api/finance/cari").json()["rows"]}["120.01.0001"] == -1200.0
     current_page = open(s.dash, "rb").read()
 
     # the previous, once-authorized page put back on disk is never served
@@ -505,9 +510,11 @@ def test_permissions_by_role_with_the_verified_cari_list(srv, monkeypatch):
         r = viewer.post("/api/auth/viewer-login", json={"password": VIEW_PASSWORD})
         assert r.status_code == 200 and r.json()["role"] == "viewer"
         viewer.headers["X-CSRF-Token"] = r.json()["csrf_token"]
-        page = viewer.get("/")                                                    # website viewer: the verified list
+        page = viewer.get("/")                                                    # website viewer: the dashboard …
         assert page.status_code == 200 and GEN.dashboard_markers(page.content)[1] == (KEY,)
-        assert {x["code"]: x["balance"] for x in _data_blob(page.text)["modules"]["collections"]["rows"]} == EXPECTED
+        assert _data_blob(page.text)["modules"]["collections"]["rows"] == []      # … without Cari records (D-075)
+        assert "-1500" not in page.text and "Sentetik Musteri" not in page.text
+        assert viewer.get("/api/finance/cari").status_code == 401
         assert viewer.post("/api/uploads").status_code == 403
         assert viewer.post("/api/context/refresh").status_code == 403
         assert viewer.get("/api/finance/overview").status_code == 401             # financial password still needed

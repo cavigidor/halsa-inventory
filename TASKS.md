@@ -4,10 +4,13 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-6 are merged; **Milestone 7 is COMPLETE** (PR #24, squash merge `de7eb43`; D-047). M8 production-readiness planning is merged (PR #26). **Owner directive 2026-10-18: NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION.** M8-ACCURACY is merged (PR #27, `a28b2b9`); M8-ACCURACY-2 technical foundation is merged (PR #28, `5baa92a`), and M8-ACCURACY-2B corrective foundation is merged (PR #29, `4ad8d8a`). The first owner-local reconciliation completed with core FAIL and Kredi NOT RUN; no business metric may be promoted without approved provenance, business definitions and per-metric reconciliation. All subsequent checkpoints use Claude Code. **Owner requirement 2026-10-22 (D-060, revised by D-061):** browser web app; three access levels — public viewer (no password), financial viewer (shared financial password, read-only Yönetim finances), owner (separate password, all changes); implemented and merged as M8-CP1, PR #30 (`a03efbf`), local only, not deployed.
 
 ## Current
-- [ ] **M8-CP1B — website password (D-074): draft PR (branch `claude/m8-cp1b-site-password`), awaiting ChatGPT's
-  independent review; NOT merged, NOT deployed.** Website / financial / owner passwords; anonymous visitors see only the
-  site-password page; nothing public. Open owner question: the account-level Cari list's level on a hosted site.
-  Hosting prerequisites remain (`docs/m8_cp1_access.md` §5–§6). STOP after review.
+- [ ] **D-075 — account-level Cari balances need the financial password: draft PR (branch
+  `claude/m8-d075-cari-finance-gate`), awaiting ChatGPT's independent review; NOT merged, NOT deployed.** Page embeds
+  no Cari record; `GET /api/finance/cari` (`finance_read`, metric route); Customer 360 Cari fields redacted without the
+  financial password; policy `m8-cari-d075`. STOP after review.
+- [x] **M8-CP1B — website password (D-074): MERGED — PR #44 squash-merged as `2d747cd` (2026-11-03; merged-main CI
+  2042 passed / 7 skipped / 1 xfailed; not deployed).** The open Cari-level question is answered by D-075 (above).
+  Hosting prerequisites remain (`docs/m8_cp1_access.md` §5–§6).
 - [x] **M8 first VERIFIED metric — `receivables.collections` (D-073): MERGED — PR #43 squash-merged as `a2fe7bf`
   (2026-11-03; code only; merged-main CI 2003 passed / 7 skipped / 1 xfailed; not deployed).** 60-day Cari freshness,
   certified VERIFIED, `GENERATION_BOUND_API_EVIDENCE` True, policy `m8-cari-d073`. Report

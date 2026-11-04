@@ -145,6 +145,8 @@ def test_ai_disabled_dashboard_and_action_center(browser, tmp_path):
             if t in ("c360", "sq", "opp", "fair", "crm", "own", "vkm", "up"):  # server-driven, tested in test_m7_* / test_m8_vkm_browser / test_m8_cp3_browser
                 continue
             page.click(f'.tab[data-t="{t}"]')
+            if t == "collections":                                      # D-075: rows come from /api/finance/cari
+                page.wait_for_selector('#collections[data-finance="open"] table', timeout=15000)
             assert page.is_visible(f"#{t}") and page.query_selector(f"#{t} table") is not None
         open_ai_tab(page)
         api = _get(srv["base"] + "/api/agent/actions")

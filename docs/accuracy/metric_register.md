@@ -86,7 +86,7 @@ tests are owner-local `local_data`). Nothing below claims a real-data reconcilia
 | `customers.order_size` | Sipariş Büyüklüğü tab | — | NOT_VERIFIED | no |
 | `finance.margin` | Kâr Marjı tab | — | **INVALID** (DQ-1) | no |
 | `receivables.risk` | Riskli Müşteri tab (withdrawn, D-071) | via `context.full` (empty) | **INVALID** (CARI-OVERDUE-UNSUPPORTED) | no |
-| `receivables.collections` | "Cari Bakiye (fatura yaşı)" tab (D-071; no stat card) | via `context.full` (no rows, no actions) | **VERIFIED** (D-073; while fresh and bound) | yes (on fresh, bound evidence) |
+| `receivables.collections` | "Cari Bakiye (fatura yaşı)" tab (D-071; no stat card; D-075: the page embeds no rows — the tab loads them for a financial-viewer / owner session) | `GET /api/finance/cari` (D-075, `finance_read`); via `context.full` (no rows, no actions) | **VERIFIED** (D-073; while fresh and bound) | yes (on fresh, bound evidence; financial password, D-075) |
 | `actions.real_decline` | (AI Aksiyon Merkezi / Günlük Satış reason) | via actions | NOT_VERIFIED | no |
 | `actions.queue` | ✨ AI Aksiyon Merkezi list | `GET /api/agent/actions` | INVALID (dependencies) | no |
 | `ai.interpretation` | AI comments | `POST …/enrich`, `POST …/analyze` | NOT_VERIFIED/INVALID | no |

@@ -1049,7 +1049,7 @@ def customer360_search(q: str = "", limit: int = C360.SEARCH_DEFAULT,
 
 
 @app.get("/api/customer360/{customer_code}", response_model=S.Customer360Detail)
-def customer360_detail(customer_code: str, c360: C360.Customer360Repository = Depends(get_c360),
+def customer360_detail(customer_code: str, request: Request, c360: C360.Customer360Repository = Depends(get_c360),
                        repo: ContextRepository = Depends(get_repo)):
     snap = _c360_snapshot(c360)
     ctx = repo.current()
@@ -1065,6 +1065,18 @@ def customer360_detail(customer_code: str, c360: C360.Customer360Repository = De
                                crm=CRM.customer_view(snap, customer_code))      # M7-5: local CRM / Takip
     if det is None:
         raise HTTPException(404, f"Müşteri bulunamadı: {customer_code}")
+    return _c360_cari_redacted(det, _session(request))
+
+
+def _c360_cari_redacted(det, sess):
+    """D-075: account-level Cari financial fields (signed balance, invoice-age month, sign direction) only for a
+    financial-viewer or owner session; the rest of Customer 360 (names, orders, notes) stays a viewer feature."""
+    if sess is not None and sess.can_view_finance:
+        return det
+    for acc in (det.get("receivables") or {}).get("accounts") or []:
+        ag = acc.get("aging")
+        if isinstance(ag, dict):
+            ag.update(balance=None, oldest_bucket=None, direction=None, direction_label=None, finance_required=True)
     return det
 
 
@@ -1477,6 +1489,61 @@ def finance_overview(owner: OV.OwnerRepository = Depends(get_owner)):
                                                                 "owner.gider_gelir", gate)),
         butce=OV.finance_section(ACC.redact_owner_section(OV.butce_section(owner, entries["butce"]), "owner.butce",
                                                           gate)))
+
+
+# ---------------- D-075: the factual Cari list for financial viewers and the owner only ----------------
+# The published dashboard never embeds account-level Cari records (dashboard_builder: the module carries title, columns
+# and notes only). Its rows are served here — FINANCE_READ in services/access.py (financial-viewer or owner session),
+# and the metric `receivables.collections` in ACC.ROUTES, so the accuracy middleware withholds the whole response (409)
+# unless the gate bound to THIS request's generation authorizes it (fresh, bound, scoped evidence). The rows are computed
+# from the aging bytes of that generation only after their SHA-256 equals the manifest record (else withheld).
+_CARI_LOCK = threading.Lock()
+_CARI_CACHE: dict = {}                    # (core_id, aging sha256) → rows; private, never serialized as a whole
+
+
+def _cari_rows(m) -> list | None:
+    rec = m.record("aging") if m is not None else None
+    if rec is None or not rec.sha256:
+        return None
+    key = (m.core_id, rec.sha256)
+    with _CARI_LOCK:
+        if key in _CARI_CACHE:
+            return _CARI_CACHE[key]
+    paths, _, _ = GEN.select_core(DATA_FOLDER)
+    p = paths.get("aging")
+    if not p or os.path.basename(p) != rec.file:
+        return None
+    try:
+        fs = GEN.FrozenSource.read("aging", p)
+    except OSError:
+        return None
+    if fs.sha256 != rec.sha256:                       # the file is not the bytes this generation was accepted from
+        return None
+    import dashboard_builder as db
+    rows, _ = db.m_collections(None, GEN.frames_from_frozen({"aging": fs})["aging"])
+    with _CARI_LOCK:
+        _CARI_CACHE.clear()                           # one generation at a time
+        _CARI_CACHE[key] = rows
+    return rows
+
+
+@app.get("/api/finance/cari", response_model=S.FinanceCari)
+def finance_cari():
+    """D-075: the complete factual Cari list (signed exact balances, invoice age, 120 / 320 classes) — financial viewer
+    or owner only, VERIFIED only (both enforced before this runs). Read-only; no overdue, priority or risk."""
+    gate = accuracy_gate()
+    v = RP.current_view()
+    m = v.manifest if v is not None else _build_gate()[0]
+    d = gate.decide("receivables.collections")
+    rows = _cari_rows(m) if (m is not None and d.displayable) else None
+    if rows is None:
+        return _deny(ACC.WITHHELD_HTTP_STATUS, ACC.WITHHELD_CODE, ACC.WITHHELD_MESSAGE)
+    import dashboard_builder as db
+    ev = m.record("aging").evidence
+    return S.FinanceCari(generation_id=m.generation_id, core_id=m.core_id,
+                         report_date=ev.report_date.isoformat() if ev.report_date else None,
+                         report_date_origin=ev.report_date_origin, date_note=db._cari_date_note(m),
+                         count=len(rows), rows=rows)
 
 
 @app.get("/api/owner/overview", response_model=S.OwnerOverview)

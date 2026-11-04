@@ -208,6 +208,10 @@ def _cari_date_note(manifest):
     d=ev.report_date
     return f"Cari rapor tarihi: {d.day} {AYLAR[d.month]} {d.year} ({CARI.DATE_ORIGIN_TR.get(ev.report_date_origin or 'declared','beyan edildi')})."
 
+# D-075: shown on the Cari tab to a session without the financial password (fixed text, no data)
+CARI_FINANCE_MESSAGE=('Cari hesap bakiyeleri finans bilgisidir; görmek için finans görüntüleme şifresi gerekir. '
+                      'Yönetim sekmesinde şifreyi girdikten sonra bu sekmeye dönün.')
+
 def m_collections(path,df=None):
     """D-071: factual Cari balances, not overdue receivables. One row per account (numeric code, as before): the signed
     balance as exported (None when a bucket is blank — unknown, never zero), the oldest month bucket holding a non-zero
@@ -327,6 +331,12 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
         d=_dec(ACC.MODULE_METRIC.get(k,'unregistered:'+k))
         if not d.displayable:
             modules[k]={'title':modules[k]['title'],'rows':[],'cols':[],'withheld':d.notice()}
+    # D-075: the published page is the same bytes for every role, so it NEVER embeds account-level Cari records. A
+    # VERIFIED Cari module keeps its title, columns and notes; the rows are served only to a financial-viewer or owner
+    # session by GET /api/finance/cari (FINANCE_READ + the same gate, bound to the served generation).
+    if 'collections' in modules and not modules['collections'].get('withheld'):
+        modules['collections']={**modules['collections'],'rows':[],'finance':1,'endpoint':'/api/finance/cari',
+                                'finance_message':CARI_FINANCE_MESSAGE}
     withheld_stats=[l for l,_ in stats if not _dec(ACC.STAT_METRIC.get(l,'unregistered:'+l)).displayable]
     stats=[(l,v) for l,v in stats if l not in withheld_stats]
     show_tiers=_dec('customers.winback').displayable
@@ -1186,6 +1196,9 @@ function receivablesCard(r){
     box.append(kv('Bu hesaptan sipariş',fmtNum(a.orders)+' · '+fmtMoney(a.net_order_amount)));
     if(!a.aging||!a.aging.available) box.append(kv('Cari bakiye','cari dosyası yok','unavailable'));
     else if(!a.aging.present_in_file) box.append(kv('Cari bakiye','cari dosyasında hesap yok',a.aging.confidence));
+    else if(a.aging.finance_required){box.dataset.cls=a.aging.account_class||'';   // D-075: financial password
+      box.append(kv('Hesap türü',a.aging.class_label||'—'));
+      box.append(kv('Cari bakiye','finans görüntüleme şifresi gerekir','unavailable'));}
     else{const b=a.aging.balance; box.dataset.cls=a.aging.account_class||'';
       box.append(kv('Hesap türü',a.aging.class_label||'—'));
       box.append(kv('Cari bakiye (işaretli)',b==null?'bilinmiyor':fmtMoneyExact(b),b==null?'unavailable':a.aging.confidence));
@@ -2875,7 +2888,7 @@ def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,o
     blob=json.dumps(modules,ensure_ascii=False).replace('</','<\\/')
     tabs=['overview']+list(modules.keys())
     tabbtns=''.join(f'<button class="tab" data-t="{t}">{("Genel Bakış" if t=="overview" else modules[t]["title"])}'
-                    f'{"" if (t=="overview" or modules[t].get("withheld")) else f" <span class=cnt>{len(modules[t]["rows"])}</span>"}</button>' for t in tabs)
+                    f'{"" if (t=="overview" or modules[t].get("withheld") or modules[t].get("finance")) else f" <span class=cnt>{len(modules[t]["rows"])}</span>"}</button>' for t in tabs)
     statcards=''.join(f'<div class="stat"><div class="n">{v}</div><div class="l">{l}</div></div>' for l,v in stats)
     # M8-ACCURACY: withheld stat cards are left out entirely (no number); one neutral line names them.
     ws=meta.get('withheld_stats') or []
@@ -3020,11 +3033,13 @@ function makePanel(id){{
     filterHTML=`<select class="repsel"><option value="">Tüm temsilciler</option>${{vals.map(v=>`<option>${{esc(v)}}</option>`).join('')}}</select>`;
   }}
   p.innerHTML=`<div class="toolbar"><input class="search" placeholder="${{m.title.toLowerCase()}} ara…">${{filterHTML}}
-    <span class="count"></span></div><p class="note">${{m.note}}</p><div class="tbl"></div>`;
+    <span class="count"></span></div><p class="note">${{m.note}}</p><div class="fin-gate" hidden></div><div class="tbl"></div>`;
   state[id]={{sort:null,dir:1,q:'',fval:''}};
   p.querySelector('.search').addEventListener('input',e=>{{state[id].q=e.target.value.toLowerCase();draw(id);}});
   const sel=p.querySelector('.repsel'); if(sel) sel.addEventListener('change',e=>{{state[id].fval=e.target.value;draw(id);}});
-  document.getElementById('panels').appendChild(p); draw(id);
+  document.getElementById('panels').appendChild(p);
+  if(m.finance){{p.dataset.finance='locked'; return;}}   // D-075: rows are loaded from the server when the tab opens
+  draw(id);
 }}
 function draw(id){{
   const m=DATA[id], s=state[id]; let rows=m.rows.slice();
@@ -3066,11 +3081,34 @@ function draw(id){{
   if(m.expand) p.querySelectorAll('tr.exp').forEach(tr=>tr.addEventListener('click',()=>{{
     const d=tr.nextElementSibling; tr.classList.toggle('open'); d.classList.toggle('open');}}));
 }}
+// D-075: a finance-gated module (the Cari list) has NO rows in this page; they come from the server only for a
+// financial-viewer or owner session, every time the tab opens (logout / lost authorization → message again).
+function loadFinance(id){{
+  const m=DATA[id], p=document.getElementById(id); if(!m||!m.finance||!p) return;
+  const gate=p.querySelector('.fin-gate');
+  const lock=(txt)=>{{m.rows=[]; p.dataset.finance='locked'; gate.hidden=false; gate.replaceChildren();
+    const box=document.createElement('div'); box.className='aw-box'; box.setAttribute('role','note');
+    const msg=document.createElement('p'); msg.className='aw-msg'; msg.textContent=txt; box.append(msg);
+    const a=document.createElement('a'); a.href='#yonetim'; a.textContent='Yönetim sekmesine git'; box.append(a);
+    a.addEventListener('click',e=>{{const t=document.querySelector('.tab[data-t="own"]'); if(t){{e.preventDefault(); t.click();}}}});
+    gate.append(box); p.querySelector('.tbl').replaceChildren(); p.querySelector('.count').textContent='';}};
+  fetch(m.endpoint,{{headers:{{'Accept':'application/json'}},credentials:'same-origin',cache:'no-store'}}).then(r=>
+    r.json().catch(()=>({{}})).then(d=>({{r,d}}))).then(({{r,d}})=>{{
+    if(r.ok&&d&&Array.isArray(d.rows)){{m.rows=d.rows; p.dataset.finance='open'; gate.hidden=true;
+      const sel=p.querySelector('.repsel');
+      if(sel&&m.filter){{const vals=[...new Set(m.rows.map(x=>x[m.filter]).filter(x=>x))].sort((a,b)=>String(a).localeCompare(String(b),'tr'));
+        sel.replaceChildren(new Option('Tüm temsilciler','')); vals.forEach(v=>sel.append(new Option(v,v)));}}
+      draw(id); return;}}
+    if(r.status===409) lock((d.detail&&d.detail.message)||'Bu analiz henüz doğrulanmadığı için gösterilmiyor.');
+    else lock(m.finance_message||'Finans görüntüleme şifresi gerekir.');
+  }}).catch(()=>lock('Sunucuya ulaşılamadı.'));
+}}
 Object.keys(DATA).forEach(makePanel);
 document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{{
   document.querySelectorAll('.tab').forEach(x=>{{x.classList.remove('on'); x.removeAttribute('aria-current');}});
   document.querySelectorAll('.panel').forEach(x=>x.classList.remove('on'));
-  b.classList.add('on'); b.setAttribute('aria-current','page'); document.getElementById(b.dataset.t).classList.add('on');}}));
+  b.classList.add('on'); b.setAttribute('aria-current','page'); document.getElementById(b.dataset.t).classList.add('on');
+  if(DATA[b.dataset.t]&&DATA[b.dataset.t].finance) loadFinance(b.dataset.t);}}));
 document.querySelector('.tab').classList.add('on'); document.querySelector('.tab').setAttribute('aria-current','page');
 </script></div></body></html>"""
 

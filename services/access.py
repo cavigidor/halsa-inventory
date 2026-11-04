@@ -95,6 +95,7 @@ ACCESS: dict[tuple[str, str], str] = {
     ("POST", "/api/crm/customers/{customer_code}/interactions"): OWNER_WRITE,
     ("PUT", "/api/crm/customers/{customer_code}/followup"): OWNER_WRITE,
     # --- M7-6 Yönetim ---
+    ("GET", "/api/finance/cari"): FINANCE_READ,                  # D-075: the factual Cari list (account balances)
     ("GET", "/api/finance/overview"): FINANCE_READ,              # D-061: Kredi / Gider-Gelir / Bütçe ONLY, source
                                                                  # diagnostics removed (services/owner_view.finance_*)
     ("GET", "/api/owner/overview"): OWNER_READ,                  # full Yönetim: + operations, system, issues, reload

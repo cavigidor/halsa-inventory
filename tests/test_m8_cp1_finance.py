@@ -262,7 +262,8 @@ def test_financial_viewers_cannot_change_anything(app_env, method, path):
 
 def test_no_mutating_route_is_reachable_with_a_read_level(monkeypatch):
     assert {lv for (m, _), lv in AX.ACCESS.items() if m in AX.MUTATING} <= {AX.OWNER_WRITE, AX.AUTH}
-    assert {k for k, lv in AX.ACCESS.items() if lv == AX.FINANCE_READ} == {("GET", "/api/finance/overview")}
+    assert {k for k, lv in AX.ACCESS.items() if lv == AX.FINANCE_READ} == {("GET", "/api/finance/overview"),
+                                                                           ("GET", "/api/finance/cari")}   # D-075
     monkeypatch.setattr(AX, "ACCESS", {**AX.ACCESS, ("POST", "/x"): AX.FINANCE_READ})
     assert AX.level("POST", "/x") == AX.OWNER_WRITE
 
