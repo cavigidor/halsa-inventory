@@ -1,11 +1,12 @@
-"""M8-CP1 (D-060, D-061): password roles for a browser web app. Viewing the normal dashboard needs no login.
+"""M8-CP1 / CP1B (D-060, D-061, D-074): password roles for a browser web app. Nothing is viewable without a session.
 
-Two roles, each with its OWN password hash and its own sessions (no usernames, no accounts):
-- ``owner``   — administration: every data-changing or administrative operation, and every owner-only read
-                (``HALSA_OWNER_PASSWORD_HASH``);
+Three roles, each with its OWN password hash and its own sessions (no usernames, no accounts):
+- ``viewer``  — D-074: the shared website password; read-only normal dashboard (``HALSA_VIEWER_PASSWORD_HASH``);
 - ``finance`` — read-only financial viewing (Yönetim: Kredi / Gider-Gelir / Bütçe) for the owner's father and other
-                explicitly trusted financial viewers (``HALSA_FINANCE_PASSWORD_HASH``). It never grants any owner
-                permission; the owner's session also allows financial viewing.
+                explicitly trusted financial viewers (``HALSA_FINANCE_PASSWORD_HASH``), plus everything a viewer sees.
+                It never grants any owner permission;
+- ``owner``   — administration: every data-changing or administrative operation, every owner-only read, financial
+                viewing and normal viewing (``HALSA_OWNER_PASSWORD_HASH``).
 
 Deliberately small and conventional:
 - a password is never stored or committed; only an scrypt hash (Python's ``hashlib.scrypt``) lives in the private
@@ -42,11 +43,12 @@ from services import store as ST
 
 log = logging.getLogger("owner_auth")
 
-ROLE_OWNER, ROLE_FINANCE = "owner", "finance"
-ROLES = (ROLE_OWNER, ROLE_FINANCE)
+ROLE_OWNER, ROLE_FINANCE, ROLE_VIEWER = "owner", "finance", "viewer"
+ROLES = (ROLE_OWNER, ROLE_FINANCE, ROLE_VIEWER)
 PASSWORD_ENV = "HALSA_OWNER_PASSWORD_HASH"
 FINANCE_PASSWORD_ENV = "HALSA_FINANCE_PASSWORD_HASH"
-PASSWORD_ENVS = {ROLE_OWNER: PASSWORD_ENV, ROLE_FINANCE: FINANCE_PASSWORD_ENV}
+VIEWER_PASSWORD_ENV = "HALSA_VIEWER_PASSWORD_HASH"                # D-074: the shared website password
+PASSWORD_ENVS = {ROLE_OWNER: PASSWORD_ENV, ROLE_FINANCE: FINANCE_PASSWORD_ENV, ROLE_VIEWER: VIEWER_PASSWORD_ENV}
 COOKIE_NAME = "halsa_owner"                             # one cookie; the server-side row says which role
 CSRF_HEADER = "x-csrf-token"
 
@@ -58,7 +60,7 @@ SCRYPT_MAXMEM = 1024 * 1024 * 1024                     # bound for N_MAX * r; no
 MIN_PASSWORD_LENGTH = 12
 MAX_PASSWORD_LENGTH = 256
 
-MAX_SESSIONS = {ROLE_OWNER: 5, ROLE_FINANCE: 10}       # per role; oldest sessions are dropped beyond this
+MAX_SESSIONS = {ROLE_OWNER: 5, ROLE_FINANCE: 10, ROLE_VIEWER: 20}   # per role; oldest sessions dropped beyond this
 LAST_SEEN_WRITE_SECONDS = 60                            # idle-timer write granularity
 
 THROTTLE_WINDOW_SECONDS = 15 * 60
@@ -220,6 +222,11 @@ class Session:
     def can_view_finance(self) -> bool:
         return self.role in (ROLE_OWNER, ROLE_FINANCE)
 
+    @property
+    def can_view(self) -> bool:
+        """D-074: every live session — viewer, financial viewer or owner — opens the normal (read-only) dashboard."""
+        return self.role in ROLES
+
     def csrf_ok(self, presented: str | None) -> bool:
         return bool(presented) and isinstance(presented, str) and hmac.compare_digest(
             presented.encode("utf-8", "replace"), self.csrf_token.encode("utf-8"))
@@ -376,26 +383,26 @@ def origin_ok(origin: str | None, scheme: str, host_header: str | None) -> bool:
 
 
 # ---------------- command line (provisioning; nothing is printed except the hash line) ----------------
-_ROLE_TR = {ROLE_OWNER: "Yönetici", ROLE_FINANCE: "Finans görüntüleme"}
+_ROLE_TR = {ROLE_OWNER: "Yönetici", ROLE_FINANCE: "Finans görüntüleme", ROLE_VIEWER: "Site (görüntüleme)"}
 
 
 def _cli(argv: list[str]) -> int:
     import getpass
     cmd = argv[0] if argv else ""
     flags = set(argv[1:])
-    role = ROLE_FINANCE if "--finance" in flags else (ROLE_OWNER if "--owner" in flags or cmd == "hash-password"
-                                                      else None)
+    role = (ROLE_FINANCE if "--finance" in flags else ROLE_VIEWER if "--viewer" in flags
+            else (ROLE_OWNER if "--owner" in flags or cmd == "hash-password" else None))
     if cmd == "hash-password":
         pw = getpass.getpass(f"{_ROLE_TR[role]} şifresi (en az {MIN_PASSWORD_LENGTH} karakter): ")
         if pw != getpass.getpass("Şifre (tekrar): "):
             print("Şifreler eşleşmiyor; hiçbir şey yazılmadı.", file=sys.stderr)
             return 2
-        other = ROLE_FINANCE if role == ROLE_OWNER else ROLE_OWNER
-        other_hash = configured_hash(other)
-        if other_hash is not None and verify_password(pw, other_hash):     # one password must never serve both roles
-            print(f"Reddedildi: bu şifre {_ROLE_TR[other].lower()} şifresiyle aynı. Farklı bir şifre seçin.",
-                  file=sys.stderr)
-            return 2
+        for other in ROLES:                                  # one password must never serve two roles
+            other_hash = configured_hash(other) if other != role else None
+            if other_hash is not None and verify_password(pw, other_hash):
+                print(f"Reddedildi: bu şifre {_ROLE_TR[other].lower()} şifresiyle aynı. Farklı bir şifre seçin.",
+                      file=sys.stderr)
+                return 2
         try:
             enc = hash_password(pw)
         except ValueError as e:
@@ -416,8 +423,8 @@ def _cli(argv: list[str]) -> int:
             state = "yapılandırıldı" if configured_hash(r) else "YAPILANDIRILMADI (kapalı)"
             print(f"{_ROLE_TR[r]} girişi: {state} · açık oturum: {session_count(r)}")
         return 0
-    print("Kullanım: python -m services.owner_auth {hash-password [--finance] | revoke-sessions [--owner|--finance] "
-          "| status}", file=sys.stderr)
+    print("Kullanım: python -m services.owner_auth {hash-password [--viewer|--finance] | "
+          "revoke-sessions [--owner|--finance|--viewer] | status}", file=sys.stderr)
     return 2
 
 

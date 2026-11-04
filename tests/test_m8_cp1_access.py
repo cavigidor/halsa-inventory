@@ -36,6 +36,8 @@ PASSWORD = "sentetik-yonetici-parolasi-42"         # synthetic test value
 HASH = AUTH.hash_password(PASSWORD, n=2 ** 14)
 FIN_PASSWORD = "sentetik-finans-parolasi-77"       # synthetic test value (D-061 financial viewer)
 FIN_HASH = AUTH.hash_password(FIN_PASSWORD, n=2 ** 14)
+VIEW_PASSWORD = "sentetik-site-parolasi-19"        # synthetic test value (D-074 website viewer)
+VIEW_HASH = AUTH.hash_password(VIEW_PASSWORD, n=2 ** 14)
 CANARY = "/Users/sentetik/gizli/klasor/satis.xlsx"
 
 
@@ -67,6 +69,7 @@ def app_env(world, tmp_path, monkeypatch):
     ST.init_db()
     monkeypatch.setenv(AUTH.PASSWORD_ENV, HASH)
     monkeypatch.setenv(AUTH.FINANCE_PASSWORD_ENV, FIN_HASH)
+    monkeypatch.setenv(AUTH.VIEWER_PASSWORD_ENV, VIEW_HASH)
     spy = _Spy()
     provider = MockProvider()
     real = provider.generate_structured
@@ -123,6 +126,20 @@ def login(cl, password=PASSWORD):
 def owner_client(app_env):
     cl = app_env()
     login(cl)
+    return cl
+
+
+def viewer_login(cl, password=VIEW_PASSWORD):
+    r = cl.post("/api/auth/viewer-login", json={"password": password})
+    assert r.status_code == 200, r.text
+    cl.headers["X-CSRF-Token"] = r.json()["csrf_token"]
+    return r
+
+
+def viewer_client(app_env):
+    """D-074: a browser that entered the shared website password."""
+    cl = app_env()
+    viewer_login(cl)
     return cl
 
 
@@ -191,7 +208,9 @@ def test_no_state_changing_route_is_viewer(monkeypatch):
         if method in AX.MUTATING:
             assert lv in (AX.OWNER_WRITE, AX.AUTH), (method, path, lv)
     assert {p for (m, p), lv in AX.ACCESS.items() if lv == AX.AUTH} == {
-        "/api/auth/session", "/api/auth/login", "/api/auth/finance-login", "/api/auth/logout"}
+        "/api/auth/session", "/api/auth/login", "/api/auth/finance-login", "/api/auth/viewer-login",
+        "/api/auth/logout"}
+    assert {p for (m, p), lv in AX.ACCESS.items() if lv == AX.PUBLIC} == {"/giris"}   # D-074: nothing else public
     monkeypatch.setattr(AX, "ACCESS", {**AX.ACCESS, ("POST", "/x"): AX.VIEWER})
     assert AX.level("POST", "/x") == AX.OWNER_WRITE                 # a viewer route can never mutate (fail closed)
     assert AX.level("GET", "/nope") is None and AX.level("POST", "/") is None
@@ -232,32 +251,56 @@ def test_api_documentation_and_schema_are_not_served(app_env):
 
 
 # ---------------------------------------------------------------------------------------------
-# B. anonymous viewer
+# B. website viewer (D-074: the shared site password) and anonymous visitors
 # ---------------------------------------------------------------------------------------------
 # M8-CP3: /yukleme is, like /giris, a fixed HTML page that embeds the shared access script (its own test:
 # tests/test_m8_cp3_upload_center.py::test_viewers_and_financial_viewers_cannot_upload_validate_or_publish)
 @pytest.mark.parametrize("method,path", [k for k in VIEWER_GETS if k[1] not in ("/", "/giris", "/yukleme")])
-def test_viewer_reads_need_no_login(app_env, method, path):
-    cl = app_env()
-    r = cl.get(_fill(path))
-    assert r.status_code not in (401, 403), (path, r.status_code, r.text[:300])
-    assert "auth_required" not in r.text
+def test_viewer_reads_need_the_site_password(app_env, method, path):
+    anon = app_env()
+    r = anon.get(_fill(path))
+    assert r.status_code == 401, (path, r.status_code)
+    assert r.json() == {"detail": {"error_code": "site_auth_required", "message": APP.SITE_REQUIRED_TEXT}}
+    for cl in (viewer_client(app_env), app_env()):
+        if not cl.cookies:
+            finance_login_(cl)
+        r = cl.get(_fill(path))
+        assert r.status_code not in (401, 403), (path, r.status_code, r.text[:300])
+        assert "auth_required" not in r.text
 
 
-def test_dashboard_and_login_page_open_without_login(app_env):
-    cl = app_env()
-    r = cl.get("/")
-    assert r.status_code != 401 and "auth_required" not in r.text      # no login wall in front of the dashboard
-    g = cl.get("/giris")
-    assert g.status_code == 200 and "Yönetici girişi" in g.text and "görüntülemek için giriş gerekmez" in g.text
+def finance_login_(cl):
+    r = cl.post("/api/auth/finance-login", json={"password": FIN_PASSWORD})
+    assert r.status_code == 200, r.text
+    cl.headers["X-CSRF-Token"] = r.json()["csrf_token"]
+
+
+def test_anonymous_visitors_get_only_the_site_password_page(app_env):
+    anon = app_env()
+    for path in ("/", "/yukleme"):
+        r = anon.get(path)
+        assert r.status_code == 401 and r.headers["x-halsa-auth"] == "site_required", path
+        assert "Site şifresi" in r.text and 'type="password"' in r.text and "/api/auth/viewer-login" in r.text
+        assert "stockagent-generation" not in r.text and "const DATA" not in r.text and FX.P[1] not in r.text
+        assert "no-store" in r.headers["cache-control"]
+    g = anon.get("/giris")                                             # the owner-login page stays reachable
+    assert g.status_code == 200 and "Yönetici girişi" in g.text and "site şifresi" in g.text
+    assert "görüntülemek için giriş gerekmez" not in g.text
     assert 'type="password"' in g.text and "autocomplete=\"current-password\"" in g.text
+    v = viewer_client(app_env)
+    r = v.get("/")
+    assert r.status_code != 401 and "Site şifresi" not in r.text      # the site password opens the dashboard
+    assert "no-store" in r.headers["cache-control"]                    # never cached for a later visitor
 
 
 def test_viewer_session_endpoint_reports_viewer(app_env):
     cl = app_env()
     j = cl.get("/api/auth/session").json()
-    assert j == {"configured": True, "finance_configured": True, "authenticated": False, "role": None,
-                 "csrf_token": None, "expires_at": None, "idle_expires_at": None}
+    assert j == {"configured": True, "finance_configured": True, "viewer_configured": True, "authenticated": False,
+                 "role": None, "csrf_token": None, "expires_at": None, "idle_expires_at": None}
+    viewer_login(cl)
+    j = cl.get("/api/auth/session").json()
+    assert j["authenticated"] is True and j["role"] == "viewer" and j["csrf_token"]
 
 
 @pytest.mark.parametrize("method,path", OWNER_READS)
@@ -282,12 +325,15 @@ def test_anonymous_writes_are_refused_and_change_nothing(app_env, method, path):
 
 
 def test_customer360_retry_is_an_owner_action(app_env):
-    cl = app_env()
+    anon = app_env()
+    r = anon.get("/api/customer360/status?retry=true")
+    assert r.status_code == 401 and r.json()["detail"]["error_code"] == "auth_required"
+    cl = viewer_client(app_env)
     assert cl.get("/api/customer360/status").status_code == 200
     assert cl.get("/api/customer360/status?retry=false").status_code == 200
     for v in ("true", "1", "yes"):
         r = cl.get(f"/api/customer360/status?retry={v}")
-        assert r.status_code == 401 and r.json()["detail"]["error_code"] == "auth_required"
+        assert r.status_code == 403 and r.json()["detail"]["error_code"] == "owner_required"   # viewer ≠ owner
     assert app_env.spy.c360_retry == 0
     login(cl)
     assert cl.get("/api/customer360/status?retry=true").status_code == 200
@@ -295,7 +341,7 @@ def test_customer360_retry_is_an_owner_action(app_env):
 
 
 def test_read_only_requests_never_change_human_decisions(app_env):
-    """A full sweep of every viewer GET (twice, anonymous) leaves every table byte-identical after the first sweep, and
+    """A full sweep of every viewer GET (twice, website-viewer session) leaves every table byte-identical after the first sweep, and
     the first sweep only ever inserts the published deterministic queue (status 'open', event 'generated')."""
     owner = owner_client(app_env)
     code = FX.P[1]
@@ -304,7 +350,7 @@ def test_read_only_requests_never_change_human_decisions(app_env):
     camp = owner.post("/api/fairs/campaigns", json=_bodies("/api/fairs/campaigns")).json()
     cid = camp["campaign_id"]
     assert owner.post(f"/api/fairs/campaigns/{cid}/customers", json={"customer_codes": [code]}).status_code == 200
-    anon = app_env()
+    anon = viewer_client(app_env)
     paths = [_fill(p, code, cid) for (_, p) in VIEWER_GETS] + [
         "/api/crm/followups?mode=all", f"/api/customer360/search?q={code[:7]}"]
     before = _db_dump(ST.DB_PATH)
@@ -326,7 +372,8 @@ def test_read_only_requests_never_change_human_decisions(app_env):
 
 def test_health_hides_local_error_text_from_viewers(app_env):
     app_env.repo.last_error = "FileNotFoundError: " + CANARY
-    anon = app_env()
+    assert app_env().get("/api/health").status_code == 401             # D-074: anonymous sees nothing
+    anon = viewer_client(app_env)
     h = anon.get("/api/health").json()
     assert h["context_error"] == APP.HEALTH_ERROR_VIEWER_TEXT and CANARY not in json.dumps(h)
     assert owner_client(app_env).get("/api/health").json()["context_error"].endswith(CANARY)
@@ -422,7 +469,7 @@ def test_admin_login_fails_closed_when_not_configured(app_env, monkeypatch):
     assert r.status_code == 503 and r.json()["detail"]["error_code"] == "admin_not_configured"
     r = cl.post("/api/actions/x/complete")
     assert r.status_code == 401 and r.json()["detail"]["error_code"] == "admin_not_configured"
-    assert cl.get("/api/agent/categories").status_code == 200                      # viewing still works
+    assert viewer_client(app_env).get("/api/agent/categories").status_code == 200   # viewing still works
     assert cl.get("/api/auth/session").json()["configured"] is False
     for bad in ("plaintext-password", "scrypt:1024:8:1:AAAAAAAAAAAAAAAAAAAAAA:" + "A" * 43,   # too weak
                 "scrypt:32768:8:1:c2FsdA:" + "A" * 43,                                      # salt too short
@@ -541,7 +588,8 @@ def test_forged_or_garbage_cookie_is_anonymous(app_env):
     for v in ("x", "A" * 43, "A" * 500):
         cl.cookies.set(AUTH.COOKIE_NAME, v)
         assert cl.get("/api/owner/status").status_code == 401
-        assert cl.get("/api/agent/categories").status_code == 200
+        r = cl.get("/api/agent/categories")
+        assert r.status_code == 401 and r.json()["detail"]["error_code"] == "site_auth_required"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -599,7 +647,7 @@ def test_protected_crm_fair_and_action_mutations_work_for_the_owner(app_env):
     assert cl.post(f"/api/actions/{aid}/defer", json={}).json()["status"] == "deferred"
     assert cl.post(f"/api/actions/{aid}/reopen").json()["status"] == "open"
     assert cl.post("/api/owner/reload").status_code == 200 and app_env.spy.owner_reload == 1
-    anon = app_env()                                                  # …and a viewer sees the result read-only
+    anon = viewer_client(app_env)                                     # …and a viewer sees the result read-only
     assert anon.get(f"/api/crm/customers/{code}").status_code == 200
     assert any(c["campaign_id"] == cid for c in anon.get("/api/fairs/campaigns").json()["items"])
 
@@ -621,10 +669,11 @@ def test_protected_report_refresh(app_env, monkeypatch):
 def test_logging_in_never_reveals_an_unverified_metric(app_env):
     assert REL.certified_keys() == list(REL.CERTIFIED)
     REL.assert_release_state()                    # D-073: one certified metric, flag True
-    anon, owner = app_env(), owner_client(app_env)
+    anon, viewer, owner = app_env(), viewer_client(app_env), owner_client(app_env)
     for path in ("/api/agent/actions", "/api/sales-queue", f"/api/customer360/{FX.P[1]}",
                  "/api/opportunities/summary", "/api/fairs/history"):
-        for cl in (anon, owner):
+        assert anon.get(path).status_code == 401
+        for cl in (viewer, owner):
             r = cl.get(path)
             assert r.status_code == ACC.WITHHELD_HTTP_STATUS, (path, r.status_code)
             assert r.json()["detail"]["error_code"] == "accuracy_withheld"

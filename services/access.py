@@ -1,10 +1,13 @@
-"""M8-CP1 (D-060, revised by D-061): who may call which route. One table, enforced by one middleware in app.py.
+"""M8-CP1 / CP1B (D-060, D-061, D-074): who may call which route. One table, enforced by one middleware in app.py.
 
 Levels
-- ``viewer``      anyone who can reach the server may call it without logging in. Read-only: it never changes a human
-                  decision (action status, CRM, fair campaigns, notes) and never triggers a refresh, a reload, an upload
-                  or a paid AI call. The accuracy gate (services/accuracy.py) still withholds every unverified metric,
-                  for viewers AND the owner alike.
+- ``public``      no session needed: only the fixed owner-login page (no data). The login / session endpoints are
+                  ``auth``. Nothing else is reachable without a password (D-074 supersedes the D-060 public viewer).
+- ``viewer``      D-074: any live session — the shared website (viewer) password, the financial-viewer password or
+                  the owner password. Read-only: it never changes a human decision (action status, CRM, fair
+                  campaigns, notes) and never triggers a refresh, a reload, an upload or a paid AI call. Anonymous
+                  requests get the Turkish site-password page (HTML pages) or HTTP 401 ``site_auth_required`` (API).
+                  The accuracy gate (services/accuracy.py) still withholds every unverified metric for every role.
 - ``finance_read`` read-only financial views (Yönetim: Kredi / Gider-Gelir / Bütçe projection) for a financial-viewer
                   session OR the owner session. GET only; never any owner permission.
 - ``owner_read``  read-only, but for the owner only (full Yönetim with system state, diagnostics, bulk data export).
@@ -25,20 +28,25 @@ views' lazy workbook load is owner-only.
 from __future__ import annotations
 
 VIEWER, FINANCE_READ, OWNER_READ, OWNER_WRITE, AUTH = "viewer", "finance_read", "owner_read", "owner_write", "auth"
-LEVELS = (VIEWER, FINANCE_READ, OWNER_READ, OWNER_WRITE, AUTH)
+PUBLIC = "public"
+LEVELS = (PUBLIC, VIEWER, FINANCE_READ, OWNER_READ, OWNER_WRITE, AUTH)
+# D-074: the HTML pages that answer an anonymous visitor with the site-password page (API routes answer JSON 401)
+HTML_PAGES = frozenset({"/", "/yukleme"})
 MUTATING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 ACCESS: dict[tuple[str, str], str] = {
     # --- the dashboard and its login page ---
     ("GET", "/"): VIEWER,                                        # only the published, gate-authorized bytes
-    ("GET", "/giris"): VIEWER,                                   # fixed login page (no data)
+    ("GET", "/giris"): PUBLIC,                                   # fixed owner-login page (no data)
     # --- owner session ---
     ("GET", "/api/auth/session"): AUTH,                          # anonymous → {authenticated: false}
     ("POST", "/api/auth/login"): AUTH,                           # owner password; throttled; HTTPS or loopback only
     ("POST", "/api/auth/finance-login"): AUTH,                   # financial-viewer password; same protections
+    ("POST", "/api/auth/viewer-login"): AUTH,                    # D-074: the shared website password; same protections
     ("POST", "/api/auth/logout"): AUTH,                          # revokes this session (CSRF-checked when live)
     ("POST", "/api/auth/logout-all"): OWNER_WRITE,               # revokes every session (owner and financial)
     ("POST", "/api/auth/finance-sessions/revoke"): OWNER_WRITE,  # ends every financial-viewer session only
+    ("POST", "/api/auth/viewer-sessions/revoke"): OWNER_WRITE,   # D-074: ends every website-viewer session only
     # --- system / reference ---
     ("GET", "/api/health"): VIEWER,                              # context error text redacted for viewers
     ("GET", "/api/agent/categories"): VIEWER,
@@ -122,7 +130,7 @@ _FALSE = {"", "0", "false", "no", "off"}
 def level(method: str, template: str | None) -> str | None:
     """The access level of a matched route, or None when it is not classified (→ refused)."""
     lv = ACCESS.get((method, template))
-    if lv in (VIEWER, FINANCE_READ) and method in MUTATING:
+    if lv in (PUBLIC, VIEWER, FINANCE_READ) and method in MUTATING:
         return OWNER_WRITE                                   # fail closed: a read level can never mutate
     return lv
 

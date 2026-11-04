@@ -16,6 +16,10 @@
 > **owner administrator** (separate password; everything incl. every change). The father's routine: open the link;
 > enter the financial password once per session only when he wants Yönetim. See `docs/m8_cp1_access.md`.
 
+> **Revision 2026-11-01 (D-074, CP1B):** the public viewer is retired. The father opens the link, enters the shared
+> **website password** once per session (site-password page at the same address), and the financial password once
+> more only when he wants Yönetim. The owner logs in at `/giris`. See `docs/m8_cp1_access.md`.
+
 **Status:** Planning checkpoint, 2026-10-18. The owner lives in the USA and handles technical support, hosting,
 monthly uploads and business maintenance. His father in Türkiye (age 70) should only have to open a bookmarked
 HTTPS link and use a Turkish dashboard. The staff exports monthly ERP workbooks; the owner uploads them.

@@ -32,7 +32,7 @@ from services import vkm_store as VS
 from tests import release_state as REL
 from tests.fixtures import synthetic_erp as SE
 from tests.test_m8_accuracy2b import HEAD, book, products
-from tests.test_m8_vkm import (by_check, dump, events, finance, http, insync, manifest_of, observe_core,  # noqa: F401
+from tests.test_m8_vkm import (by_check, dump, events, finance, http, viewer, insync, manifest_of, observe_core,  # noqa: F401
                                owner, write_folder)
 
 
@@ -331,8 +331,8 @@ def test_resync_is_idempotent_and_never_writes_a_superseded_generation(tmp_path)
 
 @pytest.mark.production_auth
 def test_observer_failure_is_visible_blocks_decisions_and_owner_resync_recovers(http, monkeypatch, caplog):
-    anon, fin, c = http(), finance(http), owner(http)     # every client before the failing publication: a new
-    nocsrf = http()                                         # TestClient re-runs the app startup
+    anon, fin, c = viewer(http), finance(http), owner(http)   # every client before the failing publication: a new
+    nocsrf, nobody = http(), http()                         # TestClient re-runs the app startup
     nocsrf.cookies = c.cookies
     lst = c.get("/api/vkm/issues").json()
     assert lst["sync"]["state"] == "in_sync"
@@ -351,7 +351,7 @@ def test_observer_failure_is_visible_blocks_decisions_and_owner_resync_recovers(
     assert "database is locked" not in caplog.text                               # error class only, never content
 
     # visible everywhere, and GETs still write nothing
-    assert anon.get("/api/vkm/summary").json()["sync"] == "out_of_sync"           # public viewer too
+    assert anon.get("/api/vkm/summary").json()["sync"] == "out_of_sync"           # website viewer too
     lst = c.get("/api/vkm/issues").json()
     assert lst["sync"]["state"] == "out_of_sync" and "sales" in {s["key"] for s in lst["sync"]["sources"]}
     assert lst["sync"].get("last_failure_at")
@@ -381,7 +381,8 @@ def test_observer_failure_is_visible_blocks_decisions_and_owner_resync_recovers(
         ST.DB_PATH = live
 
     # recovery is owner-only, CSRF-protected and idempotent
-    assert anon.post("/api/vkm/sync", json={}).status_code == 401
+    assert anon.post("/api/vkm/sync", json={}).status_code == 403                 # a website viewer is no owner
+    assert nobody.post("/api/vkm/sync", json={}).status_code == 401              # anonymous
     assert fin.post("/api/vkm/sync", json={}).status_code == 403
     assert nocsrf.post("/api/vkm/sync", json={}).status_code == 403
     assert dump() == before

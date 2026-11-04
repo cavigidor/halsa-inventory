@@ -1365,3 +1365,31 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   (public viewer without a password) is the **legacy local arrangement**, not the approved hosting arrangement, and is
   no approval of public-by-link disclosure of Cari account names and balances. The account-level Cari list is flagged
   for the separate access / launch checkpoint; no hosting or external deployment is authorized.
+
+### D-074 · 2026-11-03 · Website password: nothing viewable without a session (M8-CP1B; supersedes the D-060 / D-061 public viewer for launch)
+- **Owner requirement (relayed in the CP1B assignment, recorded with D-073 on 2026-11-01):** three passwords in the same
+  browser app — (1) one shared **website password** to enter Halsa and view the normal dashboard; (2) a separate
+  **financial password** for the sensitive Yönetim financial sections; (3) the separate **owner password** with the
+  exclusive right to upload Excel reports, validate, publish, edit records and manage the backend. Simple for the
+  owner's father; no individual accounts, e-mail login, OAuth, MFA or extra infrastructure.
+- **Supersedes:** the D-060 / D-061 "public viewer" (open the link, no password). Everything else in D-060 / D-061
+  stands: role-separated sessions, financial projection, owner-only writes, CSRF, throttling, transport rule, route
+  register, no deployment without sign-off.
+- **Decision:**
+  - new role `viewer` in `services/owner_auth.py` with its own scrypt hash `HALSA_VIEWER_PASSWORD_HASH` (private
+    `.env`), sessions (cap 20), throttling and revocation (`revoke-sessions --viewer`, owner
+    `POST /api/auth/viewer-sessions/revoke`, changing the hash), the same cookie / CSRF / HTTPS-or-loopback rules;
+    login `POST /api/auth/viewer-login`; the provisioning command refuses a password used by another role;
+  - access level `viewer` now means *any live session* (website, financial or owner); the only `public` route is
+    the owner-login page `/giris` (plus the `auth` endpoints). Anonymous `GET /` and `GET /yukleme` (incl. bookmarks
+    and `#yonetim` links) answer **401 with a fixed Turkish site-password page** (no data, `no-store`, `noindex`); after
+    the password the same address opens. Anonymous API calls answer JSON 401 `site_auth_required`; with no website
+    hash configured, `site_not_configured` — never public viewing;
+  - financial and owner sessions also open the normal dashboard; no login downgrades a session; logout ends viewing;
+    an open page whose session ended reloads to the password page on its next call;
+  - write permissions, the financial projection, owner-only reads and the accuracy gate are unchanged.
+- **Cari list (D-073):** stays a normal viewer feature, now behind the website password: **everyone with the website
+  password can read the account-level Cari balances.** This is not a final financial-disclosure approval for external
+  hosting; whether the list should require the financial password on a hosted site remains an open owner question.
+- **Not decided / not done:** hosting, TLS, proxy headers, a data-free liveness probe for hosting (`/api/health` now
+  needs a session), backups, KVKK review, and production password provisioning. No deployment is authorized.

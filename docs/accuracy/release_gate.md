@@ -95,8 +95,9 @@ A father-facing release may go live only when **all** hold:
 - [ ] Owner's recorded sign-off on the public-by-link disclosure inventory (`docs/m8_cp1_access.md` §6) — every metric
   promoted to VERIFIED becomes visible to anyone with the link, not only to the owner (D-060).
 - [ ] **Access / launch checkpoint (owner requirement 2026-11-01):** one site-wide password, a separate password for
-  the sensitive financial sections, owner-only administration / uploads / edits. The D-061 public viewer is the legacy
-  local arrangement; the account-level Cari list (D-073) must not be public by link.
+  the sensitive financial sections, owner-only administration / uploads / edits — **implemented as D-074 (CP1B, draft
+  PR; not merged, not deployed).** Still open: the account-level Cari list's level on a hosted site (website or
+  financial password), hosting / TLS / liveness probe, KVKK.
 
 ## 5. This checkpoint's acceptance
 | Criterion | Result |

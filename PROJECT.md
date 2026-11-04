@@ -51,8 +51,9 @@ services/ai/          AIProvider interface (base.py) · factory.py (only selecti
                       openai_provider.py (Responses API) · mock_provider.py · anthropic_provider.py
    ▼
 app.py                FastAPI (Layer 2 API). Deterministic endpoints never depend on AI. M8-CP1 (D-060): an access
-                      middleware (services/access.py) runs first — viewer routes need no login, owner routes need the
-                      owner session (services/owner_auth.py) + CSRF; then the accuracy gate
+                      middleware (services/access.py) runs first — D-074: every viewer route needs a session (website,
+                      financial or owner password), owner routes need the owner session (services/owner_auth.py) +
+                      CSRF; then the accuracy gate
 services/store.py     SQLite: action status, history, memory, ai_calls metadata (no content)
 services/customer360.py  M7-1 Customer 360: separate full-customer repository built from the live context's exact
                       sources (sales + liste + aging + M6-2 events + optional explicit Hedef); cached per source
@@ -190,11 +191,12 @@ and `Kredi` are stale historical fields that never drive decisions as current va
 upgrades a stale field into a current fact. StockAgent models only legitimate, recorded transactions
 (D-026).
 
-## Access model (D-060, D-061)
-Browser-based web application (no native app). Three levels, no accounts: public viewer (no password; normal
-dashboard incl. customer names and CRM / fair notes, owner-approved), financial viewer (shared financial password;
-read-only Yönetim financial projection), owner (separate password; everything incl. every change). The accuracy gate
-applies to all three alike. Remaining public-hosting sign-off: `docs/m8_cp1_access.md` §6.
+## Access model (D-060, D-061, D-074)
+Browser-based web application (no native app). Three passwords, no accounts: website viewer (shared site password;
+normal read-only dashboard incl. customer names, CRM / fair notes and the VERIFIED Cari list), financial viewer
+(shared financial password; + read-only Yönetim financial projection), owner (separate password; everything incl.
+every change). Anonymous visitors see only the site-password page (D-074 retired the public viewer). The accuracy gate
+applies to all three alike. Hosting prerequisites and open exposure questions: `docs/m8_cp1_access.md` §5–§6.
 
 ## Privacy boundary
 GitHub holds code, tests, prompts, schemas, docs, synthetic fixtures, CI and config templates.

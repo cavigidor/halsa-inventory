@@ -1373,7 +1373,7 @@ if(location.protocol==='file:'||typeof window.fetch!=='function') return;
 var nativeFetch=window.fetch.bind(window), sess=null, pending=null, msgTimer=null;
 var TXT={viewer:'Görüntüleme modu — değişiklik yapmak için ',login:'Yönetici girişi',owner:'Yönetici girişi açık',
   finance:'Finans görüntüleme açık (salt okunur)',
-  logout:'Çıkış yap',need:'Bu işlem yalnızca yönetici girişiyle yapılabilir. Görüntüleme için giriş gerekmez.',
+  logout:'Çıkış yap',need:'Bu işlem yalnızca yönetici girişiyle yapılabilir.',site:'👁 Görüntüleme (site girişi)',
   ownerOnly:'Bu işlem yalnızca yönetici girişiyle yapılabilir. Finans görüntüleme şifresi yalnızca finans bölümlerini salt okunur açar.',
   off:'Yönetici girişi bu sunucuda yapılandırılmadı; değişiklik yapılamaz.',
   csrf:'Oturum doğrulanamadı; sayfayı yenileyip tekrar deneyin.',viewonly:'Görüntüleme modu'};
@@ -1395,6 +1395,8 @@ function withToken(init,tok){var h=init.headers;
 function watch(r){
   if(r&&(r.status===401||r.status===403)&&typeof r.clone==='function'){
     try{r.clone().json().then(function(b){var c=b&&b.detail&&b.detail.error_code;
+      // D-074: the site session ended (logout elsewhere, expiry, revocation) → the server shows the password page
+      if(c==='site_auth_required'||c==='site_not_configured'){location.reload(); return;}
       if(c==='auth_required'||c==='owner_required'||c==='admin_not_configured'||c==='csrf_failed'||c==='origin_rejected'){session(true); notify(c);}
     }).catch(function(){});}catch(e){}}
   return r;}
@@ -1411,11 +1413,12 @@ function notify(code){var box=$('halsa-access-msg'); if(!box) return;
 function paint(){var bar=$('halsa-access'); if(!bar||!sess) return; bar.replaceChildren(); bar.hidden=false;
   var role=sess.role||(sess.authenticated?'owner':null);
   bar.dataset.mode=role||'viewer';
-  if(role){bar.append(el('span',role==='owner'?'🔐 '+TXT.owner:'🔓 '+TXT.finance)); var b=el('button',TXT.logout); b.type='button';
+  if(role){bar.append(el('span',role==='owner'?'🔐 '+TXT.owner:(role==='finance'?'🔓 '+TXT.finance:TXT.site)));
+    var b=el('button',TXT.logout); b.type='button';
     b.addEventListener('click',function(){b.disabled=true; window.fetch('/api/auth/logout',{method:'POST',
       headers:{'Content-Type':'application/json','X-StockAgent':'1'},body:'{}'}).then(function(){location.reload();},
       function(){b.disabled=false;});}); bar.append(b);
-    if(role==='finance'&&sess.configured){var o=el('a',TXT.login); o.href='/giris'; bar.append(o);}}
+    if(role!=='owner'&&sess.configured){var o=el('a',TXT.login); o.href='/giris'; bar.append(o);}}
   else if(sess.configured){bar.append(el('span','👁 '+TXT.viewer)); var a=el('a',TXT.login); a.href='/giris'; bar.append(a);}
   else{bar.append(el('span','👁 '+TXT.viewonly));}}
 window.StockAgentAccess={session:session};

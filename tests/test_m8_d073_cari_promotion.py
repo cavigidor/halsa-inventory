@@ -26,7 +26,7 @@ from services import refresh as RF
 from tests import accuracy_harness as H
 from tests import auth_harness as AH
 from tests.fixtures import synthetic_erp as SE
-from tests.test_m8_cp1_access import FIN_HASH, FIN_PASSWORD, HASH, PASSWORD
+from tests.test_m8_cp1_access import FIN_HASH, FIN_PASSWORD, HASH, PASSWORD, VIEW_HASH, VIEW_PASSWORD
 from tests.test_m8_cp3_upload_center import H as HDR, new_batch, publish, srv, upload, validate  # noqa: F401
 from tests.test_m8_d072_cari_first_metric import _folder, _manifest
 
@@ -485,21 +485,33 @@ def test_new_month_rebinds_rollback_keeps_and_restart_never_serves_an_obsolete_p
 
 
 @pytest.mark.production_gate
-def test_permissions_are_unchanged_by_the_promotion(srv, monkeypatch):
+def test_permissions_by_role_with_the_verified_cari_list(srv, monkeypatch):
+    """D-074: the Cari list is a normal viewer feature behind the website password; anonymous visitors see nothing."""
     s = srv
     _, pj = publish(s, _publish_cari(s, dt.date.today() - dt.timedelta(days=5), _cari(), "cari_a"))
     assert pj["batch"]["status"] == "published"
     monkeypatch.setattr(AUTH, "request_session", AH.production_request_session)   # real sessions from here on
     monkeypatch.setenv(AUTH.PASSWORD_ENV, HASH)
     monkeypatch.setenv(AUTH.FINANCE_PASSWORD_ENV, FIN_HASH)
+    monkeypatch.setenv(AUTH.VIEWER_PASSWORD_ENV, VIEW_HASH)
     assert AX.ACCESS[("GET", "/")] == AX.VIEWER and AX.ACCESS[("POST", "/api/uploads")] == AX.OWNER_WRITE
     assert AX.ACCESS[("GET", "/api/finance/overview")] == AX.FINANCE_READ
+    with TestClient(APP.app, base_url="https://testserver", headers=HDR) as anon:
+        r = anon.get("/")
+        assert r.status_code == 401 and "Site şifresi" in r.text                 # D-074: no anonymous viewing
+        assert "-1500" not in r.text and "Sentetik Musteri" not in r.text and "stockagent-displayed" not in r.text
+        assert anon.post("/api/uploads").status_code == 401
     with TestClient(APP.app, base_url="https://testserver", headers=HDR) as viewer:
-        assert viewer.get("/").status_code == 200                                  # public viewer: the verified list
-        assert viewer.post("/api/uploads").status_code == 401
-        assert viewer.post("/api/context/refresh").status_code == 401
-        assert viewer.get("/api/finance/overview").status_code == 401
-        assert viewer.get("/api/owner/overview").status_code == 401
+        r = viewer.post("/api/auth/viewer-login", json={"password": VIEW_PASSWORD})
+        assert r.status_code == 200 and r.json()["role"] == "viewer"
+        viewer.headers["X-CSRF-Token"] = r.json()["csrf_token"]
+        page = viewer.get("/")                                                    # website viewer: the verified list
+        assert page.status_code == 200 and GEN.dashboard_markers(page.content)[1] == (KEY,)
+        assert {x["code"]: x["balance"] for x in _data_blob(page.text)["modules"]["collections"]["rows"]} == EXPECTED
+        assert viewer.post("/api/uploads").status_code == 403
+        assert viewer.post("/api/context/refresh").status_code == 403
+        assert viewer.get("/api/finance/overview").status_code == 401             # financial password still needed
+        assert viewer.get("/api/owner/overview").status_code == 403
     with TestClient(APP.app, base_url="https://testserver", headers=HDR) as fin:
         r = fin.post("/api/auth/finance-login", json={"password": FIN_PASSWORD})
         assert r.status_code == 200

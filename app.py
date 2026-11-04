@@ -169,7 +169,8 @@ async def _accuracy_decide(request: Request, call_next):
     return JSONResponse(status_code=ACC.WITHHELD_HTTP_STATUS, content={"detail": d.notice()})
 
 
-# ---- M8-CP1 (D-060): viewing needs no login; administration needs the owner session ----
+# ---- M8-CP1 / CP1B (D-060, D-061, D-074): every page and API needs a session (website, financial or owner
+# password); administration needs the owner session ----
 # Registered AFTER the accuracy middleware, so it runs FIRST: an anonymous request for an owner-only route is refused
 # before the accuracy gate, any endpoint, the provider or SQLite is reached. Every matched route must be classified in
 # services/access.ACCESS (unclassified → 403 for everyone). The accuracy gate is unchanged and applies to the owner
@@ -179,7 +180,11 @@ from starlette.concurrency import run_in_threadpool
 from services import access as AX
 from services import owner_auth as AUTH
 
-AUTH_REQUIRED_TEXT = "Bu işlem yalnızca yönetici girişiyle yapılabilir. Görüntüleme için giriş gerekmez."
+AUTH_REQUIRED_TEXT = "Bu işlem yalnızca yönetici girişiyle yapılabilir."
+# D-074: the website password (or the financial / owner password) is required to view anything
+SITE_REQUIRED_TEXT = "Halsa'yı görüntülemek için site şifresi gerekir."
+SITE_NOT_CONFIGURED_TEXT = ("Site şifresi bu sunucuda tanımlanmadı; görüntüleme yalnızca finans veya yönetici "
+                            "şifresiyle açılır.")
 AUTH_NOT_CONFIGURED_TEXT = "Yönetici girişi bu sunucuda yapılandırılmadı; yönetim işlemleri kapalı."
 # D-061: a financial-viewer session is authenticated but never an owner
 OWNER_REQUIRED_TEXT = ("Bu işlem yalnızca yönetici girişiyle yapılabilir. Finans görüntüleme şifresi yalnızca "
@@ -203,7 +208,7 @@ def _owner(request: Request):
 
 
 def _session(request: Request):
-    """Any session (owner or financial viewer) the access middleware resolved for this request, or None."""
+    """Any session (owner, financial viewer or website viewer) the access middleware resolved, or None."""
     return getattr(request.state, "session", None)
 
 
@@ -247,6 +252,16 @@ async def _access_control(request: Request, call_next):
         return _security_headers(request, _deny(
             401, "finance_auth_required" if fin else "finance_not_configured",
             FINANCE_REQUIRED_TEXT if fin else FINANCE_NOT_CONFIGURED_TEXT), lv)
+    if not need_owner and lv == AX.VIEWER and (sess is None or not sess.can_view):
+        # D-074: no session → nothing is viewable. HTML pages answer with the Turkish site-password page (no data);
+        # APIs answer JSON 401. Not configured → still refused (never falls back to public viewing).
+        site = AUTH.configured_hash(AUTH.ROLE_VIEWER) is not None
+        if tpl in AX.HTML_PAGES:
+            return _security_headers(request, HTMLResponse(status_code=401, content=SITE_LOGIN_PAGE_HTML,
+                                                           headers={"X-Halsa-Auth": "site_required"}), AX.AUTH)
+        return _security_headers(request, _deny(
+            401, "site_auth_required" if site else "site_not_configured",
+            SITE_REQUIRED_TEXT if site else SITE_NOT_CONFIGURED_TEXT), lv)
     if need_owner:
         if sess is None:
             configured = AUTH.configured_hash() is not None
@@ -557,17 +572,19 @@ def health(request: Request, agent: BusinessActionAgent = Depends(get_agent),
                     as_of_data_date=asof)
 
 
-# ---------------- M8-CP1 password logins (D-060, D-061) ----------------
-# Two roles, two passwords (scrypt hashes in the private .env), no accounts. Viewing the normal dashboard needs neither.
-#   owner   → administration (+ every owner-only read, + financial viewing)
-#   finance → read-only financial viewing (Yönetim financial projection) only
+# ---------------- M8-CP1 / CP1B password logins (D-060, D-061, D-074) ----------------
+# Three roles, three passwords (scrypt hashes in the private .env), no accounts:
+#   viewer  → the normal read-only dashboard (D-074 website password)
+#   finance → + read-only financial viewing (Yönetim financial projection)
+#   owner   → + administration (every owner-only read and every change)
 _LOGIN_LOCK = threading.Lock()      # one verification at a time: throttle check + verify + record are atomic
-_ROLE_LOG = {AUTH.ROLE_OWNER: "owner", AUTH.ROLE_FINANCE: "finance viewer"}
+_ROLE_LOG = {AUTH.ROLE_OWNER: "owner", AUTH.ROLE_FINANCE: "finance viewer", AUTH.ROLE_VIEWER: "website viewer"}
 
 
 def _session_out(s, *, csrf: str | None = None, expires: float | None = None) -> S.OwnerSession:
     return S.OwnerSession(configured=AUTH.configured_hash() is not None,
                           finance_configured=AUTH.configured_hash(AUTH.ROLE_FINANCE) is not None,
+                          viewer_configured=AUTH.configured_hash(AUTH.ROLE_VIEWER) is not None,
                           authenticated=s is not None, role=s.role if s is not None else None,
                           csrf_token=csrf or (s.csrf_token if s is not None else None),
                           expires_at=_iso(expires if expires is not None else s.expires_at) if s is not None else None,
@@ -586,7 +603,8 @@ def _iso(ts: float) -> str:
 
 
 _NOT_CONFIGURED = {AUTH.ROLE_OWNER: ("admin_not_configured", AUTH_NOT_CONFIGURED_TEXT),
-                   AUTH.ROLE_FINANCE: ("finance_not_configured", FINANCE_NOT_CONFIGURED_TEXT)}
+                   AUTH.ROLE_FINANCE: ("finance_not_configured", FINANCE_NOT_CONFIGURED_TEXT),
+                   AUTH.ROLE_VIEWER: ("site_not_configured", SITE_NOT_CONFIGURED_TEXT)}
 
 
 def _password_login(body: "S.OwnerLogin", request: Request, role: str):
@@ -604,6 +622,8 @@ def _password_login(body: "S.OwnerLogin", request: Request, role: str):
     current = _session(request)
     if role == AUTH.ROLE_FINANCE and current is not None and current.is_owner:
         return JSONResponse(content=_session_out(current).model_dump())   # the owner already sees finance; no downgrade
+    if role == AUTH.ROLE_VIEWER and current is not None and current.role in (AUTH.ROLE_OWNER, AUTH.ROLE_FINANCE):
+        return JSONResponse(content=_session_out(current).model_dump())   # already sees the site; no downgrade
     key = AUTH.client_key(_client_host(request))
     with _LOGIN_LOCK:
         wait = AUTH.throttle_wait(key, role)
@@ -638,6 +658,12 @@ def auth_finance_login(body: S.OwnerLogin, request: Request):
     return _password_login(body, request, AUTH.ROLE_FINANCE)
 
 
+@app.post("/api/auth/viewer-login", response_model=S.OwnerSession)
+def auth_viewer_login(body: S.OwnerLogin, request: Request):
+    """D-074 website login: the shared site password opens the normal read-only dashboard only."""
+    return _password_login(body, request, AUTH.ROLE_VIEWER)
+
+
 def _clear_cookie(resp, request: Request):
     resp.delete_cookie(AUTH.COOKIE_NAME, path="/", httponly=True, samesite="strict",
                        secure=AUTH.cookie_secure(request.url.scheme))
@@ -669,6 +695,12 @@ def auth_finance_sessions_revoke(request: Request):
     return {"revoked": AUTH.revoke_all(AUTH.ROLE_FINANCE)}
 
 
+@app.post("/api/auth/viewer-sessions/revoke")
+def auth_viewer_sessions_revoke(request: Request):
+    """Owner only (middleware): end every website-viewer session (D-074); owner and financial sessions stay."""
+    return {"revoked": AUTH.revoke_all(AUTH.ROLE_VIEWER)}
+
+
 @app.get("/giris", include_in_schema=False)
 def login_page():
     """Fixed Turkish owner-login page: no data, no file content, no values."""
@@ -689,8 +721,8 @@ button{margin-top:14px;width:100%;font-size:1.1rem;padding:12px;border:0;border-
 a{color:#1f5fbf}.muted{color:#5b6475;font-size:.95rem}
 </style></head><body><main>
 <h1>Yönetici girişi</h1>
-<p class="muted">Panoyu görüntülemek için giriş gerekmez. Bu giriş yalnızca veri yükleme, CRM / takip
-değişiklikleri ve yönetim işlemleri içindir.</p>
+<p class="muted">Bu giriş veri yükleme, CRM / takip değişiklikleri ve yönetim işlemleri içindir. Panoyu yalnızca
+görüntülemek için <a href="/">site şifresi</a> yeterlidir.</p>
 <form id="f" autocomplete="on"><label for="pw">Yönetici şifresi</label>
 <input id="pw" name="password" type="password" autocomplete="current-password" required maxlength="256">
 <button id="b" type="submit">Giriş yap</button></form>
@@ -714,6 +746,54 @@ f.addEventListener('submit',function(e){e.preventDefault();b.disabled=true;say('
   return r.json().catch(function(){return {};}).then(function(d){return {r:r,d:d};});}).then(function(x){
   pw.value='';
   if(x.r.ok){say('Giriş yapıldı. Panoya yönlendiriliyorsunuz…','ok');location.replace('/');return;}
+  var c=(x.d&&x.d.detail&&x.d.detail.error_code)||'';say(T[c]||'Giriş yapılamadı.','err');b.disabled=false;pw.focus();
+ }).catch(function(){say('Sunucuya ulaşılamadı.','err');b.disabled=false;});
+});
+})();
+</script></body></html>"""
+
+
+# D-074: the page an anonymous visitor gets instead of any HTML page (fixed Turkish text, no data). After a successful
+# login the browser reloads the SAME address, so a bookmarked page or #yonetim link opens directly.
+SITE_LOGIN_PAGE_HTML = """<!doctype html><html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">
+<title>Halsa — giriş</title>
+<style>
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#f4f5f7;color:#1d2433;margin:0;
+ display:flex;min-height:100vh;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
+main{background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);padding:28px;max-width:400px;width:100%}
+h1{font-size:1.5rem;margin:0 0 8px}p{line-height:1.5;margin:0 0 14px}label{display:block;font-weight:600;margin:0 0 6px}
+input{width:100%;box-sizing:border-box;font-size:1.2rem;padding:12px;border:1px solid #b8bfcc;border-radius:8px}
+button{margin-top:14px;width:100%;font-size:1.2rem;padding:12px;border:0;border-radius:8px;background:#1f5fbf;
+ color:#fff;font-weight:600;cursor:pointer}button:disabled{opacity:.6}
+.msg{min-height:1.5em;margin-top:12px;font-weight:600}.msg.err{color:#b3261e}.msg.ok{color:#1b7a3a}
+a{color:#1f5fbf}.muted{color:#5b6475;font-size:.95rem}
+</style></head><body><main>
+<h1>Halsa</h1>
+<p class="muted">Panoyu görüntülemek için site şifresini girin.</p>
+<form id="f" autocomplete="on"><label for="pw">Site şifresi</label>
+<input id="pw" name="password" type="password" autocomplete="current-password" required maxlength="256" autofocus>
+<button id="b" type="submit">Giriş yap</button></form>
+<p id="m" class="msg" role="status" aria-live="polite"></p>
+<p class="muted">Yönetici misiniz? <a href="/giris">Yönetici girişi</a></p>
+</main><script>
+(function(){
+var f=document.getElementById('f'),pw=document.getElementById('pw'),b=document.getElementById('b'),
+    m=document.getElementById('m');
+function say(t,k){m.textContent=t;m.className='msg '+(k||'');}
+var T={invalid_credentials:'Şifre hatalı.',login_throttled:'Çok fazla hatalı deneme. Lütfen biraz sonra tekrar deneyin.',
+ https_required:'Şifre yalnızca güvenli (HTTPS) bağlantıyla girilebilir.',
+ site_not_configured:'Site şifresi bu sunucuda tanımlanmadı.',origin_rejected:'Lütfen sayfayı yenileyin.'};
+fetch('/api/auth/session',{headers:{'Accept':'application/json'}}).then(function(r){return r.json();}).then(function(s){
+ if(s.authenticated){location.reload();return;}
+ if(!s.viewer_configured){say(T.site_not_configured,'err');b.disabled=true;}
+}).catch(function(){});
+f.addEventListener('submit',function(e){e.preventDefault();b.disabled=true;say('Kontrol ediliyor…');
+ fetch('/api/auth/viewer-login',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json',
+  'X-StockAgent':'1'},body:JSON.stringify({password:pw.value})}).then(function(r){
+  return r.json().catch(function(){return {};}).then(function(d){return {r:r,d:d};});}).then(function(x){
+  pw.value='';
+  if(x.r.ok){say('Giriş yapıldı.','ok');location.reload();return;}
   var c=(x.d&&x.d.detail&&x.d.detail.error_code)||'';say(T[c]||'Giriş yapılamadı.','err');b.disabled=false;pw.focus();
  }).catch(function(){say('Sunucuya ulaşılamadı.','err');b.disabled=false;});
 });

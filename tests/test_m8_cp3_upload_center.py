@@ -716,8 +716,11 @@ def test_viewers_and_financial_viewers_cannot_upload_validate_or_publish(srv, mo
     assert r.status_code == 201
     r = own.post("/api/uploads", headers={"X-StockAgent": "0", "X-CSRF-Token": tok})          # local guard too
     assert r.status_code == 403 and "X-StockAgent" in r.text
-    # the page itself carries no data and is the same for everyone
+    # D-074: anonymous visitors get only the site-password page; the page itself carries no data and is the same
+    # for every signed-in role (the financial viewer here)
     page = anon.get("/yukleme")
+    assert page.status_code == 401 and "Site şifresi" in page.text and "Dosya Yükleme" not in page.text
+    page = fin.get("/yukleme")
     assert page.status_code == 200 and "Dosya Yükleme" in page.text and "Değişiklikleri Yayınla" in page.text
     assert page.headers["cache-control"] == "no-store" and FX.P[1] not in page.text
 

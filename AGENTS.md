@@ -32,10 +32,12 @@ GitHub (`cavigidor/halsa-inventory`) is the source of truth. Do not rely on chat
   anything but a metric unless it carries no business conclusion; every new route must be listed in `ACC.ROUTES`.
 - The provider gets only a small evidence packet (`services/evidence.py`). It never gets
   Excel files, DataFrames, SQLite files, whole tables or paths.
-- **Access — legacy local arrangement (D-060, D-061), NOT the approved hosting model:** the owner's launch requirement
-  (2026-11-01) is one site-wide password, a separate financial password and owner-only administration / uploads /
-  edits — a separate access checkpoint; never describe public-by-link access as approved, and never host or deploy
-  without it. As implemented today: viewing the normal dashboard needs no login; the Yönetim financial projection is
+- **Access (D-074, revising D-060 / D-061):** nothing is viewable without a session. Anonymous visitors get only the
+  Turkish site-password page and the owner-login page (`public`: `/giris` only). `viewer` routes need any session —
+  the shared website password, the financial password or the owner password; never add a public data route, and
+  never fall back to public viewing when a hash is missing. Hosting / deployment is still a separate, unauthorized
+  checkpoint, and the account-level Cari list's level on a hosted site is an open owner question. The Yönetim
+  financial projection is
   `finance_read` (financial-viewer password or owner, GET only); every state-changing, work-starting, paid-AI or
   administrative route is `owner_write` and every full-Yönetim / diagnostic read is `owner_read` in
   `services/access.py`. A financial session must never gain an owner permission. Every new route must
