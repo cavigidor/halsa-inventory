@@ -3,6 +3,10 @@
 **Scope:** bring the completed M7 dashboard into everyday *local, single-user* use. This checklist does not
 approve loan balances, accounting categories, margin rules, or files of record. It does not unblock M6-4.
 
+**2026-11-05 clarification:** this is the historical local M7 checklist. Current authentication / accuracy rules
+are D-074 / D-075 / D-073; the Render launch procedure is [CP8A](m8_cp8a_render_preflight.md). Local validation
+is not hosted acceptance.
+
 ## 1. Update and protect the Mac copy
 
 1. Make a private backup of the local project, especially `.env`, `data/`, the SQLite state DB, and any
@@ -10,9 +14,11 @@ approve loan balances, accounting categories, margin rules, or files of record. 
 2. In the existing `halsa-inventory` checkout, check `git status` before updating; do not overwrite
    local edits. Pull `main` only once any local changes are safely handled.
 3. Activate the Python **3.12+** environment and install `requirements.txt`. For a new setup see the README.
-4. Keep the server bound to **127.0.0.1**. Yönetim is **not access-controlled**; do not open it on the LAN,
-   internet, or a shared computer. Owner/admin roles require the future authentication milestone.
-5. Leave `AI_PROVIDER=disabled` initially. All M7 operational and owner views work without an AI key.
+4. Keep local development bound to **127.0.0.1**. The current app has website / financial / owner passwords
+   (D-074 / D-075), with owner-only writes and finance-only Cari balances. External hosting still requires the
+   separate approved HTTPS / persistent-storage / backup acceptance; do not expose a local development server.
+5. Leave `AI_PROVIDER=disabled` initially. APIs do not require an AI key; only verified metrics may display.
+   Current ceiling: one factual Cari metric with fresh bound evidence, 32 withheld; do not expect all M7 analytics.
 
 ## 2. Explicitly choose local owner exports
 

@@ -1,6 +1,23 @@
 # STATUS.md — current checkpoint
 
-**2026-11-05 — M8-CP2 / PR #46 correction checkpoint (Codex): code only, draft, NOT merged or deployed.**
+**2026-11-05 — M8-CP8A Render preflight: documentation only; no deployment authorization.**
+- Verified base main `fbca73d312da4a3217e8751546e039db883b4783` (PR #46, approved tree
+  `0e34effc1d5c301a2eabef1c13fe28a49b601329`); merged-main CI 42099574909 passed **2093 / 8 skipped / 1 xfailed**.
+  CP2 engineering is complete; it is not being rebuilt. Older CP2 draft entries below describe pre-merge checkpoints.
+- Isolated `~/Documents/Halsa-Codex-CP8A`, branch `codex/m8-cp8a-render-preflight`; owner checkout untouched.
+- New `docs/m8_cp8a_render_preflight.md`: exact setup, short owner decision sheet, priced backup example, synthetic
+  HTTPS/role/upload/persistence checks, off-instance recovery and phased real-data / Istanbul acceptance.
+- Corrected stale launch-plan `/var/data/halsa` root to `/var/data`, current CP2 merge/access status, and Render's
+  full Python version requirement (`3.12.16`, matching CI). Preserved explicit restore-child paths and historical notes.
+- Actual remaining gates: spend/Git connection authorization; region/KVKK and disclosure/network choice; production
+  secrets and hosted checks; restic tooling / daily in-service schedule / alerts / encrypted off-instance restore;
+  current real uploads and owner/father acceptance. No resource, secret, account, deployment or upload created here.
+- Documentation checks passed: 7 Markdown-only files, 6 relative links, 2 shell blocks, Python snippet syntax and
+  a local three-file synthetic fixture dry run (no server or upload). Exact-head CI will be recorded in the draft PR;
+  independent review / deployment authorization remain pending. Application, tests, dependencies, workflow, metric register,
+  evidence flag, three roles and Classic are unchanged. Classic owner acceptance remains deferred independently.
+
+**2026-11-05 — M8-CP2 / PR #46 correction checkpoint (Codex, historical pre-merge record): merged later as `fbca73d`; not deployed.**
 - Work is isolated in `~/Documents/Halsa-Codex-CP2`; the owner's `StockAgent` main checkout, private data and environment
   are untouched by this checkpoint. Starting PR head `6e2cab54f6d4fdd96170d022501f688562e122cb`.
 - Integrated current main `f669468ecca3f5465749dac236891256dd8b7720` through normal merge commit `d384129` (no rebase

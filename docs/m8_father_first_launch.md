@@ -1,4 +1,8 @@
-# M8 — Father-first production launch (plan, no implementation yet)
+# M8 — Father-first production launch (implementation tracked; not deployed)
+
+**Current checkpoint (2026-11-05):** CP2 is merged and verified as PR #46 (`fbca73d`), not deployed.
+The executable preparation / owner decision sheet is [CP8A Render preflight](m8_cp8a_render_preflight.md).
+The current access rules are D-074 / D-075; older no-login paragraphs below are historical, not launch instructions.
 
 > **Revision 2026-10-22 (D-060, M8-CP1 implemented locally, not deployed).** Halsa Analysis is a **browser-based web
 > application** — the father opens a link; nothing is installed. **Viewing needs no login.** The **owner** logs in
@@ -116,7 +120,7 @@ and owner-financial reporting.
 
 ## Expected Codex checkpoints (8 implementation PRs after this plan; one optional Kredi follow-up)
 
-**CP1 — Simplified access (as implemented, D-060):** one owner administration login (scrypt hash in the private
+**CP1 — Simplified access (historical D-060; viewer model superseded by D-074 / D-075):** one owner administration login (scrypt hash in the private
 `.env`, server-side revocable sessions, CSRF, throttling, secure cookies, fail-closed register of every route); viewer
 pages without login; owner-only Yönetim and diagnostics; `/docs` disabled; no deployment. Details and the disclosure
 inventory: `docs/m8_cp1_access.md`. *Original CP1 text (superseded):* create real owner/father auth, secure all HTML/API/mutations and verification,
@@ -126,11 +130,12 @@ No public deployment until accepted. CI: unauthenticated read/write uniformly de
 **CP2 — Deployable persistent runtime:** host-compatible startup, paths and single-writer setup, persistent SQLite/
 uploads, health/readiness, safe process restart, staging env, no embedded secrets. Do not claim durability without
 actual host volume and backup configuration. CI: temp persisted mount + restart test.
-*(2026-11-03, D-076: implemented code-only — draft PR, not deployed. Details: `docs/m8_cp2_hosting.md`.)*
+*(2026-11-05, D-076: PR #46 merged as `fbca73d`; merged-main CI 2093 passed / 8 skipped / 1 xfailed.
+Code-only engineering complete; not deployed. Details: `docs/m8_cp2_hosting.md`; next: `docs/m8_cp8a_render_preflight.md`.)*
 - **Minimum hosting architecture:** one web service (Render paid web service, Frankfurt, **Standard 2 GB** — the real
   workload peaks at ≈ 1.0 GB, so 512 MB is too small), one process / one Uvicorn worker, one persistent disk, TLS at
   the host's proxy, **Auto-Deploy Off** (reviewed commits are deployed by hand), health check `/livez`.
-- **Paths:** `HALSA_DATA_ROOT=/var/data/halsa` (on the disk) → `data/`, `uploads/`, `state/agent_state.db`,
+- **Paths:** disk mount `/var/data` = `HALSA_DATA_ROOT=/var/data` (the existing mount itself) → `data/`, `uploads/`, `state/agent_state.db`,
   `published/dashboard.html`; the server refuses to start if any persistent path is outside it.
 - **Startup:** `sh deploy/start_hosted.sh` (`$PORT`, proxy headers from `FORWARDED_ALLOW_IPS=*` on Render, `.env`
   ignored, AI off); the three password hashes only as private host environment variables.
@@ -139,7 +144,7 @@ actual host volume and backup configuration. CI: temp persisted mount + restart 
   manifest after a restart shows nothing (fail closed).
 - **Backups:** `python -m services.backup create|verify|restore` (consistent SQLite copy, SHA-256 manifest, restore
   into a new directory only), tested with a restore onto a new disk directory.
-- **Outstanding production checklist (CP8 + owner):** provider / region decision under KVKK, disclosure-inventory
+- **Outstanding production checklist (CP8 + owner):** Render already chosen; region / backup-location review under KVKK, disclosure-inventory
   sign-off and network-gate decision; create the service and disk; production password hashes; off-instance
   encrypted daily backup (restic or age → EU object store) and a hosted restore drill; owner's real upload; father's
   bookmark test from Istanbul.
@@ -170,8 +175,9 @@ If too large, split CP6 into multiple bounded PRs and revise estimate openly.
 auto-health/user-friendly errors, accessible login, phone/desktop 390px checks, support/no technical screens for
 father; add end-to-end browser suites for owner upload/refresh/fail-safe/data consistency.
 
-**CP8 — Real hosting and cutover:** *(D-060: first obtain the owner's recorded sign-off on the public-by-link
-disclosure inventory, `docs/m8_cp1_access.md` §6; HTTPS with trusted proxy headers is required for owner login)*
+**CP8 — Real hosting and cutover:** *(D-074 / D-075: first confirm the owner's recorded external-hosting disclosure
+sign-off, `docs/m8_cp1_access.md` §6; website password before data, financial password for Cari / Yönetim finances,
+owner-only writes; HTTPS with trusted proxy headers is required. See `docs/m8_cp8a_render_preflight.md`.)*
 provision hosting through user-authorized integrations, private TLS domain,
 authorized accounts, persistent storage, backups, upload real exports outside GitHub, full integration smoke from
 USA/Türkiye, father-facing bookmark, safe rollback, signoff checklist. Never claim deployed until URL and tests work.

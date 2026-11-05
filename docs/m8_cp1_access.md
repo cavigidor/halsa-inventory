@@ -2,7 +2,8 @@
 
 **Status:** CP1 (D-060 / D-061) implemented and merged (PR #30); CP1B (D-074, the website password) merged (PR #44,
 `2d747cd`); D-075 (the account-level Cari list needs the financial password) merged (PR #45, `4e02872`); M8-CP2
-(D-076) adds only the data-free liveness probe `GET /livez` (draft PR). Nothing is deployed. One metric, the factual Cari list (`receivables.collections`), is VERIFIED-certified (D-073) and shown
+(D-076, PR #46 merged as `fbca73d`) adds only the data-free liveness probe `GET /livez` to the access surface.
+Nothing is deployed; [CP8A](m8_cp8a_render_preflight.md) tracks the separate hosted acceptance. One metric, the factual Cari list (`receivables.collections`), is VERIFIED-certified (D-073) and shown
 only on fresh, generation-bound evidence — since D-075 only to financial-viewer and owner sessions.
 
 > **D-074 (owner requirement, 2026-11-01): nothing is viewable without a password.** The D-060 / D-061 "public viewer"
@@ -207,8 +208,9 @@ approved (now for website-password holders, not the public); Yönetim financial 
 read-only; a website password in front of everything (D-074).
 **Answered by the owner (D-075):** the account-level Cari list (and the Customer 360 Cari balance fields) needs the
 financial password.
-**Still required before public hosting (record as a dated decision):** whether to add a network gate (VPN / IP
-allow-list / access proxy) in front of public pages; the hosting region under KVKK; final CP8 checklist.
+**Still required before external hosting (record as a dated decision):** whether to add a network gate (VPN / IP
+allow-list / access proxy) in addition to the existing password gate; hosting / backup locations under KVKK;
+final CP8 checklist. No data-bearing page is public without a session. See `m8_cp8a_render_preflight.md`.
 
 ## 7. CP1B (D-074) acceptance
 
