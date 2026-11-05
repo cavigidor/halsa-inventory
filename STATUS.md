@@ -1,5 +1,19 @@
 # STATUS.md — current checkpoint
 
+**2026-11-04 — Klasik Rapor (D-077): the original dashboard regenerated exactly — draft PR, NOT merged, NOT deployed.**
+- Branch `claude/classic-dashboard` from `main` @ `4e02872`; independent of PR #46 (hosting; its STATUS / TASKS
+  corrections, e.g. "D-075 merged as PR #45", are on that branch).
+- `classic/original_builder.py` = frozen byte copy of `dashboard_builder.py` @ `71f5f2f`; `classic/generate.py`
+  selects the named stock / sales / optional original-format Cari files and the report date, nothing else (stored
+  file names, role check, master list refused as Cari, separate process, `PYTHONHASHSEED=0`); owner launcher
+  `classic/Klasik Rapor Oluştur.command`. No import between `classic/` and the new Halsa in either direction.
+- Real-data equivalence (owner's Mac, read-only copies): 5 Ekim files reproduce the father's report (same 2,272,679
+  bytes; page, CSS, JS and 8 of 9 tabs identical; Büyüme / Küçülme identical except the order of 21 rows with equal
+  change %, which the original randomizes per run); 1 Kasım files reproduce Claude's 4 Kasım recreation except that
+  order and the Unicode form of one file name; generator = original run directly, byte for byte. Report:
+  `docs/classic_dashboard.md`.
+- Tests: full suite (browser + JS required, AI disabled) **2077 passed, 7 skipped, 1 xfailed** (`main` 2057 + 20 Klasik Rapor; CI 2076 passed / 8 skipped: its shallow checkout skips the git-history hash check).
+
 **2026-11-03 — D-075: account-level Cari balances need the financial password — draft PR, NOT merged, NOT deployed.**
 - Branch `claude/m8-d075-cari-finance-gate` from `main` @ `2d747cd` (D-074 merged as PR #44; merged-main CI 2042
   passed / 7 skipped / 1 xfailed). Owner decision D-075 (2026-11-03): website viewer = dashboard without account-level
