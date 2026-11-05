@@ -74,6 +74,12 @@ python -m services.refresh                # validate + publish dashboard.html an
 uvicorn app:app --host 127.0.0.1          # local only; dashboard at http://127.0.0.1:8000/ (no /docs since M8-CP1)
 ```
 
+## Klasik Rapor — the original dashboard (D-077)
+The original dashboard the father received (commit 71f5f2f, frozen in `classic/`), regenerated from new Excel files
+without any new Halsa rule: double-click `classic/Klasik Rapor Oluştur.command`, or
+`python3.12 classic/generate.py --stock … --sales … [--cari …] --out dashboards/Klasik_Rapor.html`.
+Details and the equivalence proof: `docs/classic_dashboard.md`.
+
 ## Access: website viewer, financial viewer, owner (M8-CP1 / CP1B, D-060 / D-061 / D-074)
 Halsa Analysis is a browser web app. **Nothing is viewable without a password (D-074).** The normal dashboard needs the
 shared **website password**; the Yönetim financial sections (Kredi, Gider/Gelir, Bütçe) and the account-level Cari
