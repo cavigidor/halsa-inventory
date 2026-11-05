@@ -210,7 +210,8 @@ def test_no_state_changing_route_is_viewer(monkeypatch):
     assert {p for (m, p), lv in AX.ACCESS.items() if lv == AX.AUTH} == {
         "/api/auth/session", "/api/auth/login", "/api/auth/finance-login", "/api/auth/viewer-login",
         "/api/auth/logout"}
-    assert {p for (m, p), lv in AX.ACCESS.items() if lv == AX.PUBLIC} == {"/giris"}   # D-074: nothing else public
+    # D-074: nothing else public; D-076 adds only the data-free liveness probe
+    assert {p for (m, p), lv in AX.ACCESS.items() if lv == AX.PUBLIC} == {"/giris", "/livez"}
     monkeypatch.setattr(AX, "ACCESS", {**AX.ACCESS, ("POST", "/x"): AX.VIEWER})
     assert AX.level("POST", "/x") == AX.OWNER_WRITE                 # a viewer route can never mutate (fail closed)
     assert AX.level("GET", "/nope") is None and AX.level("POST", "/") is None

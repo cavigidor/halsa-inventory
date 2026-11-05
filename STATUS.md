@@ -1,8 +1,27 @@
 # STATUS.md — current checkpoint
 
-**2026-11-04 — Klasik Rapor (D-077): the original dashboard regenerated exactly — draft PR, NOT merged, NOT deployed.**
-- Branch `claude/classic-dashboard` from `main` @ `4e02872`; independent of PR #46 (hosting; its STATUS / TASKS
-  corrections, e.g. "D-075 merged as PR #45", are on that branch).
+**2026-11-05 — M8-CP2 / PR #46 correction checkpoint (Codex): code only, draft, NOT merged or deployed.**
+- Work is isolated in `~/Documents/Halsa-Codex-CP2`; the owner's `StockAgent` main checkout, private data and environment
+  are untouched by this checkpoint. Starting PR head `6e2cab54f6d4fdd96170d022501f688562e122cb`.
+- Integrated current main `f669468ecca3f5465749dac236891256dd8b7720` through normal merge commit `d384129` (no rebase
+  or force-push). Only documentation conflicted: AGENTS keeps both D-076 and D-077; DECISIONS keeps both entries;
+  STATUS / TASKS record D-075 and Classic as merged, with Classic owner acceptance postponed independently of CP2.
+- First-start correction: disk mount `/var/data` = `HALSA_DATA_ROOT=/var/data`. Derived paths: `data/`, `uploads/`,
+  `state/agent_state.db`, `published/dashboard.html`. No new runtime fallback: a missing root still refuses startup.
+- Exact documented configuration tested under a temporary prefix, with the real one-worker start script, initialized
+  SQLite, three HTTPS-proxy logins, synthetic upload / publication, restart persistence, data-free `/livez`, protected
+  APIs, live backup and isolated restore. No private workbook is used.
+- Approximate base cost: Standard 2 GB $25 + 5 GB disk $1.25 on the free Hobby workspace = **$26.25/month**, excluding
+  extra usage, off-site backup and taxes. Frankfurt remains a candidate subject to KVKK review; Auto-Deploy Off.
+- Focused CP2 + unchanged Classic tests: **37 passed** (17 CP2 + 20 Classic). Full local suite with AI disabled and
+  browser / JavaScript tests required: **2094 passed, 7 skipped, 1 xfailed** in 453.74 s. Exact pushed-head GitHub
+  results are recorded in PR #46 checks; independent review is still required.
+- No Classic implementation / test changes, metric promotions, evidence-flag changes or policy changes. No hosting
+  resources, passwords, deployment or backup service were provisioned. STOP for ChatGPT's independent PR review.
+
+**2026-11-04 — Klasik Rapor (D-077): the original dashboard regenerated exactly — MERGED as PR #47 (`f669468`), NOT deployed; owner acceptance postponed.**
+- Branch `claude/classic-dashboard` from `main` @ `4e02872`; merged into main, then integrated into PR #46 (hosting). Classic remains isolated;
+  owner acceptance is deferred, not completed and not a CP2 dependency.
 - `classic/original_builder.py` = frozen byte copy of `dashboard_builder.py` @ `71f5f2f`; `classic/generate.py`
   selects the named stock / sales / optional original-format Cari files and the report date, nothing else (stored
   file names, role check, master list refused as Cari, separate process, `PYTHONHASHSEED=0`); owner launcher
@@ -14,7 +33,28 @@
   `docs/classic_dashboard.md`.
 - Tests: full suite (browser + JS required, AI disabled) **2077 passed, 7 skipped, 1 xfailed** (`main` 2057 + 20 Klasik Rapor; CI 2076 passed / 8 skipped: its shallow checkout skips the git-history hash check).
 
-**2026-11-03 — D-075: account-level Cari balances need the financial password — draft PR, NOT merged, NOT deployed.**
+**2026-11-03 — M8-CP2 (D-076): minimal hosting-ready runtime — draft PR, NOT merged, NOT deployed.**
+- Branch `claude/m8-cp2-hosting-runtime` from `main` @ `4e02872` (D-075 merged as PR #45; merged-main CI run
+  41766654465: 2057 passed / 7 skipped / 1 xfailed). Code only: no hosting account, service, disk, domain, password,
+  backup destination or deployment connection was created.
+- One mounted directory `HALSA_DATA_ROOT` (data / uploads / state DB / published page; startup refuses a persistent
+  path outside it); fsync'ed atomic publication writes; `deploy/start_hosted.sh` (one Uvicorn worker, `$PORT`, proxy
+  headers only from `FORWARDED_ALLOW_IPS`, `.env` ignored, AI off); public data-free `GET /livez` (no session / SQLite
+  / context access); `python -m services.backup create|verify|restore` (SQLite online backup, SHA-256 manifest,
+  restore into a new directory only).
+- Host assessment: Render paid web service, Frankfurt, persistent disk, Auto-Deploy Off, health `/livez` — fits; the
+  instance must be **Standard 2 GB** (real workload peak ≈ 1.0 GB measured read-only on copies of the real exports).
+- Synthetic persistence acceptance with the real start command: empty disk → upload / validate / publish → CRM change
+  → stop / start → session, workbooks, selection, generation, CRM, upload history survive; changed source or broken
+  manifest → nothing served; backup taken while running and restored onto a new directory serves the same generation.
+- Unchanged: D-074 / D-075, 33 metrics / 1 VERIFIED (60 days), flag True, policy `m8-cari-d075`, D-071, owner-only
+  writes. Report: `docs/m8_cp2_hosting.md`.
+- Tests: full suite (browser + JS required, AI disabled) **2073 passed, 7 skipped, 1 xfailed** (`main` 2057 + 16 CP2).
+
+**2026-11-03 — D-075: account-level Cari balances need the financial password — MERGED: PR #45 squash-merged as
+`4e02872` (approved head `a30f075`, tree `45db222`; merged-main CI run 41766654465: 2057 passed / 7 skipped /
+1 xfailed; not deployed). This heading said "draft PR, NOT merged, NOT deployed" when written; corrected 2026-11-03,
+body unchanged.**
 - Branch `claude/m8-d075-cari-finance-gate` from `main` @ `2d747cd` (D-074 merged as PR #44; merged-main CI 2042
   passed / 7 skipped / 1 xfailed). Owner decision D-075 (2026-11-03): website viewer = dashboard without account-level
   Cari balances; financial viewer = + the VERIFIED Cari list + Yönetim finances; owner = everything. D-074 roles and

@@ -36,6 +36,7 @@ import config as C                     # noqa: E402
 import dashboard_builder as db         # noqa: E402
 from services import context as CTX    # noqa: E402
 from services import generation as GEN  # noqa: E402
+from services import paths as PATHS  # noqa: E402
 from services import request_pin as RP  # noqa: E402
 
 log = logging.getLogger("refresh")
@@ -540,9 +541,9 @@ def _pipeline(data_folder, p, previous_context, install, inflation_rate, today, 
                     shutil.copy2(p["live"], p["prev_tmp"])
                 if had_manifest:
                     shutil.copy2(p["manifest"], p["manifest_prev_tmp"])
-                os.replace(p["manifest_staged"], p["manifest"])
+                PATHS.durable_replace(p["manifest_staged"], p["manifest"])     # M8-CP2: fsync file + directory
                 _after_manifest_swap()
-                os.replace(p["staged"], p["live"])
+                PATHS.durable_replace(p["staged"], p["live"])
             except Exception as e:
                 log.exception("refresh: dashboard swap failed")
                 restored = _restore_previous(p, had_live, had_manifest)

@@ -31,6 +31,10 @@ def _load_dotenv(path=None):
 
 _load_dotenv()
 
+# M8-CP2: a private .env may name HALSA_DATA_ROOT too; fill the persistent paths now (services/paths.py)
+from services import paths as _paths  # noqa: E402
+_paths.apply()
+
 # --- context / cost control ---
 MAX_CONTEXT_ITEMS_PER_CATEGORY = int(os.environ.get("MAX_CONTEXT_ITEMS_PER_CATEGORY", 20))
 MAX_DAILY_ACTIONS = int(os.environ.get("MAX_DAILY_ACTIONS", 15))

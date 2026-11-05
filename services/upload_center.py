@@ -50,6 +50,7 @@ from typing import Any, Callable, Mapping
 from xml.etree import ElementTree as ET
 
 from services import generation as GEN
+from services import paths as PATHS
 from services import request_pin as RP
 from services import store as ST
 from services import upload_files as UF
@@ -1017,7 +1018,7 @@ class UploadCenter:
             if GEN.sha256_file(tmp) != u["sha256"]:
                 os.remove(tmp)
                 raise UploadError(409, "file_missing")
-            os.replace(tmp, dest)
+            PATHS.durable_replace(tmp, dest)            # M8-CP2: the published copy is on disk before the swap
             copied.append(dest)
         plan = self._plan(r, where="data")
         if plan["errors"]:

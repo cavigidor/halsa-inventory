@@ -1,8 +1,8 @@
 # M8-CP1 / CP1B — Web access: website viewer, financial viewer, owner (D-060, D-061, superseded for launch by D-074; D-075)
 
 **Status:** CP1 (D-060 / D-061) implemented and merged (PR #30); CP1B (D-074, the website password) merged (PR #44,
-`2d747cd`); **D-075 (the account-level Cari list needs the financial password) — draft PR, not merged, not
-deployed.** One metric, the factual Cari list (`receivables.collections`), is VERIFIED-certified (D-073) and shown
+`2d747cd`); D-075 (the account-level Cari list needs the financial password) merged (PR #45, `4e02872`); M8-CP2
+(D-076) adds only the data-free liveness probe `GET /livez` (draft PR). Nothing is deployed. One metric, the factual Cari list (`receivables.collections`), is VERIFIED-certified (D-073) and shown
 only on fresh, generation-bound evidence — since D-075 only to financial-viewer and owner sessions.
 
 > **D-074 (owner requirement, 2026-11-01): nothing is viewable without a password.** The D-060 / D-061 "public viewer"
@@ -36,7 +36,7 @@ metric except the VERIFIED Cari list (D-073) and every financial section is with
 
 ## 2. Route permissions (every route; `services/access.py`)
 
-Levels: `public` (no session: `GET /giris` only), `viewer` (any session — website, financial or owner; anonymous →
+Levels: `public` (no session: `GET /giris` and the CP2 liveness probe `GET /livez` only), `viewer` (any session — website, financial or owner; anonymous →
 the site-password page for `/` and `/yukleme`, JSON 401 `site_auth_required` for APIs), `finance_read` (financial
 viewer or owner, GET only), `owner_read`, `owner_write` (owner + CSRF token), `auth` (the login / session endpoints).
 Unlisted routes → 403 for everyone. A state-changing method can never be a read level.
@@ -45,6 +45,7 @@ Unlisted routes → 403 for everyone. A state-changing method can never be a rea
 |---|:-:|:-:|:-:|:-:|
 | `GET /`, `GET /yukleme` (fixed page) | site-password page (401) | ✔ | ✔ | ✔ |
 | `GET /giris` (owner-login page, no data) | ✔ | ✔ | ✔ | ✔ |
+| `GET /livez`, `HEAD /livez` (D-076 host liveness: constant `{"status":"ok"}`; no session lookup, no SQLite, no data) | ✔ | ✔ | ✔ | ✔ |
 | `GET /api/health` (exception text only for the owner) | ✗ 401 | ✔ | ✔ | ✔ |
 | `GET /api/agent/categories`, `GET /api/macro` | ✗ 401 | ✔ | ✔ | ✔ |
 | `GET /api/agent/actions`, `/api/agent/customer/{code}`, `/api/agent/product/{code}` | ✗ 401 | ✔ | ✔ | ✔ |
@@ -168,14 +169,16 @@ python -m services.owner_auth status                    # all three roles config
 5. **Reverse proxy** must forward the real scheme/client (`--proxy-headers --forwarded-allow-ips=<proxy>`), or logins
    are refused (fail closed) and throttling becomes global-only.
 6. No rate limits / bot protection beyond login throttling; CSP limited to framing (inline-script dashboard).
-7. A hosting health check cannot use `/api/health` any more (it needs a session); a hosting checkpoint must add or
-   choose a data-free liveness probe.
-8. Not built yet: backups (CP5), hosting / TLS (CP8).
+7. **Resolved by D-076 (CP2):** the host health check uses the data-free `GET /livez`; `/api/health` stays
+   behind a session.
+8. Not built yet: the off-instance backup schedule and hosted restore drill (CP2 provides the consistent backup /
+   restore tool, `docs/m8_cp2_hosting.md` §6), hosting / TLS (CP8).
 
 ## 6. Disclosure inventory — who can read what (D-074, D-075)
 
-Anonymous visitors: the fixed site-password page and the owner-login page only (no data, no API). Every row below
-needs at least the website password.
+Anonymous visitors: the fixed site-password page, the owner-login page and the liveness probe `GET /livez`
+(D-076: the constant `{"status":"ok"}` — no customer, financial, source, generation, configuration, path or
+authentication detail) only (no data, no API). Every row below needs at least the website password.
 
 | Information | Website viewer | Financial viewer | Owner |
 |---|:-:|:-:|:-:|

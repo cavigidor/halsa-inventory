@@ -27,7 +27,9 @@ def _site_page(r):
 
 
 def test_only_the_login_pages_are_public():
-    assert {k for k, v in AX.ACCESS.items() if v == AX.PUBLIC} == {("GET", "/giris")}
+    # D-076 (CP2) adds only the data-free host liveness probe (no session lookup at all)
+    assert {k for k, v in AX.ACCESS.items() if v == AX.PUBLIC} == {("GET", "/giris"), ("GET", "/livez")}
+    assert AX.NO_SESSION == {("GET", "/livez")}
     assert AX.HTML_PAGES == {"/", "/yukleme"}
     assert AX.level("POST", "/giris") is None and AX.level("POST", "/") is None
 

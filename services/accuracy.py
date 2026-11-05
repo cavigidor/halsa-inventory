@@ -471,6 +471,7 @@ ROUTES: dict[tuple[str, str], tuple[str, str | tuple[str, ...] | None]] = {
     ("GET", "/"): ("system", None),                         # gated at build time (POLICY_VERSION marker checked)
     # M8-CP1 (D-060): /docs, /redoc and /openapi.json are no longer served (FastAPI docs disabled).
     ("GET", "/giris"): ("system", None),                    # fixed owner-login page; no data
+    ("GET", "/livez"): ("system", None),                    # M8-CP2: host liveness; constant body, no data
     ("GET", "/api/auth/session"): ("system", None),         # owner session state; no business data
     ("POST", "/api/auth/login"): ("operational", None),
     ("POST", "/api/auth/logout"): ("operational", None),
