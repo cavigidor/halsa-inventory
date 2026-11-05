@@ -12,7 +12,7 @@
   change %, which the original randomizes per run); 1 Kasım files reproduce Claude's 4 Kasım recreation except that
   order and the Unicode form of one file name; generator = original run directly, byte for byte. Report:
   `docs/classic_dashboard.md`.
-- Tests: full suite (browser + JS required, AI disabled) **2076 passed, 7 skipped, 1 xfailed** (`main` 2057 + 19 Klasik Rapor).
+- Tests: full suite (browser + JS required, AI disabled) **2077 passed, 7 skipped, 1 xfailed** (`main` 2057 + 20 Klasik Rapor; CI 2076 passed / 8 skipped: its shallow checkout skips the git-history hash check).
 
 **2026-11-03 — D-075: account-level Cari balances need the financial password — draft PR, NOT merged, NOT deployed.**
 - Branch `claude/m8-d075-cari-finance-gate` from `main` @ `2d747cd` (D-074 merged as PR #44; merged-main CI 2042

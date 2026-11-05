@@ -67,8 +67,12 @@ def _direct(src, out, seed, aging=True):
 # ---------------------------------------------------------------------------------------------
 # 1. the frozen original and its isolation
 # ---------------------------------------------------------------------------------------------
-def test_the_frozen_builder_is_byte_identical_to_commit_71f5f2f():
+def test_the_frozen_builder_has_the_pinned_hash_of_commit_71f5f2f():
     assert _sha(os.path.join(CLASSIC, "original_builder.py")) == ORIGINAL_SHA == G.BUILDER_SHA256
+
+
+def test_the_pinned_hash_is_the_one_in_git_history():
+    """Needs the repository history (a full clone; CI's shallow checkout skips this one check)."""
     try:
         blob = subprocess.run(["git", "show", "71f5f2f:dashboard_builder.py"], cwd=ROOT, capture_output=True,
                               check=True).stdout

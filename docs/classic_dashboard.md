@@ -76,7 +76,7 @@ It is a historical reproduction, not a corrected analysis.
 
 The report date (title) is whatever date you generate on; with `--date` the original's date is reproduced exactly.
 
-**Synthetic (CI, `tests/test_classic_dashboard.py`, 19 tests):**
+**Synthetic (CI, `tests/test_classic_dashboard.py`, 20 tests):**
 - the frozen file equals `git show 71f5f2f:dashboard_builder.py`;
 - the generator output is byte-identical to the original run directly and to the committed golden report
   (`tests/fixtures/classic/golden_synthetic.html`);
