@@ -30,6 +30,10 @@ GitHub (`cavigidor/halsa-inventory`) is the source of truth. Do not rely on chat
 - **Persistent state (D-076):** everything the app must keep lives under `HALSA_DATA_ROOT` when it is set (data,
   uploads, SQLite, published page; `services/paths.py`); never write persistent or staging files elsewhere (code
   directory, `/tmp`), stage atomic writes next to their target and keep one process / one worker (single writer).
+
+- **Klasik Rapor (D-077):** `classic/original_builder.py` is a frozen byte copy of commit 71f5f2f — never edit it, and
+  never apply a new Halsa rule to `classic/`. `classic/` imports nothing from the new Halsa and nothing outside
+  `classic/` imports it; the golden test (`tests/test_classic_dashboard.py`) must keep passing unchanged.
 - **No verified evidence = no business conclusion (D-049).** Only outputs certified VERIFIED in `services/accuracy.py`
   may be displayed (D-073: only `receivables.collections`, on fresh — 60 days — generation-bound evidence). Never add a flag, env var or parameter that bypasses the gate; never classify a new route as
   anything but a metric unless it carries no business conclusion; every new route must be listed in `ACC.ROUTES`.

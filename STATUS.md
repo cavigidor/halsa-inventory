@@ -1,5 +1,19 @@
 # STATUS.md — current checkpoint
 
+**2026-11-04 — Klasik Rapor (D-077): the original dashboard regenerated exactly — MERGED as PR #47 (`f669468`), NOT deployed; owner acceptance postponed.**
+- Branch `claude/classic-dashboard` from `main` @ `4e02872`; merged into main, then integrated into PR #46 (hosting). Classic remains isolated;
+  owner acceptance is deferred, not completed and not a CP2 dependency.
+- `classic/original_builder.py` = frozen byte copy of `dashboard_builder.py` @ `71f5f2f`; `classic/generate.py`
+  selects the named stock / sales / optional original-format Cari files and the report date, nothing else (stored
+  file names, role check, master list refused as Cari, separate process, `PYTHONHASHSEED=0`); owner launcher
+  `classic/Klasik Rapor Oluştur.command`. No import between `classic/` and the new Halsa in either direction.
+- Real-data equivalence (owner's Mac, read-only copies): 5 Ekim files reproduce the father's report (same 2,272,679
+  bytes; page, CSS, JS and 8 of 9 tabs identical; Büyüme / Küçülme identical except the order of 21 rows with equal
+  change %, which the original randomizes per run); 1 Kasım files reproduce Claude's 4 Kasım recreation except that
+  order and the Unicode form of one file name; generator = original run directly, byte for byte. Report:
+  `docs/classic_dashboard.md`.
+- Tests: full suite (browser + JS required, AI disabled) **2077 passed, 7 skipped, 1 xfailed** (`main` 2057 + 20 Klasik Rapor; CI 2076 passed / 8 skipped: its shallow checkout skips the git-history hash check).
+
 **2026-11-03 — M8-CP2 (D-076): minimal hosting-ready runtime — draft PR, NOT merged, NOT deployed.**
 - Branch `claude/m8-cp2-hosting-runtime` from `main` @ `4e02872` (D-075 merged as PR #45; merged-main CI run
   41766654465: 2057 passed / 7 skipped / 1 xfailed). Code only: no hosting account, service, disk, domain, password,

@@ -1,0 +1,158 @@
+<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Şirket Panosu — 1 Temmuz 2026</title>
+<style>
+:root{--ink:#16191d;--muted:#6b7480;--line:#e6e8ec;--paper:#fbfbf9;--card:#fff;
+--low:#c2410c;--crit:#9f1239;--over:#0e7490;--gold:#92660a;--lap:#6d28d9;--warn:#b45309;--warn-bg:#fef6e7;}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);
+font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.45}
+.wrap{max-width:1080px;margin:0 auto;padding:26px 22px 70px}
+header{border-bottom:2px solid var(--ink);padding-bottom:14px;margin-bottom:18px}
+.eyebrow{font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);font-weight:700}
+h1{font-size:26px;font-weight:800;letter-spacing:-.02em;margin:5px 0 2px}
+.sub{color:var(--muted);font-size:12px}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:20px}
+.tab{border:1px solid var(--line);background:var(--card);color:var(--muted);font:inherit;font-weight:600;
+padding:8px 14px;border-radius:8px;cursor:pointer}
+.tab:hover{color:var(--ink)}.tab.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.tab .cnt{font-size:11px;opacity:.7;margin-left:3px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:8px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.stat .n{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}
+.stat .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
+.panel{display:none}.panel.on{display:block}
+.toolbar{display:flex;gap:10px;align-items:center;margin:6px 0 12px;flex-wrap:wrap}
+.search{flex:1;min-width:180px;border:1px solid var(--line);border-radius:8px;padding:9px 12px;font:inherit}
+.count{font-size:12px;color:var(--muted)}.note{font-size:12px;color:var(--muted);margin:0 0 12px}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+th{text-align:left;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:700;
+padding:10px;border-bottom:1px solid var(--line);cursor:pointer;white-space:nowrap;user-select:none}
+th.r,td.r{text-align:right}th:hover{color:var(--ink)}th .ar{opacity:.4;font-size:9px}
+td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr.main:hover{background:#f6f7f8}
+.mono{font-family:"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.money{text-align:right;font-family:"SF Mono",Menlo,Consolas,monospace}
+.tier{font-family:"SF Mono",Menlo,monospace;font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px;color:#fff}
+.t1{background:#6d28d9}.t2{background:#8b5cf6}.t3{background:#a78bfa}
+.crit{color:var(--crit);font-weight:700}.val{color:var(--gold);font-weight:600}
+.owe{background:var(--warn-bg)}.owe td.money.od{color:var(--warn);font-weight:700}
+td.neg{color:#b42318;font-weight:600}td.pos{color:#1a7f4b;font-weight:600}
+.subc{font-family:"SF Mono",Menlo,monospace;font-size:11px;color:var(--muted);margin-top:2px}
+.repsel{border:1px solid var(--line);border-radius:8px;padding:9px 12px;font:inherit;background:var(--card);cursor:pointer}
+.tag{font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--low);background:#fff4ed;padding:1px 6px;border-radius:3px;margin-left:6px}
+.empty{text-align:center;color:var(--muted);font-style:italic;padding:22px}
+.sec{font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;margin:0 0 6px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.later{columns:2;gap:24px;margin:8px 0 0;padding-left:18px;font-size:13px;color:var(--ink)}
+.later li{margin:5px 0;break-inside:avoid}
+code{background:#eef0f2;padding:1px 5px;border-radius:4px;font-size:12px}
+tr.exp td:first-child::before{content:'▸';color:var(--muted);margin-right:7px;display:inline-block;transition:.15s}
+tr.exp.open td:first-child::before{transform:rotate(90deg)}
+tr.exp{cursor:pointer}
+tr.det{display:none}tr.det.open{display:table-row}
+tr.det>td{background:#faf9fd;padding:0}
+.detail{display:flex;gap:26px;flex-wrap:wrap;padding:14px 16px 16px 30px}
+table.sub{width:auto;border:1px solid var(--line);min-width:320px}
+table.sub th{cursor:default;padding:7px 12px}table.sub td{padding:6px 12px;font-variant-numeric:tabular-nums}
+.prods{flex:1;min-width:280px}.prods-h{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;margin-bottom:6px}
+.prow{display:flex;justify-content:space-between;gap:14px;padding:4px 0;border-bottom:1px solid var(--line)}
+.pn{font-size:13px}.pv{font-size:12px;color:var(--muted);white-space:nowrap;font-family:"SF Mono",Menlo,monospace}
+</style></head><body><div class="wrap">
+<header><div class="eyebrow">Şirket Panosu</div>
+<h1>Şirket Panosu — 1 Temmuz 2026</h1>
+<div class="sub">Stok: STOK Sentetik.xlsx · Satış: Sentetik satışlar.xlsx · Alacaklar: Cari Sentetik.xlsx · 5 ürün</div></header>
+<div class="tabs"><button class="tab" data-t="overview">Genel Bakış</button><button class="tab" data-t="reorder">Azalan Stok <span class=cnt>1</span></button><button class="tab" data-t="overstock">Fazla Stok <span class=cnt>2</span></button><button class="tab" data-t="osmove">Stok Eritme <span class=cnt>1</span></button><button class="tab" data-t="winback">Geri Kazanım <span class=cnt>4</span></button><button class="tab" data-t="momentum">Büyüme / Küçülme <span class=cnt>9</span></button><button class="tab" data-t="ordersize">Sipariş Büyüklüğü <span class=cnt>1</span></button><button class="tab" data-t="margin">Kâr Marjı <span class=cnt>9</span></button><button class="tab" data-t="risk">Riskli Müşteri <span class=cnt>3</span></button><button class="tab" data-t="collections">Tahsilat <span class=cnt>3</span></button></div>
+<div id="overview" class="panel on">
+<h2 class="sec">Aktif Analizler</h2>
+<p class="note">İlk istediğiniz ikisi — <b>stok uyarıları</b> (azalan + fazla) ve <b>kayıp müşteriler</b> (geri kazanım) — çalışıyor. Gezinmek, aramak ve sıralamak için yukarıdaki sekmelere tıklayın. Her şey doğrudan tablolarınızdan hesaplanır: filtreleme, müşteri ve stok kodu üzerinden birleştirme ve aritmetik — hiçbir şey tahmin değil.</p>
+<div class="stats"><div class="stat"><div class="n">1</div><div class="l">min altı</div></div><div class="stat"><div class="n">2</div><div class="l">maks üstü</div></div><div class="stat"><div class="n">₺340,000</div><div class="l">fazla stok değeri</div></div><div class="stat"><div class="n">4</div><div class="l">kayıp müşteri</div></div><div class="stat"><div class="n">₺103,000</div><div class="l">vadesi geçen toplam</div></div><div class="stat"><div class="n">1</div><div class="l">borçlu kayıp müşteri</div></div></div>
+<p class="note" style="margin-top:14px">Geri kazanım dağılımı — Kademe 1: 2 · Kademe 2: 1 · Kademe 3: 1.</p>
+<h2 class="sec" style="margin-top:34px">Sonrası İçin</h2>
+<p class="note">Hazır olduğunuzda açabileceğimiz, tamamen gerçeğe dayalı diğer analizler — her biri yalnızca ilgili sayfanın <code>data</code> klasöründe olmasını ister, sonra kendi sekmesi olur. Yapay zekâ yok, bunlarla aynı.</p>
+<ul class="later"><li>Hedef vs gerçekleşen (müşteri / temsilci / bölge)</li><li>Temsilci verimliliği (ziyaret / km başına satış)</li><li>Gerçek stok hareketinden sipariş</li><li>Bütçe vs gerçekleşen — giderler</li><li>Kredi / nakit akışı takvimi</li><li>Fiyat değişim takibi</li><li>Dijital pazarlama hunisi</li><li>Çapraz satış (5 ürün → 5 firma)</li></ul>
+</div>
+<div id="panels"></div>
+<script>
+const DATA={"reorder": {"title": "Azalan Stok", "rows": [{"code": "SP-001", "name": "Sentetik Silgi", "stock": 5, "cov": 0.5, "min": 1.0, "crit": false}], "cols": [{"k": "code", "l": "Kod"}, {"k": "name", "l": "Ürün"}, {"k": "stock", "l": "Stok", "n": 1}, {"k": "cov", "l": "Kapsama", "n": 1}, {"k": "min", "l": "Min", "n": 1}], "note": "Kapsama minseviye altında, en acil önce. Negatif kapsama = fazla satılmış."}, "overstock": {"title": "Fazla Stok", "rows": [{"code": "SP-002", "name": "Sentetik Defter", "stock": 1000, "cov": 5.0, "inv": 250000, "disc": false}, {"code": "SP-003", "name": "Sentetik Pergel", "stock": 300, "cov": 6.0, "inv": 90000, "disc": true}], "cols": [{"k": "code", "l": "Kod"}, {"k": "name", "l": "Ürün"}, {"k": "stock", "l": "Stok", "n": 1}, {"k": "cov", "l": "Kapsama", "n": 1}, {"k": "inv", "l": "Envanter Değeri", "money": 1}], "note": "Kapsama maxseviye üstünde, en çok bağlı sermaye önce."}, "osmove": {"title": "Stok Eritme", "rows": [{"code": "SP-002", "name": "Sentetik Defter", "stock": 1000, "inv": 250000, "buyers": 2, "detail": {"buyers": [{"name": "Sentetik Aktif", "qty": 30, "last": 2026, "spend": 110000}, {"name": "Sentetik T2 Ofis", "qty": 10, "last": 2025, "spend": 15000}]}}], "expand": true, "cols": [{"k": "code", "l": "Kod"}, {"k": "name", "l": "Ürün"}, {"k": "stock", "l": "Stok", "n": 1}, {"k": "inv", "l": "Envanter Değeri", "money": 1}, {"k": "buyers", "l": "Alıcı Sayısı", "n": 1}], "note": "Fazla stoktaki ürünler + bunları daha önce alan müşteriler. Aramak için ürüne tıklayın — hazır çağrı listesi."}, "winback": {"title": "Geri Kazanım", "rows": [{"tier": 1, "code": "900.00.0001", "name": "Sentetik T1 Kirtasiye", "rep": "TEMSILCI-A", "sector": "S1", "spend": 47000, "last": 2023, "years": 3, "overdue": 0, "detail": {"years": [{"y": 2021, "spend": 15000, "orders": 1, "avg": 15000}, {"y": 2022, "spend": 20000, "orders": 1, "avg": 20000}, {"y": 2023, "spend": 12000, "orders": 1, "avg": 12000}], "products": [{"name": "Sentetik Kalem", "spend": 47000, "qty": 30}]}}, {"tier": 1, "code": "900.00.0008", "name": "Sentetik Fatura Musterisi", "rep": "TEMSILCI-A", "sector": "S1", "spend": 33000, "last": 2025, "years": 3, "overdue": 0, "detail": {"years": [{"y": 2023, "spend": 11000, "orders": 1, "avg": 11000}, {"y": 2024, "spend": 11000, "orders": 1, "avg": 11000}, {"y": 2025, "spend": 11000, "orders": 1, "avg": 11000}], "products": [{"name": "Sentetik Kalem", "spend": 33000, "qty": 30}]}}, {"tier": 2, "code": "900.00.0002", "name": "Sentetik T2 Ofis", "rep": "TEMSILCI-B", "sector": "S1", "spend": 40000, "last": 2025, "years": 2, "overdue": 8000, "detail": {"years": [{"y": 2024, "spend": 25000, "orders": 1, "avg": 25000}, {"y": 2025, "spend": 15000, "orders": 1, "avg": 15000}], "products": [{"name": "Sentetik Kalem", "spend": 25000, "qty": 10}, {"name": "Sentetik Defter", "spend": 15000, "qty": 10}]}}, {"tier": 3, "code": "900.00.0003", "name": "Sentetik T3 Okul", "rep": "TEMSILCI-A", "sector": "S1", "spend": 35000, "last": 2025, "years": 1, "overdue": 0, "detail": {"years": [{"y": 2025, "spend": 35000, "orders": 1, "avg": 35000}], "products": [{"name": "Sentetik Kalem", "spend": 35000, "qty": 10}]}}], "cols": [{"k": "tier", "l": "Kademe"}, {"k": "name", "l": "Müşteri", "sub": "code"}, {"k": "rep", "l": "Temsilci"}, {"k": "sector", "l": "Sektör"}, {"k": "spend", "l": "Toplam Harcama", "money": 1}, {"k": "last", "l": "Son Yıl"}, {"k": "years", "l": "Güçlü Yıl", "n": 1}, {"k": "overdue", "l": "Vadesi Geçen", "money": 1}], "expand": true, "filter": "rep", "note": "Geçmişte çok alışveriş yaptı, 2026'da hiç almadı. Sarı = hâlâ borcu var, kovalamadan önce tahsil edin. Detay için müşteriye tıklayın. Kapalı firmalar çıkarıldı."}, "momentum": {"title": "Büyüme / Küçülme", "rows": [{"code": "900.00.0701", "name": "Sentetik Esit 1", "rep": "TEMSILCI-B", "sector": "S1", "y2025": 40000, "y2026": 20000, "delta": -20000, "pct": -50.0, "detail": {"years": [{"y": 2025, "spend": 40000, "orders": 1, "avg": 40000}, {"y": 2026, "spend": 20000, "orders": 1, "avg": 20000}], "products": [{"name": "Sentetik Kalem", "spend": 60000, "qty": 20}]}}, {"code": "900.00.0702", "name": "Sentetik Esit 2", "rep": "TEMSILCI-A", "sector": "S1", "y2025": 40000, "y2026": 20000, "delta": -20000, "pct": -50.0, "detail": {"years": [{"y": 2025, "spend": 40000, "orders": 1, "avg": 40000}, {"y": 2026, "spend": 20000, "orders": 1, "avg": 20000}], "products": [{"name": "Sentetik Kalem", "spend": 60000, "qty": 20}]}}, {"code": "900.00.0707", "name": "Sentetik Esit 7", "rep": "TEMSILCI-B", "sector": "S1", "y2025": 40000, "y2026": 20000, "delta": -20000, "pct": -50.0, "detail": {"years": [{"y": 2025, "spend": 40000, "orders": 1, "avg": 40000}, {"y": 2026, "spend": 20000, "orders": 1, "avg": 20000}], "products": [{"name": "Sentetik Kalem", "spend": 60000, "qty": 20}]}}, {"code": "900.00.0006", "name": "Sentetik Aktif", "rep": "TEMSILCI-A", "sector": "S1", "y2025": 60000, "y2026": 30000, "delta": -30000, "pct": -50.0, "detail": {"years": [{"y": 2024, "spend": 50000, "orders": 1, "avg": 50000}, {"y": 2025, "spend": 90000, "orders": 3, "avg": 30000}, {"y": 2026, "spend": 30000, "orders": 2, "avg": 15000}], "products": [{"name": "Sentetik Defter", "spend": 110000, "qty": 30}, {"name": "Sentetik Kalem", "spend": 60000, "qty": 30}]}}, {"code": "900.00.0703", "name": "Sentetik Esit 3", "rep": "TEMSILCI-B", "sector": "S1", "y2025": 40000, "y2026": 20000, "delta": -20000, "pct": -50.0, "detail": {"years": [{"y": 2025, "spend": 40000, "orders": 1, "avg": 40000}, {"y": 2026, "spend": 20000, "orders": 1, "avg": 20000}], "products": [{"name": "Sentetik Kalem", "spend": 60000, "qty": 20}]}}, {"code": "900.00.0704", "name": "Sentetik Esit 4", "rep": "TEMSILCI-A", "sector": "S1", "y2025": 40000, "y2026": 20000, "delta": -20000, "pct": -50.0, "detail": {"years": [{"y": 2025, "spend": 40000, "orders": 1, "avg": 40000}, {"y": 2026, "spend": 20000, "orders": 1, "avg": 20000}], "products": [{"name": "Sentetik Kalem", "spend": 60000, "qty": 20}]}}, {"code": "900.00.0705", "name": "Sentetik Esit 5", "rep": "TEMSILCI-B", "sector": "S1", "y2025": 40000, "y2026": 20000, "delta": -20000, "pct": -50.0, "detail": {"years": [{"y": 2025, "spend": 40000, "orders": 1, "avg": 40000}, {"y": 2026, "spend": 20000, "orders": 1, "avg": 20000}], "products": [{"name": "Sentetik Kalem", "spend": 60000, "qty": 20}]}}, {"code": "900.00.0700", "name": "Sentetik Esit 0", "rep": "TEMSILCI-A", "sector": "S1", "y2025": 40000, "y2026": 20000, "delta": -20000, "pct": -50.0, "detail": {"years": [{"y": 2025, "spend": 40000, "orders": 1, "avg": 40000}, {"y": 2026, "spend": 20000, "orders": 1, "avg": 20000}], "products": [{"name": "Sentetik Kalem", "spend": 60000, "qty": 20}]}}, {"code": "900.00.0706", "name": "Sentetik Esit 6", "rep": "TEMSILCI-A", "sector": "S1", "y2025": 40000, "y2026": 20000, "delta": -20000, "pct": -50.0, "detail": {"years": [{"y": 2025, "spend": 40000, "orders": 1, "avg": 40000}, {"y": 2026, "spend": 20000, "orders": 1, "avg": 20000}], "products": [{"name": "Sentetik Kalem", "spend": 60000, "qty": 20}]}}], "expand": true, "filter": "rep", "cols": [{"k": "name", "l": "Müşteri", "sub": "code"}, {"k": "rep", "l": "Temsilci"}, {"k": "sector", "l": "Sektör"}, {"k": "y2025", "l": "2025 (Oca–bugün)", "money": 1}, {"k": "y2026", "l": "2026 (Oca–bugün)", "money": 1}, {"k": "delta", "l": "Fark", "money": 1, "sign": 1}, {"k": "pct", "l": "Değişim %", "n": 1, "sign": 1}], "note": "Hâlâ aktif ama aynı dönem 2025'e göre harcaması değişen müşteriler. Küçülenler üstte. \"2025/2026 (Oca–bugün)\" = yıl başından bugüne aynı dönem. Detay için tıklayın. Kapalı firmalar çıkarıldı."}, "ordersize": {"title": "Sipariş Büyüklüğü", "rows": [{"code": "900.00.0006", "name": "Sentetik Aktif", "rep": "TEMSILCI-A", "orders": 6, "rev": 170000, "aov": 28333, "chg": -50.0, "detail": {"years": [{"y": 2024, "spend": 50000, "orders": 1, "avg": 50000}, {"y": 2025, "spend": 90000, "orders": 3, "avg": 30000}, {"y": 2026, "spend": 30000, "orders": 2, "avg": 15000}], "products": [{"name": "Sentetik Defter", "spend": 110000, "qty": 30}, {"name": "Sentetik Kalem", "spend": 60000, "qty": 30}]}}], "expand": true, "filter": "rep", "cols": [{"k": "name", "l": "Müşteri", "sub": "code"}, {"k": "rep", "l": "Temsilci"}, {"k": "orders", "l": "Sipariş (24–26)", "n": 1}, {"k": "rev", "l": "Toplam Ciro (24–26)", "money": 1}, {"k": "aov", "l": "Ort. Sipariş Tutarı", "money": 1}, {"k": "chg", "l": "Ort. Tutar Değişim % (26 vs 25)", "n": 1, "sign": 1}], "note": "\"Toplam Ciro (24–26)\" 3 yılın toplamıdır; \"Ort. Sipariş Tutarı\" = toplam ÷ sipariş sayısı (düşüş değil, ortalama). Yıllık kırılım için satıra tıklayın."}, "margin": {"title": "Kâr Marjı", "rows": [{"code": "900.00.0006", "name": "Sentetik Aktif", "rep": "TEMSILCI-A", "rev": 120000, "prof": 20000, "marg": 16.7}, {"code": "900.00.0700", "name": "Sentetik Esit 0", "rep": "TEMSILCI-A", "rev": 60000, "prof": 15000, "marg": 25.0}, {"code": "900.00.0701", "name": "Sentetik Esit 1", "rep": "TEMSILCI-B", "rev": 60000, "prof": 15000, "marg": 25.0}, {"code": "900.00.0702", "name": "Sentetik Esit 2", "rep": "TEMSILCI-A", "rev": 60000, "prof": 15000, "marg": 25.0}, {"code": "900.00.0703", "name": "Sentetik Esit 3", "rep": "TEMSILCI-B", "rev": 60000, "prof": 15000, "marg": 25.0}, {"code": "900.00.0704", "name": "Sentetik Esit 4", "rep": "TEMSILCI-A", "rev": 60000, "prof": 15000, "marg": 25.0}, {"code": "900.00.0705", "name": "Sentetik Esit 5", "rep": "TEMSILCI-B", "rev": 60000, "prof": 15000, "marg": 25.0}, {"code": "900.00.0706", "name": "Sentetik Esit 6", "rep": "TEMSILCI-A", "rev": 60000, "prof": 15000, "marg": 25.0}, {"code": "900.00.0707", "name": "Sentetik Esit 7", "rep": "TEMSILCI-B", "rev": 60000, "prof": 15000, "marg": 25.0}], "filter": "rep", "cols": [{"k": "name", "l": "Müşteri", "sub": "code"}, {"k": "rep", "l": "Temsilci"}, {"k": "rev", "l": "Ciro", "money": 1}, {"k": "prof", "l": "Kâr", "money": 1}, {"k": "marg", "l": "Marj %", "n": 1}], "note": "Marj % = Kâr ÷ Ciro. Ciro = Nettutar (U sütunu), Kâr = Net_Tutar_Maliyet_Dusulmus (AC sütunu), 2025–2026. Maliyet boş olan satırlar marjı bozabilir."}, "risk": {"title": "Riskli Müşteri", "rows": [{"code": "900.00.0007", "name": "Sentetik Kapali Ltd", "rep": "TEMSILCI-A", "overdue": 60000, "rev": 0, "active": "Hayır", "ratio": null, "closed": true}, {"code": "900.00.0006", "name": "Sentetik Aktif", "rep": "TEMSILCI-A", "overdue": 35000, "rev": 120000, "active": "Evet", "ratio": 29, "closed": false}, {"code": "900.00.0002", "name": "Sentetik T2 Ofis", "rep": "TEMSILCI-B", "overdue": 8000, "rev": 15000, "active": "Hayır", "ratio": 53, "closed": false}], "filter": "rep", "cols": [{"k": "name", "l": "Müşteri", "sub": "code"}, {"k": "rep", "l": "Temsilci"}, {"k": "overdue", "l": "Vadesi Geçen", "money": 1}, {"k": "rev", "l": "Ciro 25–26", "money": 1}, {"k": "active", "l": "2026 Sipariş"}, {"k": "ratio", "l": "Borç/Ciro %", "n": 1}], "note": "Borcu olan müşteriler; ciroyla birlikte. \"2026 Sipariş = Evet\" ama borçlu = hâlâ alıp ödemiyor. Kapalı firmalar KAPALI etiketiyle gösterilir (borç tahsil edilmeli)."}, "collections": {"title": "Tahsilat", "rows": [{"name": "Sentetik Kapali Ltd", "rep": "TEMSILCI-A", "overdue": 60000, "oldest": "Kasım-2025 ve öncesi", "code": "900.00.0007"}, {"name": "Sentetik Aktif", "rep": "TEMSILCI-A", "overdue": 35000, "oldest": "Ocak-2026", "code": "900.00.0006"}, {"name": "Sentetik T2 Ofis", "rep": "TEMSILCI-B", "overdue": 8000, "oldest": "Mayıs-2026", "code": "900.00.0002"}], "cols": [{"k": "name", "l": "Müşteri"}, {"k": "rep", "l": "Temsilci"}, {"k": "overdue", "l": "Vadesi Geçen", "money": 1}, {"k": "oldest", "l": "En Eski Borç"}], "note": "Vadesi geçen alacaklar, en büyük önce. Listenin başındakileri kovalayın."}};
+const fmtMoney=v=>'₺'+Math.round(v).toLocaleString('tr-TR');
+const fmtNum=(v,d)=>Number(v).toLocaleString('tr-TR',{minimumFractionDigits:d||0,maximumFractionDigits:d||0});
+const esc=s=>String(s==null?'':s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const state={};
+function detailHTML(d){
+  if(!d) return '<div class="detail"><span style="color:#888">Detay yok.</span></div>';
+  if(d.buyers){
+    let bh='<div class="prods" style="min-width:420px"><div class="prods-h">Bu ürünü alan müşteriler (çağrı listesi)</div>';
+    d.buyers.forEach(b=>{bh+=`<div class="prow"><span class="pn">${esc(b.name)}</span><span class="pv">${fmtNum(b.qty)} adet · son ${b.last}</span></div>`;});
+    return `<div class="detail">${bh}</div></div>`;
+  }
+  const hasY=d.years&&d.years.length, hasP=d.products&&d.products.length;
+  if(!hasY&&!hasP) return '<div class="detail"><span style="color:#888">Detay yok.</span></div>';
+  let y='';
+  if(hasY){y='<table class="sub"><thead><tr><th>Yıl</th><th class=r>Harcama</th><th class=r>Sipariş</th><th class=r>Sip. Ort.</th></tr></thead><tbody>';
+    d.years.forEach(r=>{y+=`<tr><td>${r.y}</td><td class="r money">${fmtMoney(r.spend)}</td><td class=r>${r.orders}</td><td class="r money">${fmtMoney(r.avg)}</td></tr>`;});
+    y+='</tbody></table>';}
+  let p='';
+  if(hasP){p='<div class="prods"><div class="prods-h">Öne Çıkan Ürünler</div>';
+    d.products.forEach(pr=>{p+=`<div class="prow"><span class="pn">${esc(pr.name)}</span><span class="pv">${fmtMoney(pr.spend)} · ${fmtNum(pr.qty)} adet</span></div>`;});
+    p+='</div>';}
+  return `<div class="detail">${y}${p}</div>`;
+}
+function makePanel(id){
+  const m=DATA[id]; const p=document.createElement('div'); p.className='panel'; p.id=id;
+  let filterHTML='';
+  if(m.filter){
+    const vals=[...new Set(m.rows.map(r=>r[m.filter]).filter(x=>x))].sort((a,b)=>String(a).localeCompare(String(b),'tr'));
+    filterHTML=`<select class="repsel"><option value="">Tüm temsilciler</option>${vals.map(v=>`<option>${esc(v)}</option>`).join('')}</select>`;
+  }
+  p.innerHTML=`<div class="toolbar"><input class="search" placeholder="${m.title.toLowerCase()} ara…">${filterHTML}
+    <span class="count"></span></div><p class="note">${m.note}</p><div class="tbl"></div>`;
+  state[id]={sort:null,dir:1,q:'',fval:''};
+  p.querySelector('.search').addEventListener('input',e=>{state[id].q=e.target.value.toLowerCase();draw(id);});
+  const sel=p.querySelector('.repsel'); if(sel) sel.addEventListener('change',e=>{state[id].fval=e.target.value;draw(id);});
+  document.getElementById('panels').appendChild(p); draw(id);
+}
+function draw(id){
+  const m=DATA[id], s=state[id]; let rows=m.rows.slice();
+  if(s.fval) rows=rows.filter(r=>String(r[m.filter]??'')===s.fval);
+  if(s.q) rows=rows.filter(r=>m.cols.some(c=>String(r[c.k]??'').toLowerCase().includes(s.q)));
+  if(s.sort){const c=s.sort; rows.sort((a,b)=>{let x=a[c],y=b[c];
+    if(typeof x==='number'||typeof y==='number'){x=x??-Infinity;y=y??-Infinity;return (x-y)*s.dir;}
+    return String(x??'').localeCompare(String(y??''),'tr')*s.dir;});}
+  const isnum=c=>c.n!=null||c.money;
+  let h='<table><thead><tr>'+m.cols.map(c=>`<th class="${isnum(c)?'r':''}" data-k="${c.k}">${c.l} <span class=ar>${s.sort===c.k?(s.dir>0?'▲':'▼'):'↕'}</span></th>`).join('')+'</tr></thead><tbody>';
+  if(!rows.length) h+=`<tr><td class="empty" colspan="${m.cols.length}">Gösterilecek kayıt yok.</td></tr>`;
+  rows.forEach((r,i)=>{
+    const owe=id==='winback'&&r.overdue>0;
+    const cls='main '+(m.expand?'exp':'')+(owe?' owe':'');
+    h+=`<tr class="${cls}" data-i="${i}">`+m.cols.map(c=>{
+      let v=r[c.k];
+      if(c.k==='tier') return `<td><span class="tier t${v}">K${v}</span></td>`;
+      if(c.money) return `<td class="money ${c.k==='overdue'?'od':(c.k==='inv'?'val':'')} ${(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}">${v?fmtMoney(v):(v===0?'₺0':'—')}</td>`;
+      if(c.n!=null) return `<td class="r mono ${(id==='reorder'&&r.crit&&(c.k==='cov'||c.k==='stock'))?'crit':''} ${(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}">${v==null?'—':fmtNum(v,String(v).includes('.')?2:0)}</td>`;
+      if(c.k==='code') return `<td class="mono" style="color:var(--muted);font-size:12px">${v}</td>`;
+      if(c.k==='last') return `<td class="mono r">${v??'—'}</td>`;
+      if(c.k==='name'){
+        let tags=(id==='overstock'&&r.disc)?' <span class="tag">üretimden kalktı</span>':'';
+        if(id==='risk'&&r.closed) tags+=' <span class="tag">KAPALI</span>';
+        let sub=(c.sub&&r[c.sub])?`<div class="subc">${esc(r[c.sub])}</div>`:'';
+        return `<td><div class="prod">${esc(v)}${tags}</div>${sub}</td>`;
+      }
+      return `<td>${esc(v)}</td>`;
+    }).join('')+'</tr>';
+    if(m.expand) h+=`<tr class="det" data-d="${i}"><td colspan="${m.cols.length}">${detailHTML(r.detail)}</td></tr>`;
+  });
+  h+='</tbody></table>';
+  const p=document.getElementById(id); p.querySelector('.tbl').innerHTML=h;
+  p.querySelector('.count').textContent=rows.length+' satır';
+  p.querySelectorAll('th').forEach(th=>th.addEventListener('click',()=>{
+    const k=th.dataset.k, col=DATA[id].cols.find(c=>c.k===k);
+    if(state[id].sort===k) state[id].dir*=-1; else {state[id].sort=k;state[id].dir=(col.money||col.n!=null)?-1:1;}
+    draw(id);}));
+  if(m.expand) p.querySelectorAll('tr.exp').forEach(tr=>tr.addEventListener('click',()=>{
+    const d=tr.nextElementSibling; tr.classList.toggle('open'); d.classList.toggle('open');}));
+}
+Object.keys(DATA).forEach(makePanel);
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on'); document.getElementById(b.dataset.t).classList.add('on');}));
+document.querySelector('.tab').classList.add('on');
+</script></div></body></html>

@@ -1459,3 +1459,22 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **Still required before real-data launch:** owner decisions (provider / region under KVKK, disclosure inventory,
   network gate), the host itself, production passwords, an off-instance encrypted backup schedule and a hosted
   restore drill (`docs/m8_cp2_hosting.md` §6, §8).
+
+### D-077 · 2026-11-04 · Klasik Rapor: the original dashboard, frozen and regenerated exactly (owner request)
+- **Owner requirement (2026-11-04):** the father keeps receiving the exact original dashboard (before the advanced
+  Halsa project) from new monthly Excel files — no redesign, recalculation, correction or new rule; no banner.
+- **Decision:**
+  - `classic/original_builder.py` = byte-for-byte `dashboard_builder.py` of commit `71f5f2f` (SHA-256 pinned); never
+    edited. `classic/generate.py` only selects the explicitly named files (copies under their stored names in a
+    private temporary folder, role check with the original's own name rules, Cari aging layout check so the master
+    list is never read as Cari) and the report date, and runs the original in a separate process with
+    `PYTHONHASHSEED=0` (the original's only run-to-run variation is the order of equal-% rows in Büyüme / Küçülme).
+  - Completely separate from the new Halsa in both directions (no imports either way; no SQLite, generation,
+    accuracy gate, access control). A local owner tool (`classic/Klasik Rapor Oluştur.command`, fallback command),
+    not a page of the hosted site.
+- **Evidence:** real 5 Ekim files reproduce the father's report except the order of 21 equal-% rows; real 1 Kasım
+  files reproduce Claude's 4 Kasım recreation except that order and the Unicode form of one file name in the header;
+  generator = original run directly, byte for byte (`docs/classic_dashboard.md` §3).
+- **Known consequences (owner's choice, recorded):** the classic report carries the original interpretations that
+  D-070 / D-071 withdrew in the new Halsa and is not certified; as a plain file it shows Cari balances to whoever
+  receives it (D-075 applies only inside the new site).

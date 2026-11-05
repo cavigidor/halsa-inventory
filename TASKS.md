@@ -61,6 +61,11 @@ Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi,
 - [ ] **Metric acceptance follow-up (separate owner/reconciliation work, never implicit).** Audit the remaining metrics' dependencies (untouched metrics remain strict), confirm each chosen source and business/snapshot date without inferring from mtime or the latest transaction, investigate duplicate records and DQ1–DQ6, get source-specific business approvals, and rerun private reconciliation; only then propose reviewed per-metric promotion PRs. Kredi DURUM/hidden rows/negative residual/file of record/payment evidence are OPEN.
 - [ ] **Mac maintenance follow-up:** inspect `.git/stale-maintenance-lock-claude` and active Git processes before removing that renamed stale lock; do not delete any active lock. Native macOS browser tests remain to be run safely.
 
+## Deferred owner acceptance
+- [ ] **Klasik Rapor (D-077): MERGED as PR #47 (`f669468`), merged-main CI 2076 passed / 8 skipped / 1 xfailed.**
+  Original builder, generator and Finder launcher remain unchanged. Mac checkout prepared; owner generation and
+  historical-report comparison are postponed, not canceled or complete. They do not block CP2 or updated-dashboard work.
+
 ## Next (M8 — accuracy and production launch)
 - [ ] **Deferred M8-R5 — father business definitions:** Stock part done as R5A (D-070, merged); Cari part as R5B1 (D-071,
   draft PR above): invoice age is not overdue, 320 suppliers, signed negative balances. Still open: the customer-specific
