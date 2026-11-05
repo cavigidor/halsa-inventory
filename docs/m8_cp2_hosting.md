@@ -1,6 +1,9 @@
 # M8-CP2 — Minimal hosting-ready runtime (D-076)
 
-**Status:** code-only hosting readiness — draft PR, **not deployed**. No hosting account, service, disk, domain,
+**Status:** code-only hosting readiness merged as PR #46, main `fbca73d312da4a3217e8751546e039db883b4783`;
+merged-main CI 2093 passed / 8 skipped / 1 xfailed. **Not deployed**.
+Next: [CP8A setup, owner decisions and acceptance](m8_cp8a_render_preflight.md).
+No hosting account, service, disk, domain,
 password or backup destination was created; no repository was connected to a deployment service. Nothing here
 authorizes a deployment (`docs/m8_father_first_launch.md`, CP8).
 
@@ -110,7 +113,7 @@ The script requires `HALSA_DATA_ROOT`, ignores any `.env` file (`STOCKAGENT_NO_D
 | `HALSA_VIEWER_PASSWORD_HASH`, `HALSA_FINANCE_PASSWORD_HASH`, `HALSA_OWNER_PASSWORD_HASH` | scrypt hashes generated on the owner's computer (`python -m services.owner_auth hash-password [--viewer\|--finance]`); three different passwords |
 | `FORWARDED_ALLOW_IPS` | `*` on Render (see below) |
 | `MANUAL_INFLATION_RATE` | as today (optional) |
-| `PYTHON_VERSION` | `3.12.x` (Render's Python selector) |
+| `PYTHON_VERSION` | `3.12.16` (full version required by Render; matches verified CI) |
 
 **HTTPS and the proxy headers.** Render's TLS proxy forwards plain HTTP with `X-Forwarded-Proto: https`. Uvicorn
 rewrites the scheme, client address and Host only for connections from `FORWARDED_ALLOW_IPS`.

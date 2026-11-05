@@ -4,13 +4,14 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-6 are merged; **Milestone 7 is COMPLETE** (PR #24, squash merge `de7eb43`; D-047). M8 production-readiness planning is merged (PR #26). **Owner directive 2026-10-18: NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION.** M8-ACCURACY is merged (PR #27, `a28b2b9`); M8-ACCURACY-2 technical foundation is merged (PR #28, `5baa92a`), and M8-ACCURACY-2B corrective foundation is merged (PR #29, `4ad8d8a`). The first owner-local reconciliation completed with core FAIL and Kredi NOT RUN; no business metric may be promoted without approved provenance, business definitions and per-metric reconciliation. All subsequent checkpoints use Claude Code. **Owner requirement 2026-10-22 (D-060, revised by D-061):** browser web app; three access levels — public viewer (no password), financial viewer (shared financial password, read-only Yönetim finances), owner (separate password, all changes); implemented and merged as M8-CP1, PR #30 (`a03efbf`), local only, not deployed.
 
 ## Current
-- [ ] **M8-CP2 — minimal hosting-ready runtime (D-076): existing draft PR #46 updated by Codex, awaiting
-  ChatGPT's independent review; NOT merged, NOT deployed.** One mounted data root, one-worker start script, `/livez`,
-  consistent backup / restore tool, Render (Frankfurt, Standard 2 GB, disk, Auto-Deploy Off) assessment. Remaining for
-  a real link: owner decisions, the host itself, production passwords, off-instance encrypted backups and a hosted
-  restore drill (`docs/m8_cp2_hosting.md` §8). Integrated main / PR #47 with a normal merge; Render root corrected to
-  the mount itself (`/var/data`), empty-mount + three-role proxy tests extended. Focused 37 passed; full local suite
-  2094 passed / 7 skipped / 1 xfailed (browser / JS required, AI disabled); exact-head CI in PR #46 checks. Classic owner acceptance is postponed and does not block this checkpoint. STOP for review.
+- [ ] **M8-CP8A — Render launch preflight (documentation-only draft PR):** exact single-service setup, owner
+  decision sheet, priced backup example and reproducible phased acceptance in `docs/m8_cp8a_render_preflight.md`.
+  STOP for independent review and explicit owner deployment authorization. No provisioning, billing, deployment,
+  production secrets or private upload; current policies and Classic remain unchanged.
+- [x] **M8-CP2 — engineering complete:** PR #46 squash-merged as `fbca73d312da4a3217e8751546e039db883b4783`,
+  exact approved tree, merged-main CI 42099574909 **2093 passed / 8 skipped / 1 xfailed**. One-worker runtime,
+  `/var/data`, `/livez`, persistent state and consistent backup / restore tools accepted synthetically; hosted
+  operations / KVKK / production credentials / current uploads / Istanbul acceptance remain separate and open.
 - [x] **D-075 — account-level Cari balances need the financial password: MERGED — PR #45 squash-merged as `4e02872`
   (2026-11-03; approved head `a30f075`; merged-main CI 2057 passed / 7 skipped / 1 xfailed; not deployed).** Page
   embeds no Cari record; `GET /api/finance/cari` (`finance_read`, metric route, source re-verified per request);
