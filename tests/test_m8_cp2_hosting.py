@@ -45,6 +45,22 @@ PATH_VARS = ("DATA_FOLDER", "UPLOAD_DIR", "AGENT_DB", "DASHBOARD_PATH")
 # ---------------------------------------------------------------------------------------------
 # 1. one data root
 # ---------------------------------------------------------------------------------------------
+def _documented_render_root():
+    with open(os.path.join(ROOT, ".env.example")) as fh:
+        roots = [line.strip().removeprefix("# HALSA_DATA_ROOT=") for line in fh
+                 if line.startswith("# HALSA_DATA_ROOT=")]
+    assert roots == ["/var/data"]       # Render creates this mount, not an application-specific child
+    return roots[0]
+
+
+def test_render_configuration_uses_the_mount_itself_and_derives_exact_paths():
+    env = {PATHS.ROOT_ENV: _documented_render_root()}
+    PATHS.apply(env)
+    assert {k: env[k] for k in PATH_VARS} == {
+        "DATA_FOLDER": "/var/data/data", "UPLOAD_DIR": "/var/data/uploads",
+        "AGENT_DB": "/var/data/state/agent_state.db", "DASHBOARD_PATH": "/var/data/published/dashboard.html"}
+
+
 def test_data_root_fills_every_persistent_path(tmp_path):
     env = {PATHS.ROOT_ENV: str(tmp_path)}
     PATHS.apply(env)
@@ -200,7 +216,8 @@ class Hosted:
     def env(self, port):
         env = {k: v for k, v in os.environ.items()
                if k not in PATH_VARS + PATHS.INPUT_PATHS + ("STOCKAGENT_NO_DOTENV", "ENABLE_AI", "AI_PROVIDER")}
-        env.update({PATHS.ROOT_ENV: str(self.mount), "PORT": str(port), "MANUAL_INFLATION_RATE": "0.40",
+        env.update({PATHS.ROOT_ENV: str(self.mount), "PORT": str(port), "FORWARDED_ALLOW_IPS": "*",
+                    "MANUAL_INFLATION_RATE": "0.40",
                     "OPENAI_API_KEY": "", "ANTHROPIC_API_KEY": "", "PYTHONPATH": ROOT,
                     "PATH": os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", ""),
                     **BA.server_env()})
@@ -296,8 +313,10 @@ def _served(owner):
 
 
 def test_hosted_runtime_persists_across_restart_and_fails_closed(tmp_path):
-    mount = tmp_path / "disk"                                         # 1. an EMPTY persistent mount
-    mount.mkdir()
+    # Reproduce the documented Render mount under a temporary prefix, never the machine's real /var/data.
+    mount = tmp_path / _documented_render_root().lstrip("/")
+    mount.mkdir(parents=True)                                         # only the mount exists, no halsa/ child
+    assert list(mount.iterdir()) == []
     src = tmp_path / "src"                                            # the owner's computer (synthetic exports)
     FX.write_all(str(src))
     day = dt.date.today() - dt.timedelta(days=5)
@@ -309,16 +328,31 @@ def test_hosted_runtime_persists_across_restart_and_fails_closed(tmp_path):
     srv = Hosted(mount, tmp_path)
 
     with srv:                                                         # --- first start: fresh hosting
+        assert all((mount / d).is_dir() for d in ("data", "uploads", "state", "published"))
+        db = mount / "state" / "agent_state.db"
+        assert db.is_file()
+        with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as con:
+            assert con.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+            tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            assert {"actions", "owner_sessions"} <= tables
         anon = Http(srv.base)
+        s, h, c = anon.call("GET", "/livez")
+        assert s == 200 and c == b'{"status":"ok"}' and "Set-Cookie" not in h
+        assert anon.json("GET", "/api/health")[0] == 401
         s, h, c = anon.call("GET", "/")
         assert s == 401 and h["X-Halsa-Auth"] == "site_required" and b"const DATA" not in c
         # behind the host's TLS proxy: X-Forwarded-Proto from the trusted proxy address makes the request HTTPS —
         # the login works and the session cookie is Secure; the same request without it is refused (fail closed)
         proxied = {"Host": "halsa.example", "Origin": "https://halsa.example", "X-Forwarded-Proto": "https",
                    "X-Forwarded-For": "203.0.113.7"}
-        s, _, h = Http(srv.base).json("POST", "/api/auth/viewer-login", {"password": BA.TEST_VIEWER_PASSWORD},
-                                      headers=proxied)
-        assert s == 200 and "secure" in h["Set-Cookie"].lower() and "Strict-Transport-Security" in h
+        for path, password, role in (("/api/auth/viewer-login", BA.TEST_VIEWER_PASSWORD, AUTH.ROLE_VIEWER),
+                                      ("/api/auth/finance-login", BA.TEST_FINANCE_PASSWORD, AUTH.ROLE_FINANCE),
+                                      ("/api/auth/login", BA.TEST_PASSWORD, AUTH.ROLE_OWNER)):
+            proxy_client = Http(srv.base)
+            s, _, h = proxy_client.json("POST", path, {"password": password}, headers=proxied)
+            assert s == 200 and "secure" in h["Set-Cookie"].lower() and "Strict-Transport-Security" in h
+            s, session, _ = proxy_client.json("GET", "/api/auth/session", headers=proxied)
+            assert s == 200 and session["authenticated"] and session["role"] == role
         plain = {"Host": "halsa.example", "Origin": "http://halsa.example"}
         s, d, h = Http(srv.base).json("POST", "/api/auth/viewer-login", {"password": BA.TEST_VIEWER_PASSWORD},
                                       headers=plain)

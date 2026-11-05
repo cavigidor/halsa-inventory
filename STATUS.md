@@ -1,5 +1,24 @@
 # STATUS.md — current checkpoint
 
+**2026-11-05 — M8-CP2 / PR #46 correction checkpoint (Codex): code only, draft, NOT merged or deployed.**
+- Work is isolated in `~/Documents/Halsa-Codex-CP2`; the owner's `StockAgent` main checkout, private data and environment
+  are untouched by this checkpoint. Starting PR head `6e2cab54f6d4fdd96170d022501f688562e122cb`.
+- Integrated current main `f669468ecca3f5465749dac236891256dd8b7720` through normal merge commit `d384129` (no rebase
+  or force-push). Only documentation conflicted: AGENTS keeps both D-076 and D-077; DECISIONS keeps both entries;
+  STATUS / TASKS record D-075 and Classic as merged, with Classic owner acceptance postponed independently of CP2.
+- First-start correction: disk mount `/var/data` = `HALSA_DATA_ROOT=/var/data`. Derived paths: `data/`, `uploads/`,
+  `state/agent_state.db`, `published/dashboard.html`. No new runtime fallback: a missing root still refuses startup.
+- Exact documented configuration tested under a temporary prefix, with the real one-worker start script, initialized
+  SQLite, three HTTPS-proxy logins, synthetic upload / publication, restart persistence, data-free `/livez`, protected
+  APIs, live backup and isolated restore. No private workbook is used.
+- Approximate base cost: Standard 2 GB $25 + 5 GB disk $1.25 on the free Hobby workspace = **$26.25/month**, excluding
+  extra usage, off-site backup and taxes. Frankfurt remains a candidate subject to KVKK review; Auto-Deploy Off.
+- Focused CP2 + unchanged Classic tests: **37 passed** (17 CP2 + 20 Classic). Full local suite with AI disabled and
+  browser / JavaScript tests required: **2094 passed, 7 skipped, 1 xfailed** in 453.74 s. Exact pushed-head GitHub
+  results are recorded in PR #46 checks; independent review is still required.
+- No Classic implementation / test changes, metric promotions, evidence-flag changes or policy changes. No hosting
+  resources, passwords, deployment or backup service were provisioned. STOP for ChatGPT's independent PR review.
+
 **2026-11-04 — Klasik Rapor (D-077): the original dashboard regenerated exactly — MERGED as PR #47 (`f669468`), NOT deployed; owner acceptance postponed.**
 - Branch `claude/classic-dashboard` from `main` @ `4e02872`; merged into main, then integrated into PR #46 (hosting). Classic remains isolated;
   owner acceptance is deferred, not completed and not a CP2 dependency.

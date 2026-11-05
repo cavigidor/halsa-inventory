@@ -21,7 +21,7 @@ workers would break that assumption — **never scale out**.
 
 ## 2. Host assessment — Render, paid web service, Frankfurt, persistent disk (default candidate)
 
-Facts checked on 2026-11-03 (sources at the end):
+Storage / pricing rechecked on 2026-11-05; initial host assessment 2026-11-03 (sources at the end):
 
 | Topic | Render | Consequence for Halsa |
 |---|---|---|
@@ -34,7 +34,7 @@ Facts checked on 2026-11-03 (sources at the end):
 | Port | bind `0.0.0.0` on `$PORT` (default 10000) | `deploy/start_hosted.sh` |
 | Auto-deploy | per service: **On Commit** (default) / After CI Checks Pass / **Off** | set **Off** at creation; deploy a reviewed commit manually |
 | `X-Forwarded-For` | Render's handling of a client-supplied value is not clearly documented (a 2021 thread conflicts) | the per-client login throttle may be keyed on a spoofable address; the **global** per-role throttle still caps guessing (§4) |
-| Size / price | Starter 512 MB ($7/mo), **Standard 2 GB ($25/mo)**; disk $0.25 / GB / month; Pro workspace $25/mo flat (2026 plans) | see sizing below |
+| Size / price | Starter 512 MB ($7/mo), **Standard 2 GB ($25/mo)**; disk $0.25 / GB / month; Hobby workspace $0/mo + compute (Pro optional) | see sizing below |
 
 **Sizing — a material finding.** The workload was measured read-only on byte-identical copies of the real 5 Oct
 exports (owner's Mac, 2026-11-04). Peak memory was about **1.0 GB**:
@@ -45,22 +45,28 @@ exports (owner's Mac, 2026-11-04). Peak memory was about **1.0 GB**:
 Render **Starter (512 MB) would run out of memory**; the minimum is **Standard (2 GB)**. A 5 GB disk is ample, since a
 monthly set is about 42 MB, with uploads kept, plus backups.
 
-**No blocker** otherwise: the paid Frankfurt service with a disk fits the design. Indicative monthly cost is about
-$25 (instance) + $25 (Pro workspace, if required for the team / bandwidth) + about $1–2 (disk). Confirm current
-pricing before ordering.
+**No blocker** otherwise: the paid Frankfurt service with a disk fits the design. Approximate base cost on the
+free **Hobby workspace** is **$26.25/month**: $25 Standard (2 GB) + $1.25 for a 5 GB disk ($0.25/GB/month).
+Paid compute does not require a Pro workspace; Pro is optional for its team / platform features. Additional usage,
+off-site backup and taxes are excluded. Confirm current pricing before ordering; no resources were purchased.
 
 ## 3. Persistent storage — one mounted directory
 
 `HALSA_DATA_ROOT` names the mount (absolute). `services/paths.py` fills the persistent paths under it:
 
-| Variable | Hosted path (Render example: `HALSA_DATA_ROOT=/var/data/halsa`) | Holds |
+| Variable | Hosted path (Render example: `HALSA_DATA_ROOT=/var/data`) | Holds |
 |---|---|---|
-| `DATA_FOLDER` | `/var/data/halsa/data` | the published workbooks (content-addressed `yukleme-<sha>.xlsx`), `sources.json`, `owner_sources.json` |
-| `UPLOAD_DIR` | `/var/data/halsa/uploads` | Upload Center blobs, batches, previews (staging) |
-| `AGENT_DB` | `/var/data/halsa/state/agent_state.db` | SQLite: sessions, action decisions, CRM / follow-ups, fair campaigns, Veri Kontrol history and notes, Upload Center history |
-| `DASHBOARD_PATH` | `/var/data/halsa/published/dashboard.html` | the published page, `dashboard.generation.json` (accepted generation), `dashboard.prev.html` |
+| `DATA_FOLDER` | `/var/data/data` | the published workbooks (content-addressed `yukleme-<sha>.xlsx`), `sources.json`, `owner_sources.json` |
+| `UPLOAD_DIR` | `/var/data/uploads` | Upload Center blobs, batches, previews (staging) |
+| `AGENT_DB` | `/var/data/state/agent_state.db` | SQLite: sessions, action decisions, CRM / follow-ups, fair campaigns, Veri Kontrol history and notes, Upload Center history |
+| `DASHBOARD_PATH` | `/var/data/published/dashboard.html` | the published page, `dashboard.generation.json` (accepted generation), `dashboard.prev.html` |
 
-The mount itself is e.g. `/var/data`. Render forbids `/`, `/opt/render/project/src` and similar exact paths.
+For first start, mount the disk at **`/var/data` and set `HALSA_DATA_ROOT=/var/data`**. Render creates the
+mount; the app creates `data/`, `uploads/`, `state/` and `published/` beneath it. Do not point the initial root at
+`/var/data/halsa`: that child is not created by the mount, and startup correctly refuses a missing root.
+Leave the four derived path overrides unset in the host environment (do not copy the local `.env` defaults).
+A genuinely missing root still refuses startup; the app never creates a missing mount. Render forbids `/`,
+`/opt/render/project/src` and similar exact paths.
 
 **Rules (enforced at startup; the server refuses to start otherwise — fail closed):**
 - the root exists, is a directory, is absolute and is writable;
@@ -100,7 +106,7 @@ The script requires `HALSA_DATA_ROOT`, ignores any `.env` file (`STOCKAGENT_NO_D
 
 | Variable | Value |
 |---|---|
-| `HALSA_DATA_ROOT` | `/var/data/halsa` (a directory on the disk) |
+| `HALSA_DATA_ROOT` | `/var/data` (the disk mount itself) |
 | `HALSA_VIEWER_PASSWORD_HASH`, `HALSA_FINANCE_PASSWORD_HASH`, `HALSA_OWNER_PASSWORD_HASH` | scrypt hashes generated on the owner's computer (`python -m services.owner_auth hash-password [--viewer\|--finance]`); three different passwords |
 | `FORWARDED_ALLOW_IPS` | `*` on Render (see below) |
 | `MANUAL_INFLATION_RATE` | as today (optional) |
@@ -196,12 +202,15 @@ python -m services.backup restore /var/data/halsa-backups/halsa-backup-… --tar
 
 `tests/test_m8_cp2_hosting.py::test_hosted_runtime_persists_across_restart_and_fails_closed` runs the **real start
 command** (`sh deploy/start_hosted.sh`, Uvicorn, one worker, `app:app`, production accuracy gate, real logins). Its
-environment holds only `HALSA_DATA_ROOT` (an empty temporary "disk"), `PORT` and synthetic password hashes.
+environment uses the documented `HALSA_DATA_ROOT=/var/data` layout under a temporary test prefix (no system
+`/var/data` is touched), `PORT` and synthetic password hashes, with no derived path overrides. A configuration test
+reads `.env.example` and checks the four exact `/var/data/...` paths. No pre-created `halsa` child is needed.
 
-1. Starts on the empty disk; `/livez` 200. Anonymous `GET /` gives the site-password page; owner `GET /` shows nothing
-   published.
-2. A request with `X-Forwarded-Proto: https` from the trusted proxy address: the login works and the cookie is
-   `Secure` + HSTS. The same request without it: `403 https_required`. Owner login.
+1. Starts on the empty mount itself; creates all four persistent subdirectories and an initialized, integrity-checked
+   SQLite database. `/livez` is the constant data-free 200 response; anonymous `/api/health` stays 401. Anonymous
+   `GET /` gives the site-password page; owner `GET /` shows nothing published.
+2. With the documented `FORWARDED_ALLOW_IPS=*` and `X-Forwarded-Proto: https` from the proxy: website, financial
+   and owner logins work, their cookies are `Secure`, and HSTS is set. The same request without it: `403 https_required`. Owner login.
 3. The owner uploads, validates and publishes stock + sales + a dated Cari report through the Upload Center API.
 4. `GET /` 200, page generation = status generation, displayed = `receivables.collections`, exactly 1 VERIFIED.
    `/api/finance/cari` gives the exact synthetic balances; the website viewer gets 401 on the list and 403 on upload.
@@ -216,14 +225,19 @@ environment holds only `HALSA_DATA_ROOT` (an empty temporary "disk"), `PORT` and
 10. The backup restored into a new directory and the real start command run on it: the same core generation is
     served, with the same Cari rows and CRM note.
 
+**2026-11-05 correction checkpoint:** 17 CP2 + 20 unchanged Classic tests passed together (37). Full local suite
+with AI disabled and browser / JavaScript tests required: **2094 passed, 7 skipped, 1 xfailed** (453.74 s).
+Exact pushed-head GitHub CI is recorded on PR #46; its shallow checkout skips the independent Git-history hash test
+(the complete clone runs it). Classic code / fixtures / tests equal merged main; owner acceptance is postponed.
+
 ## 8. Remaining steps to a real HTTPS link (owner + separate authorization — not done here)
 
-1. **Owner decisions (record as D-xxx):** hosting provider and region (Frankfurt) under KVKK; the disclosure
+1. **Owner already chose Render.** Before real-data hosting, confirm region (Frankfurt candidate) under KVKK, the disclosure
    inventory (`docs/m8_cp1_access.md` §6); whether to add a network gate.
 2. Create the Render workspace / Standard web service / 5 GB disk at `/var/data` with the owner's payment account.
    Region Frankfurt, **Auto-Deploy Off**, health check path `/livez`, start command `sh deploy/start_hosted.sh`.
 3. Generate the three password hashes on the owner's computer and paste them into the host's private environment.
-   Set `HALSA_DATA_ROOT=/var/data/halsa` and `FORWARDED_ALLOW_IPS=*`.
+   Set `HALSA_DATA_ROOT=/var/data` and `FORWARDED_ALLOW_IPS=*`.
 4. Manual deploy of the reviewed main commit. Check `/livez`, the site-password page, the three logins over HTTPS, and
    that `/api/health` is 401 without a session.
 5. Configure and test the off-instance encrypted backup and a restore drill on the host (§6).
@@ -237,4 +251,5 @@ Sources:
 - [Render — Deploys](https://render.com/docs/deploys)
 - [Render — Regions](https://render.com/docs/regions)
 - [Render feedback — X-Forwarded-For](https://feedback.render.com/features/p/send-the-correct-xforwardedfor)
-- [Render 2026 plan change review](https://jwatte.com/blog/render-com-platform-review.md)
+- [Render — Pricing](https://render.com/pricing)
+- [Render — Workspace plans](https://render.com/docs/new-workspace-plans)

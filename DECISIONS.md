@@ -1454,10 +1454,13 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   - default host candidate **Render paid web service, Frankfurt, persistent disk, Auto-Deploy Off, health path
     `/livez`**; minimum instance **Standard (2 GB)** — measured peak ≈ 1.0 GB on copies of the real exports, so
     Starter (512 MB) is insufficient. No other blocker found.
+- **First-start correction (2026-11-05):** Render mount and initial `HALSA_DATA_ROOT` are both `/var/data`; the app
+  creates only the persistent subdirectories, never a missing root. Standard 2 GB + 5 GB disk on the free Hobby
+  workspace is approximately $26.25/month before usage, off-site backup and taxes; Pro is not mandatory.
 - **Unchanged:** D-074 / D-075 access, 33 metrics with only `receivables.collections` VERIFIED (60 days),
   `GENERATION_BOUND_API_EVIDENCE = True`, policy `m8-cari-d075`, D-071 withdrawals, owner-only writes.
-- **Still required before real-data launch:** owner decisions (provider / region under KVKK, disclosure inventory,
-  network gate), the host itself, production passwords, an off-instance encrypted backup schedule and a hosted
+- **Still required before real-data launch:** region under KVKK and disclosure / network-gate review (Render already
+  chosen), the host itself, production passwords, an off-instance encrypted backup schedule and a hosted
   restore drill (`docs/m8_cp2_hosting.md` §6, §8).
 
 ### D-077 · 2026-11-04 · Klasik Rapor: the original dashboard, frozen and regenerated exactly (owner request)
