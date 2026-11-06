@@ -340,7 +340,8 @@ def test_production_dashboard_embeds_no_withheld_rows(tmp_path):
     html = open(out, encoding="utf-8").read()
     assert counts["low"] is None and counts["lapsed"] and counts["margin"]  # Stock retired; unrelated algorithms ran
     blob = _data_blob(html)
-    assert set(blob) == set(ACC.MODULE_METRIC)
+    assert set(blob) == set(ACC.MODULE_METRIC) | {"stock_review"}
+    assert blob.pop("stock_review")["withheld"]["verification"] == "UNAVAILABLE"
     for k, m in blob.items():
         assert m["rows"] == [] and m["cols"] == [], k                      # nothing to render
         assert m["withheld"]["message"] == ACC.WITHHELD_MESSAGE and m["withheld"]["metric"] == ACC.MODULE_METRIC[k]
@@ -616,7 +617,10 @@ def test_refresh_success_publishes_only_a_gated_dashboard_and_no_unverified_tota
     assert all(rep["counts"][k] is None for k in ("products", "low_stock", "lapsed", "overstock_value",
                                                    "overdue_total", "actions"))     # 2B: products withheld too
     html = open(dash, encoding="utf-8").read()
-    assert all(m["rows"] == [] for m in _data_blob(html).values())
+    modules = _data_blob(html)
+    review = modules.pop("stock_review")
+    assert review["rows"] and review["review"]["status"] == "PRELIMINARY"
+    assert all(m["rows"] == [] for m in modules.values())
 
 
 def test_data_quality_failure_during_refresh_keeps_previous_and_publishes_nothing(tmp_path):

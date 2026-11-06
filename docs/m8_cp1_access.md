@@ -31,8 +31,10 @@ The three passwords must differ (the provisioning command refuses a password alr
 never downgrades a session (an owner who opens the site page stays owner). The financial and website passwords can
 never create an owner session. **Logging out ends viewing too** (back to the site-password page).
 
-**No login reveals an unverified number.** The accuracy gate applies identically at every level; every analytical
-metric except the VERIFIED Cari list (D-073) and every financial section is withheld for all three.
+**Certification and preliminary review are separate (D-078).** The accuracy gate still applies identically to
+certified analyses at every level. The explicit stock-source review now displays factual preliminary stock records
+with evidence warnings to authenticated viewers; it does not certify them or unlock action/AI APIs. Cari account
+balances remain financial/owner-only. Other analytical/financial outputs remain gated at this checkpoint.
 
 ## 2. Route permissions (every route; `services/access.py`)
 
@@ -209,6 +211,12 @@ read-only; a website password in front of everything (D-074).
 financial password.
 **Still required before public hosting (record as a dated decision):** whether to add a network gate (VPN / IP
 allow-list / access proxy) in front of public pages; the hosting region under KVKK; final CP8 checklist.
+
+**D-078 stock-source review disclosure (2026-11-06):** authenticated website/financial/owner viewers may read
+stock code/name, source quantity, old coverage/min/max, recorded inventory value and DURUM, exact Excel row numbers,
+per-record data issues, source filename/report-date origin, generation id, SHA-256 and existing VKM stock counts
+and warning text. These are preliminary source observations, not certified stock actions. The common page embeds no
+Cari account code/name paired with a balance, invoice-age month or direction. Anonymous visitors remain refused.
 
 ## 7. CP1B (D-074) acceptance
 

@@ -1,5 +1,34 @@
 # STATUS.md — current checkpoint
 
+**2026-11-06 — Halsa V1 / D-078 first stock-source implementation checkpoint (Codex); draft PR #49, NOT merged or deployed.**
+- Isolated branch from requested baseline main `fbca73d312da4a3217e8751546e039db883b4783`. Owner's existing
+  StockAgent checkout, original Excel files, private `.env` and frozen Classic implementation remain unchanged.
+- New Stok Kaynak İncelemesi: preliminary source records/counts with Excel row references, exact cached values,
+  error codes, missing caches, unknowns, signs and duplicates preserved; expandable Turkish warnings reuse VKM.
+  Source file/date origin, full fingerprint, generation and unchanged certification verdict remain visible.
+- Explicit stock-only review marker is separate from VERIFIED display authorization. Served review pages recheck the
+  selected stock SHA-256 per request; unknown layout, absent/changed bytes fail closed. Old policy pages are refused.
+  Identical source-generation rebuilds keep deterministic HTML. Three access roles / finance-only Cari / owner-only
+  changes and all metric certification records remain intact. No AI/action release or retired D-070/D-071 rankings.
+- Coverage matrix inventories all 33 metrics, computability, current surface and remaining work:
+  `docs/accuracy/v1_metric_coverage.md`. Local generation and offline/server limitations:
+  `docs/halsa_v1_local_review.md`. Complete V1/father delivery is NOT claimed.
+- November stock read-only acceptance: 3,316 records / 3,313 code rows / 3,313 distinct codes / 3 missing identities;
+  1,168 coverage-error records, 0 negative quantity records. Independent comparison: 26,528 displayed fields,
+  0 mismatches; original SHA-256/size/mtime unchanged. Real offline Chromium opens all rows, matches 1,168 error
+  filter rows, expands warnings, no JS errors; no real-data screenshot. Only synthetic screenshots were produced.
+- Normal controlled refresh on explicit read-only November Stock+Sales copies also passed; no aging substitution or
+  supplied inflation assumption, originals unchanged. Sales producers ran but numerical acceptance remains pending.
+  November Cari aging was not found in inspected local directories; the older export/master list was not substituted.
+- Focused tests: 117 passed (accuracy, D-075 role access, stock policy); expanded source-generation/restart/rollback,
+  new source-review unit/browser coverage: 138 passed. Frozen Classic + deterministic rebuild check: 21 passed.
+  Final full local suite (AI disabled, browser/JavaScript required): **2108 passed, 7 skipped, 1 xfailed** in
+  **473.80 s**. GitHub CI results are tracked in draft PR #49 checks and the engineering handoff.
+- Initial broad run exposed stale blank-output/rollback expectations and a render-timestamp digest instability;
+  corrected with source-checked rollback assertions, isolated in-process fixture and deterministic review HTML.
+  Follow-up regressions 13 passed. Full V1 stays OPEN: sales/other review surfaces, missing current inputs,
+  curated offline report and father acceptance. STOP after this checkpoint for independent review; no merge/deploy.
+
 **2026-11-05 — M8-CP2 / PR #46 correction checkpoint (Codex): code only, draft, NOT merged or deployed.**
 - Work is isolated in `~/Documents/Halsa-Codex-CP2`; the owner's `StockAgent` main checkout, private data and environment
   are untouched by this checkpoint. Starting PR head `6e2cab54f6d4fdd96170d022501f688562e122cb`.

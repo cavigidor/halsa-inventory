@@ -5,7 +5,12 @@ updated by the correction pass after the independent review of PR #27 (see `rele
 _Source of truth in code: `services/accuracy.py` (`REGISTER`, `DEFINITIONS`, `ROUTES`). This document mirrors it and
 adds the audit evidence. If they disagree, the code wins and this file must be corrected._
 
-Owner directive: **NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION.** Every analytical output has one internal state:
+**2026-11-06 presentation update (D-078):** the explicit stock-source review displays preliminary raw facts/counts
+with Turkish evidence warnings, separately from certification. The historical gate description below remains the
+certification policy; it is no longer a blanket prohibition on this review surface. No register ceiling is promoted.
+Full current inventory: [V1 33-metric coverage](v1_metric_coverage.md).
+
+Owner directive: **NO VERIFIED EVIDENCE = NO CERTIFIED BUSINESS CONCLUSION.** Every analytical output has one internal state:
 
 | State | Meaning | Shown to the owner? |
 |---|---|---|

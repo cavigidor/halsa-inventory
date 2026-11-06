@@ -142,7 +142,9 @@ services/sales_projection.py  M7-6: Customer 360 projection of the sales frame b
   = Halsa owes the account holder); 120 = Müşteri, 320 = Satıcı (D-072); `Toplam Döviz Bakiye` is USD and kept apart;
   the as-of date is the original file name's date (upload date if none), recorded with its provenance.
 - **Missing ≠ zero** anywhere in the AI layer.
-- **Factual integrity (D-049):** only VERIFIED outputs are displayed (HTML and API); everything else is withheld with
+- **Factual integrity (D-049, review visibility revised by D-078):** certified analysis/API outputs require VERIFIED.
+  The explicit preliminary stock-source review shows generation-bound raw facts with Turkish evidence warnings,
+  without promoting any metric or restoring retired actions. Other unverified outputs are withheld with
   the notice "Bu analiz henüz doğrulanmadığı için gösterilmiyor." The gate lives in the backend (`services/accuracy.py`).
 
 ## AI layer (Milestone 3)

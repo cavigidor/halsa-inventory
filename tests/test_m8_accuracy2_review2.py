@@ -360,6 +360,8 @@ def test_edited_dashboard_bytes_are_withheld_live_and_after_restart(world, publi
 
 
 def test_failed_publication_rolls_back_to_the_served_dashboard(world, published, monkeypatch):
+    source = Path(GEN.select_core(world.folder)[0]["stock"])
+    original = source.read_bytes()
     write_stock(world.folder, stock_rows([NEW_ROW]))
     APP.app.state.generations = world.store
     with monkeypatch.context() as mp:                     # scoped: the DB isolation of the fixtures stays in place
@@ -369,6 +371,11 @@ def test_failed_publication_rolls_back_to_the_served_dashboard(world, published,
     assert not rep["ok"] and rep["step"] == "swap"
     c = live_client(world)
     try:
+        r = c.get("/")
+        # Disk/context rollback succeeds, but changed source bytes cannot authorize cached preliminary evidence.
+        assert r.status_code == 503 and r.headers["X-Halsa-Dashboard"] == "review_source_unavailable"
+        assert Path(world.dash).read_bytes() == published["body"]
+        source.write_bytes(original)
         r = c.get("/")
         assert r.status_code == 200 and r.content == published["body"]
         assert r.headers["X-Halsa-Generation"] == published["m"].generation_id

@@ -3,6 +3,7 @@ import os, glob, json, html, datetime as dt, warnings
 import pandas as pd, numpy as np
 from services.stock_policy import RETIREMENT_REASON
 from services import cari_policy as CARI
+from services import stock_review as REVIEW
 warnings.filterwarnings('ignore')
 
 STOCK_HEADER_ROW=3
@@ -244,8 +245,9 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     """sources/frames (M5-5): a frozen source selection and the already-read raw frames, so a controlled
     refresh builds from exactly what it validated. stats_out (dict): filled with build totals for verification.
     gate (M8-ACCURACY): the factual-integrity gate; default = the production gate (services/accuracy.py). Every
-    module, stat card and server-driven panel whose metric is not VERIFIED is WITHHELD from the HTML: its rows are
-    never embedded, only a neutral notice. The computations themselves are unchanged.
+    analytical module, stat card and server-driven panel whose metric is not VERIFIED is WITHHELD from the HTML: its rows are
+    never embedded, only a neutral notice. Owner V1 adds a separate generation-bound stock source review,
+    labelled preliminary without changing certification or recommendation calculations.
     manifest (M8-ACCURACY-2): the source generation whose frozen bytes `frames` were parsed from (the controlled
     refresh passes both from one frozen read). Evidence is taken ONLY from it; without a manifest there is no evidence
     and every source-bound output is withheld."""
@@ -337,6 +339,12 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     if 'collections' in modules and not modules['collections'].get('withheld'):
         modules['collections']={**modules['collections'],'rows':[],'finance':1,'endpoint':'/api/finance/cari',
                                 'finance_message':CARI_FINANCE_MESSAGE}
+    # Owner V1 directive: raw factual evidence may be reviewed without certifying a business conclusion.
+    # This explicit stock-only surface never releases old recommendation modules or any analytical API.
+    modules['stock_review']=REVIEW.module(manifest, sp, gate)
+    if modules['stock_review'].get('review'):
+        modules['stock_review']['review_html']=REVIEW.warning_html(modules['stock_review']['review'])
+    review_keys=[REVIEW.KEY] if modules['stock_review'].get('review') else []
     withheld_stats=[l for l,_ in stats if not _dec(ACC.STAT_METRIC.get(l,'unregistered:'+l)).displayable]
     stats=[(l,v) for l,v in stats if l not in withheld_stats]
     show_tiers=_dec('customers.winback').displayable
@@ -351,7 +359,7 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
           'aging':os.path.basename(ap) if ap else '','tiers':tier_counts,'total':total,'has_aging':has_aging,
           'asof':_asof_iso(sdf),'show_tiers':show_tiers,'withheld_stats':withheld_stats,
           'withheld_panels':panel_notice,'accuracy_policy':ACC.POLICY_VERSION,'generation':core_gen,
-          'total_shown':_dec('stock.product_counts').displayable,
+          'total_shown':_dec('stock.product_counts').displayable,'reviewed':review_keys,
           # M8-ACCURACY-2: every metric whose output this HTML embeds; GET / re-authorizes exactly these keys
           'displayed':sorted(k for k,d in decisions.items() if d.displayable)}
     with open(out_path,'w',encoding='utf-8') as f: f.write(_html(modules,stats,meta,later,ai_panel=ai_panel,c360_panel=c360_panel,sq_panel=sq_panel,opp_panel=opp_panel,fair_panel=fair_panel,crm_panel=crm_panel,own_panel=own_panel,vkm_panel=vkm_panel,up_panel=up_panel))
@@ -2899,6 +2907,7 @@ def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,o
     acc=html.escape(str(meta.get('accuracy_policy') or ''),quote=True)
     gen=html.escape(str(meta.get('generation') or ''),quote=True)
     shown=html.escape(','.join(meta.get('displayed') or []),quote=True)
+    reviewed=html.escape(','.join(meta.get('reviewed') or []),quote=True)
     laterlist=''.join(f'<li>{html.escape(x)}</li>' for x in later)
     src=f"Stok: {meta['stock']} · Satış: {meta['sales']}"+(f" · Alacaklar: {meta['aging']}" if meta['has_aging'] else '')
     ai_btn,ai_block=_ai_panel(meta) if ai_panel else ('','')
@@ -2913,7 +2922,7 @@ def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,o
     from services import upload_ui as _UPUI
     up_btn,up_block=_UPUI.panel() if up_panel else ('','')        # M8-CP3: owner-only Dosya Yükleme (hidden for viewers)
     return f"""<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="stockagent-accuracy" content="{acc}"><meta name="stockagent-generation" content="{gen}"><meta name="stockagent-displayed" content="{shown}"><title>Şirket Panosu — {meta['date']}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="stockagent-accuracy" content="{acc}"><meta name="stockagent-generation" content="{gen}"><meta name="stockagent-displayed" content="{shown}"><meta name="stockagent-review" content="{reviewed}"><title>Şirket Panosu — {meta['date']}</title>
 <style>
 :root{{--ink:#16191d;--muted:#6b7480;--line:#e6e8ec;--paper:#fbfbf9;--card:#fff;
 --low:#c2410c;--crit:#9f1239;--over:#0e7490;--gold:#92660a;--lap:#6d28d9;--warn:#b45309;--warn-bg:#fef6e7;}}
@@ -2971,6 +2980,12 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 .prods{{flex:1;min-width:280px}}.prods-h{{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;margin-bottom:6px}}
 .prow{{display:flex;justify-content:space-between;gap:14px;padding:4px 0;border-bottom:1px solid var(--line)}}
 .pn{{font-size:13px}}.pv{{font-size:12px;color:var(--muted);white-space:nowrap;font-family:"SF Mono",Menlo,monospace}}
+#stock_review .tbl{{overflow-x:auto}}
+#stock_review table{{min-width:1120px}}
+.aw-box.review-box{{background:#fff9ed;border-color:#edd7a9}}
+.review-box details{{margin:8px 0;border-top:1px solid var(--line);padding-top:7px}}
+.review-box summary{{cursor:pointer;font-weight:600}}
+.review-box code{{overflow-wrap:anywhere;font-size:11px}}
 .aw-box{{border:1px solid var(--line);background:#f4f5f7;border-radius:10px;padding:14px 16px;margin:8px 0 14px}}
 .aw-msg{{font-weight:700;margin:0 0 6px;font-size:15px}}.aw-why{{margin:0;padding-left:18px;color:var(--muted);font-size:13px}}
 .aw-why li{{margin:3px 0}}
@@ -2984,7 +2999,7 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <div class="tabs">{tabbtns}{up_btn}{vk_btn}{sq_btn}{c3_btn}{op_btn}{fm_btn}{cr_btn}{ow_btn}{ai_btn}</div>
 <div id="overview" class="panel on">
 <h2 class="sec">Aktif Analizler</h2>
-<p class="note">Bu panoda yalnızca kaynağı, tarihi, tanımı ve hesabı doğrulanmış sonuçlar gösterilir. Doğrulanmamış bir analizin yerinde rakam değil, neyin eksik olduğunu söyleyen kısa bir not görürsünüz. Rakamlar yapay zekâ tarafından üretilmez.</p>
+<p class="note">Stok Kaynak İncelemesi, mevcut kayıtları doğrulanmamış inceleme verisi olarak gösterir; yanındaki uyarıları ve kaynak satırlarını ERP Excel raporuyla karşılaştırın. Diğer analizlerin doğrulama durumu kendi sekmesinde belirtilir. Rakamlar Python ile hesaplanır; yapay zekâ tarafından üretilmez.</p>
 <div class="stats">{statcards}</div>{statnote}
 {tiers}
 <h2 class="sec" style="margin-top:34px">Sonrası İçin</h2>
@@ -3033,7 +3048,7 @@ function makePanel(id){{
     filterHTML=`<select class="repsel"><option value="">Tüm temsilciler</option>${{vals.map(v=>`<option>${{esc(v)}}</option>`).join('')}}</select>`;
   }}
   p.innerHTML=`<div class="toolbar"><input class="search" placeholder="${{m.title.toLowerCase()}} ara…">${{filterHTML}}
-    <span class="count"></span></div><p class="note">${{m.note}}</p><div class="fin-gate" hidden></div><div class="tbl"></div>`;
+    <span class="count"></span></div>${{m.review_html||''}}<p class="note">${{esc(m.note)}}</p><div class="fin-gate" hidden></div><div class="tbl"></div>`;
   state[id]={{sort:null,dir:1,q:'',fval:''}};
   p.querySelector('.search').addEventListener('input',e=>{{state[id].q=e.target.value.toLowerCase();draw(id);}});
   const sel=p.querySelector('.repsel'); if(sel) sel.addEventListener('change',e=>{{state[id].fval=e.target.value;draw(id);}});
@@ -3055,11 +3070,12 @@ function draw(id){{
     const cls='main '+(m.expand?'exp':'');
     h+=`<tr class="${{cls}}" data-i="${{i}}">`+m.cols.map(c=>{{
       let v=r[c.k];
+      if(m.review&&v==null) return '<td>—</td>';
       if(c.k==='tier') return `<td><span class="tier t${{v}}">K${{v}}</span></td>`;
       if(c.money&&c.exact) return `<td class="money ${{(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}}">${{v==null?'—':fmtMoneyExact(v)}}</td>`;
       if(c.money) return `<td class="money ${{c.k==='overdue'?'od':(c.k==='inv'?'val':'')}} ${{(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}}">${{v?fmtMoney(v):(v===0?'₺0':'—')}}</td>`;
       if(c.n!=null) return `<td class="r mono ${{(id==='reorder'&&r.crit&&(c.k==='cov'||c.k==='stock'))?'crit':''}} ${{(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}}">${{v==null?'—':fmtNum(v,String(v).includes('.')?2:0)}}</td>`;
-      if(c.k==='code') return `<td class="mono" style="color:var(--muted);font-size:12px">${{v}}</td>`;
+      if(c.k==='code') return `<td class="mono" style="color:var(--muted);font-size:12px">${{esc(v)}}</td>`;
       if(c.k==='last') return `<td class="mono r">${{v??'—'}}</td>`;
       if(c.k==='name'){{
         let tags=(id==='overstock'&&r.disc)?' <span class="tag">üretimden kalktı</span>':'';
