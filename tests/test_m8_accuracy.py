@@ -384,7 +384,8 @@ def test_unaffected_verified_metric_renders_unchanged_beside_an_invalid_one(tmp_
     blob = _data_blob(open(out, encoding="utf-8").read())
     low, _, _ = db.m_stock(src["stock"])
     assert blob["reorder"]["rows"] == json.loads(json.dumps(low)) and "withheld" not in blob["reorder"]
-    assert blob["margin"]["rows"] == [] and blob["margin"]["withheld"]["verification"] == "invalid"
+    assert blob["margin"]["review"]["verification"] == "invalid"
+    assert blob["margin"]["rows"] and all(r["prof"] is None and r["marg"] is None for r in blob["margin"]["rows"])
     # the evidence actually collected from the synthetic files would NOT verify it (no declared date, joins unknown…)
     out2 = str(tmp_path / "d2.html")
     db.build(data, out2, today=TODAY, gate=ACC.Gate(reg, ACC.DEFINITIONS, None, TODAY), frames=frames, sources=src,
@@ -620,7 +621,12 @@ def test_refresh_success_publishes_only_a_gated_dashboard_and_no_unverified_tota
     modules = _data_blob(html)
     review = modules.pop("stock_review")
     assert review["rows"] and review["review"]["status"] == "PRELIMINARY"
-    assert all(m["rows"] == [] for m in modules.values())
+    for key,module in modules.items():
+        if module.get("review"):
+            assert module["review"]["status"] == "PRELIMINARY"
+            assert module["review"]["verification"] != "verified"
+        else:
+            assert module["rows"] == [], key
 
 
 def test_data_quality_failure_during_refresh_keeps_previous_and_publishes_nothing(tmp_path):

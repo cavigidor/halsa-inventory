@@ -44,7 +44,7 @@ def test_route_is_finance_only_and_gated_by_the_metric():
     assert AX.ACCESS[("GET", "/api/finance/cari")] == AX.FINANCE_READ
     assert ACC.ROUTES[("GET", "/api/finance/cari")] == ("metric", KEY)
     REL.assert_release_state()                                   # 33 metrics, only the Cari list certified, flag True
-    assert ACC.REGISTER[KEY].max_source_age_days == 60 and ACC.POLICY_VERSION == "m8-v1-stock-review"
+    assert ACC.REGISTER[KEY].max_source_age_days == 60 and ACC.POLICY_VERSION == "m8-v1-sales-review"
 
 
 # ---------------------------------------------------------------------------------------------

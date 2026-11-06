@@ -742,7 +742,11 @@ def test_publication_never_promotes_a_metric_and_payloads_carry_no_values(srv):
     assert s.c.get("/api/sales-queue").status_code == ACC.WITHHELD_HTTP_STATUS
     html = s.c.get("/").text
     assert '<button class="tab" data-t="up" hidden>Dosya Yükleme</button>' in html
-    assert FX.name(1) not in html                                      # no unverified rows in the published page
+    assert FX.name(1) in html  # provisional sales evidence is visible, without any metric promotion
+    from tests.test_m8_accuracy import _data_blob
+    data=_data_blob(html)
+    assert data["purchases_yearly"]["rows"] and data["purchases_yearly"]["review"]["status"]=="PRELIMINARY"
+    assert data["purchases_yearly"]["review"]["verification"]!="verified"
     body = json.dumps(s.c.get(f"/api/uploads/jobs/{pj['job_id']}").json(), ensure_ascii=False)
     assert not [x for x in SECRETS if x in body]
 

@@ -1,7 +1,8 @@
-# Halsa V1 checkpoint 1 — coverage of all 33 registered metrics
+# Halsa V1 — coverage of all 33 registered metrics (Stock/Sales continuation)
 
 Owner request: 2026-11-06; baseline main `fbca73d312da4a3217e8751546e039db883b4783`.
-This is the **first reviewable implementation checkpoint**, not completion of the V1 release.
+Stock checkpoint PR #49 is merged. D-079 adds the provisional sales surfaces and curated offline general report
+([procedure and current acceptance](../halsa_v1_father_report.md)). The complete V1 task awaits review and father acceptance.
 Inventory traces `REGISTER`, `MODULE_METRIC`, `PANEL_METRIC`, `ROUTES`, the builder and producers.
 Computability below describes current code and required inputs; it is **not real-data acceptance of 33 outputs**.
 Ceilings, blockers, definitions, source validation and VERIFIED certification are unchanged.
@@ -16,10 +17,10 @@ not new certifications. The first preliminary source review is independent of `D
 | 2 | `stock.overstock` | NV | RETIRED D-070; no supported overstock amount | Same raw stock evidence; no overstock conclusion or total |
 | 3 | `stock.product_counts` | NV | Calculable source row / distinct-code counts on inspected stock bytes; duplicates and ambiguous identity kept separate | **PRELIMINARY** counts + searchable exact stock source records, Excel rows, errors, signs, blanks, provenance and VKM warnings; certified header/refresh count stays gated |
 | 4 | `stock.clearance_buyers` | INV | RETIRED D-070; depends on withdrawn overstock classification | Stock input evidence only; no clearance / buyer action ranking |
-| 5 | `customers.winback` | INV | Existing deterministic sales aggregation runs; hard-coded 2021–25/2026 windows, amount→zero and DQ-5 attribution make conclusions unsafe | Still withheld. Next: factual sales evidence + labelled preliminary calculation after tracing affected records, no action propagation |
-| 6 | `customers.momentum` | NV | Calculable 2025/26 YTD order amounts if sales dates/amounts readable; missing amounts and master attributes unresolved; window ends at data date | Still withheld. Add exact window, amounts/identity diagnostics and preliminary warning surface |
-| 7 | `customers.order_size` | NV | Calculable 2024–26 revenue/distinct-document ratios; missing money, free documents and master attribution unresolved | Still withheld. Audit missing inputs and denominator; label order-source arithmetic |
-| 8 | `finance.margin` | INV | Known invalid missing-cost→zero path DQ-1; current result cannot establish profit | Still withheld. Expose source revenue/cost evidence and affected counts; do not certify current margin |
+| 5 | `customers.winback` | INV | Existing deterministic sales aggregation runs; hard-coded 2021–25/2026 windows, amount→zero and DQ-5 attribution make conclusions unsafe | **PRELIMINARY** existing-rule candidates; fixed window/thresholds, 2026 document counts/date and concrete questions. Unknown dependent values stay null; action APIs remain withheld |
+| 6 | `customers.momentum` | NV | Calculable 2025/26 YTD order amounts if sales dates/amounts readable; missing amounts and master attributes unresolved; window ends at data date | **PRELIMINARY** original 2025/26 source-date cutoff and amounts/ratios, with amount/date and revenue-meaning warnings; no inflation claim |
+| 7 | `customers.order_size` | NV | Calculable 2024–26 revenue/distinct-document ratios; missing money, free documents and master attribution unresolved | **PRELIMINARY** original document/amount thresholds and average; missing document/amount-dependent fields null independently; explicit zero-document/identity questions |
+| 8 | `finance.margin` | INV | Known invalid missing-cost→zero path DQ-1; current result cannot establish profit | **PRELIMINARY evidence** in original 2025–26/≥50k cohort: known after-cost portion, missing-cost count; full profit/ratio null for affected records. Existing invalid calculation is not released as valid |
 | 9 | `receivables.risk` | NV | RETIRED D-071; invoice-age buckets do not establish overdue/risk; runtime INVALID | No risk ranking. Underlying balances remain existing finance-only Cari list when eligible |
 | 10 | `receivables.collections` | V | Existing signed bucket sums, independent reproduction, mapping, original report date, 60-day freshness; no overdue claim | Existing `/api/finance/cari`, financial/owner session only, fresh bound source only. Current November aging export not found; never substitute customer master list |
 | 11 | `actions.real_decline` | NV | Manual inflation assumption plus sales momentum; no independently supplied inflation basis | Withheld; no V1 action release. A future labelled arithmetic view would need explicit assumptions |
@@ -32,8 +33,8 @@ not new certifications. The first preliminary source review is independent of `D
 | 18 | `opportunities.cross_sell` | NV | Historical group association support/confidence/lift computable from sales; thresholds and cohort not accepted as buying intent | Still withheld; next inspect associations as descriptive evidence, no purchase recommendation claim |
 | 19 | `opportunities.territories` | NV | Requires Hedef + sales; Hedef file/age and cross-sell dependency unresolved | Still withheld; missing inputs must be explicit; do not manufacture territories |
 | 20 | `sales_queue` | NV | Composite action scores plus local follow-ups; not a factual sales report | Withheld (runtime INVALID); do not release action rankings. CRM remains in Dinamik CRM for V1 use |
-| 21 | `customer360.profile` | NV | Sales facts calculable, optional master/Hedef cards and invoice-account links need field-level audit; Cari restricted | Still withheld except existing redacted directory; next expose cards individually, preserve finance redaction |
-| 22 | `fairs.history` | NV | FUAR-labelled historical order counts/amounts computable from sales; taxonomy/revenue meaning not confirmed | Still withheld; next descriptive labelled history, no attendance/ROI inference |
+| 21 | `customer360.profile` | NV | Sales facts calculable, optional master/Hedef cards and invoice-account links need field-level audit; Cari restricted | **PRELIMINARY descriptive subset**: Customer 360 yearly aggregation and existing top-10 product history, no Cari fields. Full live profile/composite API still gated; no Hedef invention |
+| 22 | `fairs.history` | NV | FUAR-labelled historical order counts/amounts computable from sales; taxonomy/revenue meaning not confirmed | **PRELIMINARY** existing FUAR order history, missing-amount/label/customer/date evidence; no attendance, conversion or ROI |
 | 23 | `fairs.segments` | NV | Composite action segments depend on unverified/retired sources | Still withheld (runtime INVALID); do not revive collections segment from invoice age |
 | 24 | `crm.active_customers` | NV | Calculable last-order-within-365-days count if sales dates readable; activity definition unapproved | Analytic tile withheld; existing user-entered records unchanged, no new CRM work |
 | 25 | `owner.kredi` | NV | Explicit Kredi workbook; installment identities must pass; status/file/date unresolved; schedule is not bank debt proof | Finance/owner-only existing section stays withheld. File of record needed; no fabricated schedule |
@@ -70,7 +71,17 @@ The normal controlled refresh also ran successfully on explicit read-only copies
 files (aging absent, no customer-master substitution, no inflation assumption supplied). Original hash/size/mtime
 checks passed for both. Existing sales producers ran, but their results remained withheld; their numerical acceptance
 is still pending. The latest observed sales transaction was 2026-10-30; that is not a report-date or completeness claim.
-**Sales analyses were not accepted in this stock checkpoint**.
+**Sales analyses were not accepted in that stock checkpoint**; the D-079 continuation below records subsequent acceptance.
 November Cari aging export was not found in the inspected StockAgent and related acceptance directories; only an
 older October aging export and a customer master list were found. No substitution was made. Expanded sections need
 the actual explicit Hedef, Kredi, Gider/Gelir, Bütçe, Trodat or detailed collections reports, as applicable.
+
+## D-079 current continuation
+The curated private general report now includes all the provisional Stock/Sales surfaces above. It excludes Cari and
+owner-financial inputs, server controls, CRM and action systems; optional missing files do not prevent opening it.
+No metric certification or business-rule threshold changes. Existing nested substituted-zero details are replaced
+in review views by the guarded annual/product tables. The inherited generic VKM question is replaced by specific
+check/field questions. Full current counts and independent acceptance are recorded in
+[the father report runbook](../halsa_v1_father_report.md). Historical stock-only acceptance above remains a record
+of that checkpoint; sales numerical acceptance in this continuation passed 550,229 independent source/key/arithmetic
+checks with zero discrepancies. Financial/account-level Cari delivery remains separate and unauthorized here.

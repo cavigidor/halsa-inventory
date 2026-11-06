@@ -1,5 +1,41 @@
 # STATUS.md — current checkpoint
 
+**2026-11-06 — D-079 provisional Stock/Sales dashboard + private offline father report; new draft review checkpoint, NOT merged/deployed.**
+- Phase A completed exactly as authorized: PR #49 marked ready and squash-merged as `112062384d22d32a542088aedd34da80a6019a84`.
+  Approved head `f774837`, tree `0ea9d34826ef3415c17a438b6a05bc6dafced6ea`, expected parent `fbca73d` verified before/after merge;
+  unchanged 23-file scope and both exact-head CI logs green (2107 / 8 skipped / 1 xfailed). Merged-main workflow
+  [42252480112](https://github.com/cavigidor/halsa-inventory/actions/runs/42252480112) passed the same counts in 671.17 s.
+- New branch `codex/halsa-v1-sales-report` starts from that verified merged main. Existing owner StockAgent checkout,
+  original Excel files and frozen Classic untouched. No PR48/infrastructure merge or deployment.
+- Existing growth/order-size/win-back comparisons, guarded after-cost evidence, Customer 360 yearly/product history,
+  source issue records and FUAR history now have explicit preliminary review surfaces. Thresholds, fixed years,
+  D-003 identity, original rounding and comparison KAPALI filter preserved. No metric promotion/API/action/AI release.
+  Missing cost never becomes full zero profit; missing-input-dependent values alone are unknown. Source questions
+  distinguish record/field/formula/period/identity issues. Current Stock/Sales bytes rechecked for served review.
+- New `python -m services.father_report` reuses calculations/renderer for one private offline file, mode 600, exclusive
+  new output, frozen/rechecked source bytes. Explicit Stock/Sales only, no Cari/owner-financial input, publication,
+  database, backend, session or CRM dependency. Readable tables, all-record search, representative filter, sorting,
+  pagination and expandable evidence/warnings. Filenames/cells escaped; optional missing sources stay explicit.
+- Actual November read-only report: 3316 stock records; 390 growth, 864 order-size, 552 win-back, 807 profitability,
+  13488 annual-history, 37000 product-history, 2783 source-issue and 88 FUAR-history rows. Independent openpyxl/Python:
+  **550229 source/key/arithmetic checks, zero discrepancies**; original SHA-256/size/mtime unchanged. No private
+  workbook, record/value, comparison script or generated report committed. Runbook: `docs/halsa_v1_father_report.md`.
+- Missing after-cost input: 2775 source records in 2025–26, affecting 547 profitability rows; full profit/ratio unknown.
+  Eight records involved in identical-row duplicates, preserved. Four win-back candidates have 2026 documents;
+  non-positive net is explicitly not "no orders". Existing November Cari absence does not block the general report.
+- Real offline Chromium: all 10 sections checked, paging/search/warnings passed, 0 JS errors, 0 API/external requests;
+  14,850,468-byte report opened/tested in 2.6 s. No real screenshot; only synthetic visual QA images produced.
+- Focused accuracy/access/review/browser set: 157 passed. Follow-up legacy-browser/upload/privacy regressions plus
+  new report tests: 16 passed; final standalone browser/XSS set: 3 passed; VERIFIED-Cari mutation isolation: 1 passed.
+  Initial broad run: 2119 passed, 3 stale visibility assumptions failed, 7 skipped, 1 xfailed; those expectations were
+  corrected to distinguish permitted Sales identities/results from protected Cari records and optional missing FUAR.
+  Final full suite (AI disabled; browser/JS required): **2124 passed, 7 skipped, 1 xfailed** in **475.99 s**.
+  GitHub exact-head CI results are recorded in the new draft PR checks and engineering handoff; all three roles and
+  financial access remain protected.
+- Remaining before full acceptance: independent new-PR review and father's private file/ERP usability acceptance.
+  The general report can be opened now. Current Cari aging/agreement-based overdue and optional sources remain
+  unavailable/outside this deliverable; no unsupported conclusion or silent source substitution. STOP for review.
+
 **2026-11-06 — Halsa V1 / D-078 first stock-source implementation checkpoint (Codex); draft PR #49, NOT merged or deployed.**
 - Isolated branch from requested baseline main `fbca73d312da4a3217e8751546e039db883b4783`. Owner's existing
   StockAgent checkout, original Excel files, private `.env` and frozen Classic implementation remain unchanged.

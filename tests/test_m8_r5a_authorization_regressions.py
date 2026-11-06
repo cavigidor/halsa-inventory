@@ -35,7 +35,7 @@ R5A_POLICY = "m8-r5a-stock-retirement"             # D-070, replaced by D-071
 R5B1_POLICY = "m8-r5b1-cari-invoice-age"           # D-071, replaced by D-072
 D072_POLICY = "m8-cari-d072"                       # D-072, replaced by D-073
 D073_POLICY = "m8-cari-d073"                       # the immediate predecessor (D-073): its pages EMBEDDED the Cari rows
-PREVIOUS_POLICIES = (OLD_POLICY, R5A_POLICY, R5B1_POLICY, D072_POLICY, D073_POLICY, "m8-cari-d075")
+PREVIOUS_POLICIES = (OLD_POLICY, R5A_POLICY, R5B1_POLICY, D072_POLICY, D073_POLICY, "m8-cari-d075", "m8-v1-stock-review")
 # What an R5A-era page said about the Cari export (the D-071 build no longer produces it). Emulated in the old-policy
 # build so the refused page provably carries an old overdue claim; the refresh digests the page AFTER it is written,
 # so the old page and its old manifest stay internally consistent.
@@ -117,7 +117,7 @@ def _publish_as_previous_policy(w, monkeypatch, old=OLD_POLICY):
         if old == R5A_POLICY:
             mp.setattr(DB, "_html", lambda *a, **k: real_html(*a, **k).replace("</body>", LEGACY_CARI + "</body>"))
         _, html = _publish(w, monkeypatch)
-    assert ACC.POLICY_VERSION != old and ACC.POLICY_VERSION == "m8-v1-stock-review"
+    assert ACC.POLICY_VERSION != old and ACC.POLICY_VERSION == "m8-v1-sales-review"
     assert f'<meta name="stockagent-accuracy" content="{old}">' in html
     assert GEN.read_manifest(GEN.manifest_path(w.dash)).policy_version == old
     assert (LEGACY_CARI in html) == (old == R5A_POLICY)

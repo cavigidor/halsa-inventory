@@ -211,3 +211,10 @@ consistent backup / isolated restore `python -m services.backup`. Details: `docs
 GitHub holds code, tests, prompts, schemas, docs, synthetic fixtures, CI and config templates.
 The Mac holds the real Excel exports, SQLite state, `.env` and keys, `agent_context.json`, and
 generated dashboards and reports. Those never leave the Mac through git.
+
+## V1 private general report (D-079)
+`python -m services.father_report` reuses the existing stock/sales calculations and HTML table renderer for a single
+private, read-only offline file. Explicit frozen Stock/Sales only; no Cari or owner financial inputs, database, AI,
+server, publication or CRM. Existing threshold/year rules remain, while known-invalid dependent values stay unknown
+and concrete Turkish source questions explain preliminary observations. Live metric certification and access roles
+are unchanged. Procedure and acceptance: `docs/halsa_v1_father_report.md`.

@@ -1,5 +1,8 @@
 # Halsa V1 — local stock review checkpoint and report delivery
 
+**Continuation:** PR #49 is merged. For the next Stock/Sales analysis checkpoint and curated offline report, see
+[the current father report procedure](halsa_v1_father_report.md). The remainder records the stock-only checkpoint.
+
 This branch stops at the first reviewable implementation checkpoint. It does **not** finish all V1 analysis tabs or
 deliver a complete November father report. No hosting/deployment or merge is authorized. Classic is unchanged.
 The full 33-metric inventory and remaining work are in [the coverage matrix](accuracy/v1_metric_coverage.md).

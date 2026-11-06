@@ -86,8 +86,12 @@ def test_production_dashboard_shows_only_notices_and_never_requests_withheld_dat
             page.click(f'.tab[data-t="{t}"]')
             panel = page.locator(f"#{t}")
             assert panel.locator(".aw-box").count() == 1, t
-            assert panel.locator("table").count() == 0, t
-            assert ACC.WITHHELD_MESSAGE in panel.inner_text(), t
+            if t in ("winback", "momentum", "ordersize", "margin"):
+                assert panel.locator("table").count() == 1, t
+                assert "İnceleme için / doğrulanmadı" in panel.inner_text(), t
+            else:
+                assert panel.locator("table").count() == 0, t
+                assert ACC.WITHHELD_MESSAGE in panel.inner_text(), t
         for t in ("sq", "c360", "opp"):                                   # server panels replaced by a notice
             page.click(f'.tab[data-t="{t}"]')
             assert ACC.WITHHELD_MESSAGE in page.locator(f"#{t}").inner_text(), t
