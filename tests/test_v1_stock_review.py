@@ -59,7 +59,7 @@ def test_preliminary_facts_keep_errors_blanks_signs_duplicates_and_exact_rows(tm
     assert blob['stock_review']['rows'] == rows
     for retired in ('reorder', 'overstock', 'osmove', 'risk'):
         assert blob[retired]['rows'] == []
-    assert REVIEW.markers(output.read_bytes()) == (REVIEW.KEY,)
+    assert REVIEW.KEY in REVIEW.markers(output.read_bytes())
     assert REVIEW.KEY not in GEN.dashboard_markers(output.read_bytes())[1]
 
 

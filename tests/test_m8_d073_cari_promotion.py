@@ -124,7 +124,7 @@ def test_production_register_certifies_only_the_cari_list():
             assert x.max_source_age_days == ACC.DEFAULT_OPERATIONAL_MAX_AGE_DAYS, k
     assert len(ACC.REGISTER) == 33
     assert [k for k, x in ACC.REGISTER.items() if x.certified == ACC.State.VERIFIED] == [KEY]
-    assert ACC.GENERATION_BOUND_API_EVIDENCE is True and ACC.POLICY_VERSION == "m8-v1-stock-review"   # D-078 preliminary stock review policy
+    assert ACC.GENERATION_BOUND_API_EVIDENCE is True and ACC.POLICY_VERSION == "m8-v1-sales-review"   # D-078 preliminary stock review policy
     ACC.validate_register()                                                       # the production rules pass
     assert ACC.current_gate().decide(KEY).codes == ("NO-EVIDENCE:aging",)         # no evidence → withheld
 
@@ -267,8 +267,8 @@ def test_production_gate_verifies_only_the_cari_list(tmp_path, monkeypatch):
     assert "Cari rapor tarihi: 5 Ekim 2026 (dosya adındaki tarih (D-072))." in coll["note"]
     assert CARI.FX_NOTE in coll["note"] and CARI.OVERDUE_RETIRED_REASON in coll["note"]
     for k, mod in mods.items():                                                     # every other module withheld
-        if k == "stock_review":
-            assert mod["rows"] and mod["review"]["status"] == "PRELIMINARY"
+        if mod.get("review"):
+            assert mod["review"]["status"] == "PRELIMINARY" and mod["review"]["verification"] != "verified"
         elif k != "collections":
             assert mod["rows"] == [] and mod.get("withheld"), k
     for text in ("Vadesi Geçen", "vadesi geçen toplam", "kovalayın", "Riskli Müşteri listesi", "Tahsilat önceliği"):

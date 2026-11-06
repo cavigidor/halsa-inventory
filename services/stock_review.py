@@ -12,6 +12,7 @@ from collections import Counter
 from services import generation as GEN
 from services import source_validation as SV
 from services import vkm as VKM
+from services.review_questions import question
 
 KEY = "stock.product_counts"
 TITLE = "Stok Kaynak İncelemesi"
@@ -47,16 +48,21 @@ def markers(body):
 def authorize(body, manifest, data_folder):
     """Recheck the exact selected source bytes on every served review page (including cached HTML)."""
     keys = markers(body)
-    if keys is None or any(k != KEY for k in keys):
+    from services import sales_review as SALES
+    if keys is None or any(k not in SALES.KEYS | {KEY} for k in keys):
         return False
     if not keys:
         return True
-    if not available(manifest):
-        return False
     try:
         paths, _, _ = GEN.select_core(data_folder)
-        rec = manifest.record("stock")
-        return GEN.sha256_file(paths["stock"]) == rec.sha256
+        required = {"stock" if key == KEY else "sales" for key in keys}
+        for source in required:
+            if not (available(manifest) if source == "stock" else SALES.available(manifest)):
+                return False
+            rec = manifest.record(source)
+            if GEN.sha256_file(paths[source]) != rec.sha256:
+                return False
+        return True
     except (OSError, ValueError, KeyError, TypeError):
         return False
 
@@ -148,7 +154,7 @@ def module(manifest, source_path, gate):
             counts = ", ".join(f"{VKM.COUNT_TR.get(k, k)}: {v}" for k, v in issue.counts.items())
             review["warnings"].append({"title": texts["title"], "issue": texts["explain"],
                 "evidence": counts or "Denetim sonucu; etkilenen kayıt sayısı bilinmiyor.",
-                "question": "Excel'de ilgili sütun ve satırları karşılaştırınca bu bulgu aynı mı?",
+                "question": question(issue),
                 "resolution": texts["action"], "code": issue.check, "severity": issue.severity})
         # Field errors may also include footer cells in diagnostics. Count actual displayed records separately.
         affected = [r for r in rows if any(str(r[k]) in SV.EXCEL_ERRORS for k in ("coverage",))]
@@ -160,8 +166,8 @@ def module(manifest, source_path, gate):
             "evidence": f"STOK Kontrol % hata kodu taşıyan kaynak kayıt: {len(affected)}. "
                         "Etkilenen satırlar tabloda hata koduyla gösterilir; aramada #DIV/0! gibi kodları kullanın. "
                         "Sayı yalnızca kayıt satırlarıdır; Veri Kontrol hücre sayımı toplam satırlarını da içerebilir.",
-            "question": "Bu kayıtların ERP miktarları doğru mu? Güncel sipariş kararı için hangi birim, "
-                        "talep dönemi ve güncel alt / üst seviye kullanılmalı?",
+            "question": "Bu kaynak satırlarında kayıtlı stok miktarı ERP Excel ile aynı mı? STOK Kontrol % "
+                        "hatası, formülün çıkış miktarı/böleninin sıfır olmasından mı geliyor? Eski min/maks güncel hedef değildir.",
             "resolution": "Kaynak miktarlarını kontrol edin. Yeni bir iş kuralı onaylanıp ayrıca uygulanmadan "
                           "bu alanlardan satın alma veya stok eritme önerisi üretilmez.",
             "code": "D-070", "severity": "yuksek"})
@@ -172,7 +178,7 @@ def module(manifest, source_path, gate):
         return unavailable  # no source path, exception text, or partial data on a failed inspection
 
 
-def warning_html(review):
+def warning_html(review, *, offline=False):
     """Compact expandable Turkish evidence, escaped at the Python boundary."""
     e = lambda x: html.escape(str(x if x is not None else "Bilinmiyor"), quote=True)
     counts = review["counts"]
@@ -193,5 +199,5 @@ def warning_html(review):
                 f'<p><b>Sorun / etki:</b> {e(w["issue"])}</p><p><b>Kanıt:</b> {e(w["evidence"])}</p>',
                 f'<p><b>ERP kontrol sorusu:</b> {e(w["question"])}</p>',
                 f'<p><b>Çözüm için:</b> {e(w["resolution"])}</p></details>']
-    out.append('<p>Diğer tanılar: Veri Kontrol sekmesi (ayrıntılar yönetici erişiminde).</p></section>')
+    out.append(('<p>Denetim soruları kaynak Excel ile kontrol içindir; tanımsız alanlara yeni değer atanmadı.</p>' if offline else '<p>Diğer tanılar: Veri Kontrol sekmesi (ayrıntılar yönetici erişiminde).</p>')+'</section>')
     return "".join(out)

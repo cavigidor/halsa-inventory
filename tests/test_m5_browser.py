@@ -147,6 +147,10 @@ def test_ai_disabled_dashboard_and_action_center(browser, tmp_path):
             page.click(f'.tab[data-t="{t}"]')
             if t == "collections":                                      # D-075: rows come from /api/finance/cari
                 page.wait_for_selector('#collections[data-finance="open"] table', timeout=15000)
+            if t == "fairs_review" and page.evaluate("Boolean(DATA.fairs_review.withheld)"):
+                assert page.is_visible(f"#{t}") and "Srmmerk" in page.inner_text(f"#{t}")
+                assert page.query_selector(f"#{t} table") is None  # optional source field is genuinely absent
+                continue
             assert page.is_visible(f"#{t}") and page.query_selector(f"#{t} table") is not None
         open_ai_tab(page)
         api = _get(srv["base"] + "/api/agent/actions")

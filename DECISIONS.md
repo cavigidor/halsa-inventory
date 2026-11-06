@@ -1503,3 +1503,27 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   33-metric inventory, missing inputs and local/report limitations are in `docs/accuracy/v1_metric_coverage.md` and
   `docs/halsa_v1_local_review.md`. Mac first; no deployment, cloud resource, merge or Classic change. Halsa supports
   analysis of manually supplied ERP exports; Dinamik CRM remains the operational system of record.
+
+### D-079 · 2026-11-06 · V1 provisional sales analyses and private offline general report (owner continuation)
+- After the approved PR #49 squash merge (`1120623`, same approved tree, merged-main CI passed), the owner directs
+  the next checkpoint toward a usable father-facing Stock/Sales report, with concrete source/assumption questions.
+- Reuse existing momentum/order-size/lapsed/margin producers and Customer 360 yearly/product aggregations plus
+  FUAR importer/history arithmetic. Preserve their thresholds, fixed years, rounding, D-003 identity and existing
+  KAPALI comparison filtering. Mark review outputs preliminary and preserve actual certification verdicts; no register
+  ceiling/definition/freshness promotion. Mask missing-input-dependent values, not independent available evidence;
+  never expose the old cost→zero profit or nested substituted detail as a valid result. Keep known portions separate.
+- Explicit sales review surfaces are generation/fingerprint-bound, like stock review. The common HTML's fixed review
+  marker allow-list extends only to these surfaces; current selected Sales/Stock bytes are checked on served reads.
+  Policy `m8-v1-sales-review`; existing certified metric APIs, AI/actions, three roles and finance-only Cari unchanged.
+- `python -m services.father_report`: one private offline HTML from explicitly selected, read-only Stock/Sales bytes,
+  reusing the builder; no database, backend, hosting, publication or CRM. Only source/analysis tables and scope;
+  pagination/search/filter/sort and expandable warnings. Exclude all Cari/owner-financial inputs regardless of optional
+  selection; a missing optional file does not block this general report. New output only, mode 600, atomic exclusive
+  creation, input hashes rechecked; no embedded password/hash. A recipient's snapshot has no live role enforcement.
+- Profitability = evidence about exported after-cost values under stated assumptions, not certified accounting profit.
+  Non-positive current-year net sum does not prove no orders; show observed document counts/date alongside win-back.
+  Duplicate rows remain separate. Descriptive fair amounts establish neither attendance/conversion nor ROI.
+- Replace generic VKM review questions with check/field-specific ERP questions. Do not reopen settled 120/320/date
+  meanings or demand a new CRM/approval workflow. D-070/D-071 action retirements and frozen Classic stay unchanged.
+- Actual acceptance and local procedure: `docs/halsa_v1_father_report.md`; real source rows/values/artifacts remain
+  private. Stop at this checkpoint for independent review; no merge of the new PR and no deployment.

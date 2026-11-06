@@ -4,6 +4,7 @@ import pandas as pd, numpy as np
 from services.stock_policy import RETIREMENT_REASON
 from services import cari_policy as CARI
 from services import stock_review as REVIEW
+from services import sales_review as SALES_REVIEW
 warnings.filterwarnings('ignore')
 
 STOCK_HEADER_ROW=3
@@ -345,6 +346,14 @@ def build(data_folder,out_path,today=None,ai_panel=True,sources=None,frames=None
     if modules['stock_review'].get('review'):
         modules['stock_review']['review_html']=REVIEW.warning_html(modules['stock_review']['review'])
     review_keys=[REVIEW.KEY] if modules['stock_review'].get('review') else []
+    sales_review=SALES_REVIEW.modules(manifest, ep, gate, raw=fr.get('sales'),
+        legacy={'winback':lap,'momentum':momentum,'margin':margin,'ordersize':ordersize})
+    for key,module in sales_review.items():
+        if key in ACC.MODULE_METRIC and _dec(ACC.MODULE_METRIC[key]).displayable:
+            continue  # certified/test-harness calculations keep their existing surface
+        modules[key]=module
+        if module.get('review'): review_keys.append(module['review']['metric'])
+    review_keys=sorted(set(review_keys))
     withheld_stats=[l for l,_ in stats if not _dec(ACC.STAT_METRIC.get(l,'unregistered:'+l)).displayable]
     stats=[(l,v) for l,v in stats if l not in withheld_stats]
     show_tiers=_dec('customers.winback').displayable
@@ -2909,7 +2918,8 @@ def _html(modules,stats,meta,later,ai_panel=True,c360_panel=True,sq_panel=True,o
     shown=html.escape(','.join(meta.get('displayed') or []),quote=True)
     reviewed=html.escape(','.join(meta.get('reviewed') or []),quote=True)
     laterlist=''.join(f'<li>{html.escape(x)}</li>' for x in later)
-    src=f"Stok: {meta['stock']} · Satış: {meta['sales']}"+(f" · Alacaklar: {meta['aging']}" if meta['has_aging'] else '')
+    laterblock=('<h2 class="sec" style="margin-top:34px">Sonrası İçin</h2><ul class="later">'+laterlist+'</ul>') if later else ''
+    src=html.escape(f"Stok: {meta['stock']} · Satış: {meta['sales']}"+(f" · Alacaklar: {meta['aging']}" if meta['has_aging'] else ''))
     ai_btn,ai_block=_ai_panel(meta) if ai_panel else ('','')
     wp=meta.get('withheld_panels') or {}
     c3_btn,c3_block=(_withheld_panel('c360','Müşteri 360','C360',wp['c360'],meta) if 'c360' in wp else _c360_panel(meta)) if c360_panel else ('','')
@@ -2982,6 +2992,9 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 .pn{{font-size:13px}}.pv{{font-size:12px;color:var(--muted);white-space:nowrap;font-family:"SF Mono",Menlo,monospace}}
 #stock_review .tbl{{overflow-x:auto}}
 #stock_review table{{min-width:1120px}}
+.pager{{margin:0 0 12px;display:flex;gap:8px}}
+.pager button{{font:inherit;padding:6px 12px;cursor:pointer}}
+.panel:has(.review-box) .tbl{{overflow-x:auto}}
 .aw-box.review-box{{background:#fff9ed;border-color:#edd7a9}}
 .review-box details{{margin:8px 0;border-top:1px solid var(--line);padding-top:7px}}
 .review-box summary{{cursor:pointer;font-weight:600}}
@@ -2999,12 +3012,10 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 <div class="tabs">{tabbtns}{up_btn}{vk_btn}{sq_btn}{c3_btn}{op_btn}{fm_btn}{cr_btn}{ow_btn}{ai_btn}</div>
 <div id="overview" class="panel on">
 <h2 class="sec">Aktif Analizler</h2>
-<p class="note">Stok Kaynak İncelemesi, mevcut kayıtları doğrulanmamış inceleme verisi olarak gösterir; yanındaki uyarıları ve kaynak satırlarını ERP Excel raporuyla karşılaştırın. Diğer analizlerin doğrulama durumu kendi sekmesinde belirtilir. Rakamlar Python ile hesaplanır; yapay zekâ tarafından üretilmez.</p>
+<p class="note">{html.escape(meta.get('intro') or 'İnceleme tabloları, mevcut kaynaklardan hesaplanan ön sonuçlardır. Uyarıları ve kaynak satırlarını ERP Excel raporuyla karşılaştırın. Eksik maliyet, bilinmeyen veri ve tanımsız hesaplar sıfır sayılmaz; doğrulama durumu her bölümde korunur.')}</p>
 <div class="stats">{statcards}</div>{statnote}
 {tiers}
-<h2 class="sec" style="margin-top:34px">Sonrası İçin</h2>
-<p class="note">İleride eklenebilecek analizler. Her biri ancak kaynağı sağlanıp doğrulandıktan sonra gösterilir.</p>
-<ul class="later">{laterlist}</ul>
+{laterblock}
 </div>
 <div id="panels"></div>{up_block}{vk_block}{sq_block}{c3_block}{op_block}{fm_block}{cr_block}{ow_block}{ai_block}
 <script>
@@ -3048,10 +3059,11 @@ function makePanel(id){{
     filterHTML=`<select class="repsel"><option value="">Tüm temsilciler</option>${{vals.map(v=>`<option>${{esc(v)}}</option>`).join('')}}</select>`;
   }}
   p.innerHTML=`<div class="toolbar"><input class="search" placeholder="${{m.title.toLowerCase()}} ara…">${{filterHTML}}
-    <span class="count"></span></div>${{m.review_html||''}}<p class="note">${{esc(m.note)}}</p><div class="fin-gate" hidden></div><div class="tbl"></div>`;
-  state[id]={{sort:null,dir:1,q:'',fval:''}};
-  p.querySelector('.search').addEventListener('input',e=>{{state[id].q=e.target.value.toLowerCase();draw(id);}});
-  const sel=p.querySelector('.repsel'); if(sel) sel.addEventListener('change',e=>{{state[id].fval=e.target.value;draw(id);}});
+    <span class="count"></span></div>${{m.page_size?'<div class="pager"><button type="button" class="prev-page">Önceki</button> <button type="button" class="next-page">Sonraki</button></div>':''}}${{m.review_html||''}}<p class="note">${{esc(m.note)}}</p><div class="fin-gate" hidden></div><div class="tbl"></div>`;
+  state[id]={{sort:null,dir:1,q:'',fval:'',page:0}};
+  p.querySelector('.search').addEventListener('input',e=>{{state[id].q=e.target.value.toLowerCase();state[id].page=0;draw(id);}});
+  const sel=p.querySelector('.repsel'); if(sel) sel.addEventListener('change',e=>{{state[id].fval=e.target.value;state[id].page=0;draw(id);}});
+  if(m.page_size){{p.querySelector('.prev-page').addEventListener('click',()=>{{state[id].page=Math.max(0,state[id].page-1);draw(id);}}); p.querySelector('.next-page').addEventListener('click',()=>{{state[id].page++;draw(id);}});}}
   document.getElementById('panels').appendChild(p);
   if(m.finance){{p.dataset.finance='locked'; return;}}   // D-075: rows are loaded from the server when the tab opens
   draw(id);
@@ -3059,10 +3071,12 @@ function makePanel(id){{
 function draw(id){{
   const m=DATA[id], s=state[id]; let rows=m.rows.slice();
   if(s.fval) rows=rows.filter(r=>String(r[m.filter]??'')===s.fval);
-  if(s.q) rows=rows.filter(r=>m.cols.some(c=>String(r[c.k]??'').toLowerCase().includes(s.q)));
+  if(s.q) rows=rows.filter(r=>m.cols.some(c=>String(r[c.k]??'').toLowerCase().includes(s.q)||(c.sub&&String(r[c.sub]??'').toLowerCase().includes(s.q))));
   if(s.sort){{const c=s.sort; rows.sort((a,b)=>{{let x=a[c],y=b[c];
     if(typeof x==='number'||typeof y==='number'){{x=x??-Infinity;y=y??-Infinity;return (x-y)*s.dir;}}
     return String(x??'').localeCompare(String(y??''),'tr')*s.dir;}});}}
+  const totalRows=rows.length;
+  if(m.page_size){{s.page=Math.min(s.page,Math.max(0,Math.ceil(totalRows/m.page_size)-1)); rows=rows.slice(s.page*m.page_size,(s.page+1)*m.page_size);}}
   const isnum=c=>c.n!=null||c.money;
   let h='<table><thead><tr>'+m.cols.map(c=>`<th class="${{isnum(c)?'r':''}}" data-k="${{c.k}}">${{c.l}} <span class=ar>${{s.sort===c.k?(s.dir>0?'▲':'▼'):'↕'}}</span></th>`).join('')+'</tr></thead><tbody>';
   if(!rows.length) h+=`<tr><td class="empty" colspan="${{m.cols.length}}">Gösterilecek kayıt yok.</td></tr>`;
@@ -3071,6 +3085,7 @@ function draw(id){{
     h+=`<tr class="${{cls}}" data-i="${{i}}">`+m.cols.map(c=>{{
       let v=r[c.k];
       if(m.review&&v==null) return '<td>—</td>';
+      if(c.raw) return `<td class="r mono">${{v==null?'—':esc(v)}}</td>`;
       if(c.k==='tier') return `<td><span class="tier t${{v}}">K${{v}}</span></td>`;
       if(c.money&&c.exact) return `<td class="money ${{(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}}">${{v==null?'—':fmtMoneyExact(v)}}</td>`;
       if(c.money) return `<td class="money ${{c.k==='overdue'?'od':(c.k==='inv'?'val':'')}} ${{(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}}">${{v?fmtMoney(v):(v===0?'₺0':'—')}}</td>`;
@@ -3089,11 +3104,12 @@ function draw(id){{
   }});
   h+='</tbody></table>';
   const p=document.getElementById(id); p.querySelector('.tbl').innerHTML=h;
-  p.querySelector('.count').textContent=rows.length+' satır';
+  p.querySelector('.count').textContent=totalRows+' satır'+(m.page_size?' · sayfa '+(s.page+1)+' / '+Math.max(1,Math.ceil(totalRows/m.page_size)):'');
+  if(m.page_size){{p.querySelector('.prev-page').disabled=s.page===0; p.querySelector('.next-page').disabled=(s.page+1)*m.page_size>=totalRows;}}
   p.querySelectorAll('th').forEach(th=>th.addEventListener('click',()=>{{
     const k=th.dataset.k, col=DATA[id].cols.find(c=>c.k===k);
     if(state[id].sort===k) state[id].dir*=-1; else {{state[id].sort=k;state[id].dir=(col.money||col.n!=null)?-1:1;}}
-    draw(id);}}));
+    state[id].page=0;draw(id);}}));
   if(m.expand) p.querySelectorAll('tr.exp').forEach(tr=>tr.addEventListener('click',()=>{{
     const d=tr.nextElementSibling; tr.classList.toggle('open'); d.classList.toggle('open');}}));
 }}

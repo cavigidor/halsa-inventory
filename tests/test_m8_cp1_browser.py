@@ -250,8 +250,21 @@ def test_cari_list_needs_the_financial_password_in_the_browser(browser, tmp_path
         with urllib.request.urlopen(req, timeout=10) as r:
             rows = json.load(r)["rows"]
         assert rows
-        for x in rows:                                                       # none of them reached the viewer
-            assert x["code"] not in viewer_html
+        # Sales-derived customer identities can overlap Cari account codes; the protected data is the balance
+        # record, not the customer's public commercial identity. Prove the identity's independent sales provenance.
+        import dashboard_builder as DB
+        from services import sales_projection as SP
+        sales_path=DB.select_sources(srv["data"])["sales"]
+        sales_codes=set(SP.prepare_sales(DB.read_sales_raw(sales_path))["_cust"])
+        data=page.evaluate("DATA")
+        for x in rows:
+            if x["code"] not in sales_codes:
+                assert x["code"] not in viewer_html
+        for key in ("momentum","ordersize","winback","margin","purchases_yearly","purchases_products","sales_source_issues"):
+            for row in data.get(key,{}).get("rows",[]):
+                assert row.get("code") is None or row["code"] in sales_codes
+                assert not ({"balance","oldest","direction","direction_label","aging"}&set(row))
+        assert data["collections"]["rows"]==[]
         page.click("#collections .fin-gate a")                               # → Yönetim, financial password
         page.wait_for_selector("#own.on .ow-login:not([hidden])")
         page.fill("#own .ow-pw", BA.TEST_FINANCE_PASSWORD)

@@ -291,3 +291,11 @@ viewer) restarted under the D-075 code:
 Customer 360 profiles: 409 (withheld by the accuracy gate) for every role today, so no Cari field is reachable there;
 the D-075 redaction applies once the profile is promoted. Originals = copies (Stok `63602ae3e8bf`, Satış
 `be1d895e426b`, Cari `672fac2f5bf6`, unchanged).
+
+### D-079 preliminary sales disclosure
+The authenticated common dashboard may display source-derived customer order amounts, annual/product purchasing
+history, existing-rule growth/order-size/win-back comparisons, source after-cost evidence/ratios only with complete
+inputs, missing-input/duplicate counts and Excel row evidence, cached representative/sector with DQ-5 caveats, and
+descriptive FUAR orders. D-003 order-customer identity is retained. These are commercial sales observations, never
+Cari account balances/direction/invoice-age data. The static general report reads no Cari or owner-financial source
+and has no role enforcement; it is for private authorized sharing. Application finance/owner permissions are unchanged.

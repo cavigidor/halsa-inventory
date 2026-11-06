@@ -4,12 +4,16 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-6 are merged; **Milestone 7 is COMPLETE** (PR #24, squash merge `de7eb43`; D-047). M8 production-readiness planning is merged (PR #26). **Owner directive 2026-10-18: NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION.** M8-ACCURACY is merged (PR #27, `a28b2b9`); M8-ACCURACY-2 technical foundation is merged (PR #28, `5baa92a`), and M8-ACCURACY-2B corrective foundation is merged (PR #29, `4ad8d8a`). The first owner-local reconciliation completed with core FAIL and Kredi NOT RUN; no business metric may be promoted without approved provenance, business definitions and per-metric reconciliation. All subsequent checkpoints use Claude Code. **Owner requirement 2026-10-22 (D-060, revised by D-061):** browser web app; three access levels — public viewer (no password), financial viewer (shared financial password, read-only Yönetim finances), owner (separate password, all changes); implemented and merged as M8-CP1, PR #30 (`a03efbf`), local only, not deployed.
 
 ## Current
-- [ ] **Halsa V1 (D-078) — first reviewable stock-source checkpoint, draft PR #49; STOP for independent review.**
-  Baseline main `fbca73d`; all 33 metrics inventoried in `docs/accuracy/v1_metric_coverage.md`. Searchable preliminary
-  stock records/counts and evidence-backed Turkish warnings implemented; no certification, retired-action or role
-  changes. November stock independent read-only comparison: 26,528 fields / 0 mismatches; private originals unchanged.
-  Remaining V1 work: preliminary sales/other calculable surfaces, actual November Cari aging and optional reports,
-  curated read-only father report and usability acceptance. Full tests/CI: see STATUS. No merge/deploy/Classic changes.
+- [ ] **Halsa V1 (D-079) — provisional Stock/Sales analyses + curated private father report; STOP for independent review.**
+  New branch from verified PR #49 merged main `1120623`. Existing growth/order-size/win-back/margin calculations,
+  guarded yearly/product history, FUAR history and exact source evidence are visible in preliminary review surfaces.
+  `python -m services.father_report` creates one offline file, no Cari/owner-financial data, CRM or backend dependency.
+  Actual read-only November acceptance: 550,229 independent field/key/arithmetic checks, 0 discrepancies; 2,775 missing
+  cost records / 547 affected profitability rows explicitly unknown. Full results: STATUS and father-report runbook.
+  Remaining: independent PR review, private file handoff and father's actual-use/ERP comparison acceptance. Optional
+  missing current Cari/other sources do not block opening the general report. No merge of this implementation/deploy.
+- [x] **D-078 stock-source code checkpoint:** PR #49 approved head `f774837`, squash-merged as `1120623`; exact approved
+  tree and merged-main CI verified (2,107 passed / 8 skipped / 1 xfailed). Frozen Classic unchanged; not deployed.
 - [x] **M8-CP2 (D-076) engineering: PR #46 merged as baseline `fbca73d`**; hosting activation deferred by the owner's
   Mac-first V1 directive. Prior correction checkpoint and test evidence retained in STATUS history. No deployment.
 - [x] **D-075 — account-level Cari balances need the financial password: MERGED — PR #45 squash-merged as `4e02872`
