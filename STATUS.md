@@ -1,6 +1,6 @@
 # STATUS.md — current checkpoint
 
-**2026-11-06 — Halsa V1 / D-078 first stock-source implementation checkpoint (Codex); draft review, NOT merged or deployed.**
+**2026-11-06 — Halsa V1 / D-078 first stock-source implementation checkpoint (Codex); draft PR #49, NOT merged or deployed.**
 - Isolated branch from requested baseline main `fbca73d312da4a3217e8751546e039db883b4783`. Owner's existing
   StockAgent checkout, original Excel files, private `.env` and frozen Classic implementation remain unchanged.
 - New Stok Kaynak İncelemesi: preliminary source records/counts with Excel row references, exact cached values,
@@ -22,7 +22,8 @@
   November Cari aging was not found in inspected local directories; the older export/master list was not substituted.
 - Focused tests: 117 passed (accuracy, D-075 role access, stock policy); expanded source-generation/restart/rollback,
   new source-review unit/browser coverage: 138 passed. Frozen Classic + deterministic rebuild check: 21 passed.
-  Final full-suite / exact-head CI results will be recorded before handoff.
+  Final full local suite (AI disabled, browser/JavaScript required): **2108 passed, 7 skipped, 1 xfailed** in
+  **473.80 s**. GitHub CI results are tracked in draft PR #49 checks and the engineering handoff.
 - Initial broad run exposed stale blank-output/rollback expectations and a render-timestamp digest instability;
   corrected with source-checked rollback assertions, isolated in-process fixture and deterministic review HTML.
   Follow-up regressions 13 passed. Full V1 stays OPEN: sales/other review surfaces, missing current inputs,
