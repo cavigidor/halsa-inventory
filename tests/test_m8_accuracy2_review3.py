@@ -229,6 +229,8 @@ def test_refresh_publishes_new_bytes_and_rollback_keeps_the_previous(world, empt
         assert r.headers["X-Halsa-Generation"] == world.store.current().generation_id
     finally:
         close(c)
+    source = Path(GEN.select_core(world.folder)[0]["stock"])
+    original = source.read_bytes()
     write_stock(world.folder, stock_rows([NEW_ROW, ["SP-778", "Sentetik Ek", 1, 0.1, 1.0, 3.0, 5, ""]]))
     APP.app.state.generations = world.store
     with monkeypatch.context() as mp:
@@ -239,7 +241,11 @@ def test_refresh_publishes_new_bytes_and_rollback_keeps_the_previous(world, empt
     c = live_client(world)
     try:
         r = c.get("/")
-        assert r.status_code == 200 and r.content == b_body              # rolled back to B, still served
+        assert r.status_code == 503 and r.headers["X-Halsa-Dashboard"] == "review_source_unavailable"
+        assert Path(world.dash).read_bytes() == b_body  # previous publication retained; source check still required
+        source.write_bytes(original)
+        r = c.get("/")
+        assert r.status_code == 200 and r.content == b_body
     finally:
         close(c)
 

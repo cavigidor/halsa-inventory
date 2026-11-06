@@ -35,7 +35,7 @@ R5A_POLICY = "m8-r5a-stock-retirement"             # D-070, replaced by D-071
 R5B1_POLICY = "m8-r5b1-cari-invoice-age"           # D-071, replaced by D-072
 D072_POLICY = "m8-cari-d072"                       # D-072, replaced by D-073
 D073_POLICY = "m8-cari-d073"                       # the immediate predecessor (D-073): its pages EMBEDDED the Cari rows
-PREVIOUS_POLICIES = (OLD_POLICY, R5A_POLICY, R5B1_POLICY, D072_POLICY, D073_POLICY)
+PREVIOUS_POLICIES = (OLD_POLICY, R5A_POLICY, R5B1_POLICY, D072_POLICY, D073_POLICY, "m8-cari-d075")
 # What an R5A-era page said about the Cari export (the D-071 build no longer produces it). Emulated in the old-policy
 # build so the refused page provably carries an old overdue claim; the refresh digests the page AFTER it is written,
 # so the old page and its old manifest stay internally consistent.
@@ -61,7 +61,7 @@ def _publish(w, monkeypatch):
 # =============================================================================================
 # A. product-count authorization
 # =============================================================================================
-def test_unverified_product_count_is_never_exposed(world, monkeypatch):
+def test_preliminary_stock_review_does_not_certify_or_unredact_the_product_count(world, monkeypatch):
     assert ACC.REGISTER["stock.product_counts"].certified != ACC.State.VERIFIED       # the production register
     rep, html = _publish(world, monkeypatch)
     st, _ = api_state(world, "stock.product_counts")
@@ -117,7 +117,7 @@ def _publish_as_previous_policy(w, monkeypatch, old=OLD_POLICY):
         if old == R5A_POLICY:
             mp.setattr(DB, "_html", lambda *a, **k: real_html(*a, **k).replace("</body>", LEGACY_CARI + "</body>"))
         _, html = _publish(w, monkeypatch)
-    assert ACC.POLICY_VERSION != old and ACC.POLICY_VERSION == "m8-cari-d075"
+    assert ACC.POLICY_VERSION != old and ACC.POLICY_VERSION == "m8-v1-stock-review"
     assert f'<meta name="stockagent-accuracy" content="{old}">' in html
     assert GEN.read_manifest(GEN.manifest_path(w.dash)).policy_version == old
     assert (LEGACY_CARI in html) == (old == R5A_POLICY)

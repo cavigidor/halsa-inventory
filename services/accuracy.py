@@ -53,7 +53,7 @@ WITHHELD_MESSAGE = "Bu analiz henüz doğrulanmadığı için gösterilmiyor."
 WITHHELD_CODE = "accuracy_withheld"
 WITHHELD_HTTP_STATUS = 409          # the resource exists; its verification state conflicts with displaying it
 MAX_REASONS_SHOWN = 4               # keep the father-facing notice short
-POLICY_VERSION = "m8-cari-d075"  # old generated pages/manifests must be refreshed (D-070 … D-073, D-075: pages of
+POLICY_VERSION = "m8-v1-stock-review"  # old generated pages/manifests must be refreshed (D-070 … D-073, D-075: pages of
 #   m8-cari-d073 embedded the account-level Cari rows for every viewer)
 DEFAULT_OPERATIONAL_MAX_AGE_DAYS = 45      # PROVISIONAL engineering default, not an owner-approved policy
 TEMPORAL_KINDS = ("operational", "historical")

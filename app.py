@@ -515,6 +515,7 @@ _UNAVAILABLE_TEXT = {
     "displayed_marker_missing": "Bu pano doğrulama kuralları uygulanmadan oluşturulmuş. Verileri yenileyin.",
     "not_authorized": "Panodaki bazı sonuçlar artık doğrulanmış sayılmıyor (ör. kaynak tarihi eskidi). Verileri "
                       "yenileyin.",
+    "review_source_unavailable": "İnceleme kaynağı değişti, eksik veya doğrulanamadı. Dosya Yükleme bölümünde verileri yeniden yayımlayın.",
     "publication_pending": "Pano yeniden doğrulandı ve yeniden yayımlanıyor; birkaç saniye sonra sayfayı yenileyin.",
 }
 
@@ -556,6 +557,9 @@ def _dashboard_authorized(body: bytes, m) -> tuple[bool, str, str | None]:
         return False, "authorization_error", None
     if refused:
         return False, "not_authorized", None
+    from services import stock_review as REVIEW
+    if not REVIEW.authorize(body, m, DATA_FOLDER):
+        return False, "review_source_unavailable", None
     return True, "ok", m.generation_id
 
 

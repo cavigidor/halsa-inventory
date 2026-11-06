@@ -1481,3 +1481,25 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **Known consequences (owner's choice, recorded):** the classic report carries the original interpretations that
   D-070 / D-071 withdrew in the new Halsa and is not certified; as a plain file it shows Cari balances to whoever
   receives it (D-075 applies only inside the new site).
+
+### D-078 · 2026-11-06 · V1 review-first presentation (owner directive; first stock checkpoint)
+- Owner requirement: show calculable preliminary results with specific Turkish issue/evidence/control-question boxes,
+  without changing certification, source values, business definitions or access roles. This supersedes D-049's
+  visibility-only blanket withholding for explicitly implemented preliminary review surfaces; it does not certify them.
+- First bounded implementation: `services/stock_review.py` extends the registered `stock.product_counts` surface with
+  raw stock records/counts in **Stok Kaynak İncelemesi**, labelled “İnceleme için / doğrulanmadı”. Recognized totals
+  are excluded from the product table; unknown identities, duplicate rows, signed quantities, cached Excel errors,
+  missing caches and literal blank-looking strings remain traceable to Excel row numbers. Existing VKM/accuracy
+  diagnostics and source-generation metadata provide the warning evidence. No source workbook is edited.
+- Certified gate decisions remain unchanged. The exact HTML publication carries a separate, fixed stock-only review
+  marker. `GET /` checks the accepted generation, page digest, current policy and selected stock SHA-256 on every
+  review-page read; absent/changed/unreadable source or unrecognized layout fails closed. No runtime bypass setting,
+  unauthenticated data route or general relaxation of metric APIs is added. Policy → `m8-v1-stock-review`.
+- D-070 and D-071 action recommendations remain retired. No action queue, AI evidence/draft, scenario or CRM workflow
+  consumes provisional source data. D-074/D-075 three roles, finance-only Cari and owner-only administration remain.
+  Normal authenticated stock disclosure now includes source quantity, old coverage/min/max, inventory value, recorded
+  DURUM, Excel row, issue counts and provenance; no Cari account/value is embedded in the common page.
+- This checkpoint stops for independent review before extending the other preliminary analysis surfaces. The full
+  33-metric inventory, missing inputs and local/report limitations are in `docs/accuracy/v1_metric_coverage.md` and
+  `docs/halsa_v1_local_review.md`. Mac first; no deployment, cloud resource, merge or Classic change. Halsa supports
+  analysis of manually supplied ERP exports; Dinamik CRM remains the operational system of record.

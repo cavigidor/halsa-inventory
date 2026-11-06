@@ -34,7 +34,12 @@ GitHub (`cavigidor/halsa-inventory`) is the source of truth. Do not rely on chat
 - **Klasik Rapor (D-077):** `classic/original_builder.py` is a frozen byte copy of commit 71f5f2f — never edit it, and
   never apply a new Halsa rule to `classic/`. `classic/` imports nothing from the new Halsa and nothing outside
   `classic/` imports it; the golden test (`tests/test_classic_dashboard.py`) must keep passing unchanged.
-- **No verified evidence = no business conclusion (D-049).** Only outputs certified VERIFIED in `services/accuracy.py`
+- **V1 review-first presentation (owner directive 2026-11-06, D-078):** explicitly implemented preliminary source
+  review may display calculable factual evidence with concrete Turkish warnings, without certification or action
+  propagation. First surface: `services/stock_review.py`, stock-only, generation/fingerprint-bound on every served
+  page. Extend other metrics only in later reviewed checkpoints; no general gate switch. D-070 / D-071 remain retired.
+- **No verified evidence = no certified business conclusion (D-049, visibility revised by D-078).** Apart from the
+  explicit preliminary stock-source review above, only outputs certified VERIFIED in `services/accuracy.py`
   may be displayed (D-073: only `receivables.collections`, on fresh — 60 days — generation-bound evidence). Never add a flag, env var or parameter that bypasses the gate; never classify a new route as
   anything but a metric unless it carries no business conclusion; every new route must be listed in `ACC.ROUTES`.
 - The provider gets only a small evidence packet (`services/evidence.py`). It never gets

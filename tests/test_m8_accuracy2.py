@@ -141,6 +141,8 @@ def world(tmp_path, monkeypatch):
     ST.init_db()
     folder = clean_folder(tmp_path)
     w = World(folder, str(tmp_path / "dashboard.html"), tmp_path)
+    monkeypatch.setattr(APP, "DATA_FOLDER", folder)
+    monkeypatch.setattr(APP, "WARMUP_CONTEXT", False)  # this in-process world owns its repo/store; no second writer
     yield w
     APP.app.dependency_overrides.clear()
     APP.app.state.generations = None
