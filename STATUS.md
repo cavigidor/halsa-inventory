@@ -1,5 +1,24 @@
 # STATUS.md — current checkpoint
 
+**2026-11-07 — D-080 father's B2B tracking: Klasik B2B variant + V1 `--b2b`; draft PR, NOT merged / deployed / sent.**
+- Branch `claude/b2b-tracking` from verified baseline `9084b11`. New `halsa_b2b.py` (one shared calculation),
+  `classic/klasik_b2b.py` (separate generator; frozen builder + `generate.py` untouched), `services/b2b_review.py` and
+  opt-in `father_report --b2b`. B2B sale = sales physical column AG (`Satici` in November) = `B2B`; registration =
+  `b2b_kullanici_rapor.xlsx` physical column B, exact codes only; ambiguous (whitespace / invoice-account) never counted;
+  missing list = unknown (A/B not produced). B2B Takip tab after Kâr Marjı (A/B/C views, search, representative filter,
+  sort, detail); "B2B" column after Temsilci in Büyüme / Küçülme; five-column yearly detail; V1 yearly B2B columns.
+  "Son zamanlarda" = provisional 365 days from the latest transaction. Runbook / definitions: `docs/b2b_tracking.md`.
+- **`b2b_kullanici_rapor.xlsx` not found** in `~/Desktop/ME/Projects` or `~/Downloads`; the old Dec 2025 login report was
+  not substituted. November reports generated in the "list missing" state: C = 415 in both (860 B2B customers, 423 with
+  B2B in the window, 22 KAPALI excluded); 23,329 B2B lines, 5,683 B2B documents, 0 mixed, 1,864 zero-amount B2B lines.
+- Real read-only acceptance (Mac VM, Python 3.12.15 / pandas 3.1.0): independent openpyxl 101,731 checks, 0
+  discrepancies; original Klasik vs Klasik B2B 7,699 checks, 0 discrepancies; offline DOM (jsdom) 28 + 29 checks, 0 JS
+  errors. Chromium unavailable in the Mac VM; Chromium tests ran on synthetic reports only. Originals unchanged.
+  Outputs (private, gitignored): `reports/private/b2b-tracking/Halsa_Kasim_2026_Klasik_B2B.html` `00c5d9bc…`,
+  `Halsa_Kasim_2026_Genel_B2B.html` `f024daf6…`.
+- Tests: new `tests/test_b2b_tracking.py` (19, incl. Chromium); Klasik golden tests unchanged and passing. Full suite:
+  see next commit (run in progress). STOP for ChatGPT review; regenerate once the registration file arrives.
+
 **2026-11-06 — D-079 provisional Stock/Sales dashboard + private offline father report; new draft review checkpoint, NOT merged/deployed.**
 - Phase A completed exactly as authorized: PR #49 marked ready and squash-merged as `112062384d22d32a542088aedd34da80a6019a84`.
   Approved head `f774837`, tree `0ea9d34826ef3415c17a438b6a05bc6dafced6ea`, expected parent `fbca73d` verified before/after merge;

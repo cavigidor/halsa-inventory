@@ -218,3 +218,8 @@ private, read-only offline file. Explicit frozen Stock/Sales only; no Cari or ow
 server, publication or CRM. Existing threshold/year rules remain, while known-invalid dependent values stay unknown
 and concrete Turkish source questions explain preliminary observations. Live metric certification and access roles
 are unchanged. Procedure and acceptance: `docs/halsa_v1_father_report.md`.
+
+## B2B tracking (D-080)
+`halsa_b2b.py` is the one B2B calculation (sales column AG = `B2B`; `b2b_kullanici_rapor.xlsx` column B, exact codes)
+used by the separate Klasik variant `classic/klasik_b2b.py` (frozen builder unmodified) and by `father_report --b2b`.
+Offline private reports only; no app route, metric, action or AI input. Details: `docs/b2b_tracking.md`.

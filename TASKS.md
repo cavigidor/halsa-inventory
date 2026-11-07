@@ -4,6 +4,10 @@ Rules: one *Current* task at a time. Each task must be executable in one bounded
 Milestone 5 is complete. All available M6 sources are done (M6-0 to M6-3, Kredi, M6-5 Trodat, M6-6 Gider/Gelir, M6-6 Bütçe). M6-4 is BLOCKED (missing export). M7-1 to M7-6 are merged; **Milestone 7 is COMPLETE** (PR #24, squash merge `de7eb43`; D-047). M8 production-readiness planning is merged (PR #26). **Owner directive 2026-10-18: NO VERIFIED EVIDENCE = NO BUSINESS CONCLUSION.** M8-ACCURACY is merged (PR #27, `a28b2b9`); M8-ACCURACY-2 technical foundation is merged (PR #28, `5baa92a`), and M8-ACCURACY-2B corrective foundation is merged (PR #29, `4ad8d8a`). The first owner-local reconciliation completed with core FAIL and Kredi NOT RUN; no business metric may be promoted without approved provenance, business definitions and per-metric reconciliation. All subsequent checkpoints use Claude Code. **Owner requirement 2026-10-22 (D-060, revised by D-061):** browser web app; three access levels — public viewer (no password), financial viewer (shared financial password, read-only Yönetim finances), owner (separate password, all changes); implemented and merged as M8-CP1, PR #30 (`a03efbf`), local only, not deployed.
 
 ## Current
+- [ ] **D-080 — father's B2B tracking (Klasik B2B variant + V1 `--b2b`): draft PR, STOP for independent review.**
+  Shared `halsa_b2b.py`; November reports generated without the registration list (missing on the Mac): A/B withheld
+  with notice, C = 415. Remaining: father supplies `b2b_kullanici_rapor.xlsx` and answers `docs/b2b_tracking.md`
+  questions → regenerate; review; no merge / deploy / sending of reports.
 - [ ] **Halsa V1 (D-079) — provisional Stock/Sales analyses + curated private father report; STOP for independent review.**
   New branch from verified PR #49 merged main `1120623`. Existing growth/order-size/win-back/margin calculations,
   guarded yearly/product history, FUAR history and exact source evidence are visible in preliminary review surfaces.

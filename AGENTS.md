@@ -34,6 +34,9 @@ GitHub (`cavigidor/halsa-inventory`) is the source of truth. Do not rely on chat
 - **Klasik Rapor (D-077):** `classic/original_builder.py` is a frozen byte copy of commit 71f5f2f — never edit it, and
   never apply a new Halsa rule to `classic/`. `classic/` imports nothing from the new Halsa and nothing outside
   `classic/` imports it; the golden test (`tests/test_classic_dashboard.py`) must keep passing unchanged.
+  **D-080 exception (variant only):** `classic/klasik_b2b.py` runs the unmodified frozen builder and may load only
+  `halsa_b2b.py` (stdlib + pandas + openpyxl; imports neither application) for the father's B2B Takip report; the
+  original Klasik workflow and output stay unchanged. `services/b2b_review.py` applies the same module to the V1 report.
 - **V1 review-first presentation (owner directive 2026-11-06, D-078):** explicitly implemented preliminary source
   review may display calculable factual evidence with concrete Turkish warnings, without certification or action
   propagation. First surface: `services/stock_review.py`, stock-only, generation/fingerprint-bound on every served

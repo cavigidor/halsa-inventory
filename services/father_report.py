@@ -15,7 +15,9 @@ from services import accuracy as ACC, generation as GEN, paths as PATHS
 from services import sales_review as SALES, stock_review as STOCK
 
 
-def generate(data_folder, output, *, today=None):
+def generate(data_folder, output, *, today=None, b2b=False, b2b_registration=None, b2b_review_days=365):
+    """b2b=True adds the father's B2B tracking (D-080; services/b2b_review.py). Without it the output is unchanged.
+    b2b_registration: explicit b2b_kullanici_rapor.xlsx path; None = the list is missing (never 'not registered')."""
     import dashboard_builder as DB
     today=today or dt.date.today()
     data_folder=str(Path(data_folder).resolve())
@@ -38,6 +40,11 @@ def generate(data_folder, output, *, today=None):
         declarations[key]=GEN._declaration(key,entry)  # existing date/provenance validation, no new inference
 
     PATHS.check({'DATA_FOLDER':data_folder,'DASHBOARD_PATH':str(target)})
+    reg_source=None
+    if b2b and b2b_registration is not None:
+        if not Path(b2b_registration).is_file() or Path(b2b_registration).suffix.lower()!='.xlsx':
+            raise ValueError('B2B kayıt dosyası bulunamadı veya .xlsx değil.')
+        reg_source=GEN.FrozenSource.read('b2b_registration',str(b2b_registration))
     frozen=GEN.freeze(paths)
     frames=GEN.frames_from_frozen(frozen)
     manifest=GEN.build_manifest(frozen,frames,{k:declarations.get(k,{}) for k in paths},origin,today=today)
@@ -62,10 +69,28 @@ def generate(data_folder, output, *, today=None):
           'show_tiers':False,'withheld_stats':[],'withheld_panels':{},'accuracy_policy':ACC.POLICY_VERSION,
           'generation':manifest.core_id,'asof':'','displayed':[],'reviewed':keys,
           'intro':'Bu özel rapor, seçilen Stok ve Satış Excel dosyalarından hesaplanan ön inceleme sonuçlarını içerir. Dönem, belge, müşteri kimliği ve eksik maliyet uyarılarını kaynak raporla kontrol edin. Bilinmeyen değerler — olarak kalır. Cari hesap bakiyeleri genel rapora dahil değildir.'}
+    b2b_counts=None
+    if b2b:
+        import halsa_b2b as HB
+        from services import b2b_review as B2B
+        registration=HB.read_registration(reg_source.data if reg_source else None,
+                                          reg_source.file if reg_source else HB.REGISTRATION_FILE)
+        modules,b2b_result=B2B.apply(modules,frames['sales'],HB.sheet_header(frozen['sales'].stream()),registration,
+                                     source=frozen['sales'].file,sha256=frozen['sales'].sha256,
+                                     generation=manifest.core_id,review_days=b2b_review_days)
+        b2b_counts=b2b_result['counts']
+        modules['report_scope']['rows'].append({'section':'B2B Takip','state':'Ön inceleme' if registration['status']=='ok' else 'Kayıt listesi yok',
+            'need':'B2B satışı = satış dosyası AG sütunu; kayıt = b2b_kullanici_rapor.xlsx B sütunu. Belirsiz eşleşmeler kayıtlı sayılmaz; kayıt listesi yoksa A/B listeleri üretilmez. "Son zamanlarda" süresi geçicidir.'})
+        modules['report_scope']=modules.pop('report_scope')
+        meta['intro']+=' B2B Takip bölümü, satış dosyasının AG sütunu ve B2B kayıt listesinin B sütunuyla hazırlanmış ön inceleme arama listeleridir.'
     body=DB._html(modules,[],meta,[],ai_panel=False,c360_panel=False,sq_panel=False,opp_panel=False,
                   fair_panel=False,crm_panel=False,own_panel=False,vkm_panel=False,up_panel=False)
+    if b2b:
+        body=HB.inject(body)
     if any(GEN.sha256_file(paths[k])!=source.sha256 for k,source in frozen.items()):
         raise ValueError('Kaynak değişti; karışık kuşak raporu yazılmadı.')
+    if reg_source and GEN.sha256_file(reg_source.path)!=reg_source.sha256:
+        raise ValueError('B2B kayıt dosyası değişti; rapor yazılmadı.')
     target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
     fd,staged=tempfile.mkstemp(prefix='.father-report-',dir=target.parent)
     try:
@@ -76,20 +101,28 @@ def generate(data_folder, output, *, today=None):
     finally:
         os.unlink(staged)
     return {'generation':manifest.core_id,'sections':{k:len(m['rows']) for k,m in modules.items()},
-            'sources':{k:s.sha256 for k,s in frozen.items()},'output':str(target)}
+            'sources':{k:s.sha256 for k,s in frozen.items()},'output':str(target),'b2b':b2b_counts}
 
 
 def main():
     parser=argparse.ArgumentParser(description='Özel çevrimdışı Halsa genel inceleme raporu; Cari bakiyesi içermez.')
     parser.add_argument('--data',required=True,help='Açık kaynak seçimi sources.json bulunan özel veri klasörü')
     parser.add_argument('--output',required=True,help='Henüz var olmayan özel .html çıktı dosyası')
+    parser.add_argument('--b2b',action='store_true',help='B2B Takip bölümünü ekle (D-080)')
+    parser.add_argument('--b2b-registration',help='b2b_kullanici_rapor.xlsx (B sütunu = kayıtlı müşteri kodu)')
+    parser.add_argument('--b2b-review-days',type=int,default=365,help="geçici 'son zamanlarda' süresi (gün)")
     args=parser.parse_args()
+    if (args.b2b_registration or args.b2b_review_days!=365) and not args.b2b: parser.error('--b2b gerekir')
+    if args.b2b_review_days<1: parser.error('--b2b-review-days en az 1 olmalı')
     try:
-        result=generate(args.data,args.output)
+        result=generate(args.data,args.output,b2b=args.b2b,b2b_registration=args.b2b_registration,
+                        b2b_review_days=args.b2b_review_days)
     except (ValueError,OSError,KeyError):
         parser.exit(2,'Rapor oluşturulamadı. Kaynak seçimini/sütunlarını ve yeni çıktı adını kontrol edin; dosyalar değiştirilmedi.\n')
     print('Özel çevrimdışı rapor oluşturuldu. Cari hesap bakiyesi içermez; yalnız yetkili alıcıyla özel paylaşın.')
     print('İnceleme bölümü: '+str(len(result['sections'])))
+    if result.get('b2b'):
+        b=result['b2b']; print(f"B2B Takip — A {b['view_A']} · B {b['view_B']} · C {b['view_C']} · kayıt listesi: {b['registration_status']}")
 
 
 if __name__=='__main__': main()

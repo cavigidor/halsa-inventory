@@ -1527,3 +1527,31 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   meanings or demand a new CRM/approval workflow. D-070/D-071 action retirements and frozen Classic stay unchanged.
 - Actual acceptance and local procedure: `docs/halsa_v1_father_report.md`; real source rows/values/artifacts remain
   private. Stop at this checkpoint for independent review; no merge of the new PR and no deployment.
+
+### D-080 · 2026-11-07 · Father's B2B tracking in a Klasik B2B variant and the V1 general report (owner request)
+- **Owner requirement (father, relayed 2026-11-07):** identify customers to call about the B2B platform. Sales channel =
+  sales export **physical column AG** = `B2B`; registration = `b2b_kullanici_rapor.xlsx` **physical column B**. Three call
+  lists (A buyers without confirmed registration, B registered without B2B purchases, C earlier B2B buyers without recent
+  B2B purchases), a "B2B" column in Büyüme / Küçülme between Temsilci and Sektör, and the customer detail
+  `Yıl | Harcama | Sipariş | B2B Alımı | Sipariş (B2B)`. First the Klasik report, then the V1 general report.
+- **Decision:**
+  - One calculation, `halsa_b2b.py` (stdlib + pandas + openpyxl; imports neither the new Halsa nor the frozen builder).
+    Exact code matching only; whitespace-only or invoice-account-only matches are *ambiguous*, shown with the codes and
+    never counted as registered. A missing registration file is unknown: A and B are not produced. Missing amounts stay
+    unknown; zero / negative / duplicate lines are kept; "Sipariş" = distinct order documents, mixed documents counted
+    once per channel and listed. "Son zamanlarda" = provisional 365 days from the latest transaction in the file
+    (configurable), not an approved rule. Existing KAPALI rule removes customers from the call lists (counts shown).
+  - **Narrow exception to D-077's isolation, for the new variant only:** `classic/klasik_b2b.py` (a separate generator
+    with a separate output name) runs the unmodified frozen builder and may load `halsa_b2b.py` by file path. It observes
+    the builder (keeps the frame `load_sales` reads; renders the builder's own modules through its own `_html` with the
+    three additions; appends one style and one script at the asserted template ending). `original_builder.py`,
+    `generate.py`, the launcher, the golden report and the original workflow are unchanged; services / config / app /
+    schemas / dashboard_builder still may not load in the child. The B2B rules are the father's, applied only in the
+    variant; no new Halsa rule enters the original Klasik report.
+  - V1: `services/b2b_review.py` + opt-in `father_report --b2b`; without it the output is unchanged. Not a registered
+    metric, API, action or AI input; existing masks, review boxes, Cari exclusion and D-070 / D-071 retirements kept.
+- **Evidence (November, counts only):** `docs/b2b_tracking.md`. The registration file was not available; reports made in
+  the "list missing" state (A/B empty with notice, C = 415 in both). Independent openpyxl reconciliation 101,731 checks,
+  0 discrepancies; original vs variant 7,699 checks, 0 discrepancies.
+- **Open (father):** the registration file; which code a B2B user is opened under (ordering customer vs invoice account);
+  the "son zamanlarda" period; zero-amount B2B lines; KAPALI in call lists. Ambiguous cases stay unconfirmed until answered.
