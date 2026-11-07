@@ -17,6 +17,11 @@ Scenarios (latest transaction 2026-06-30 → provisional 365-day window starts a
   090.00.0001  leading zero, registered as text                                    → confirmed
   910.00.0099  registration only                                                   → B (satış eşleşmesi yok)
   12345        a numeric registration cell
+  (row 11)     a registration row without a customer code (Kod No blank)
+  SNB|1003 is also recorded for 910.00.0010 (a document identifier used by two customers): the B2B line of
+  910.00.0001 and the other-channel line of 910.00.0010 must NOT make a cross-customer "mixed" document.
+The registration workbook has the supplied export's columns (Id, Kod No, Kullanıcı Adı, Kullanıcı E-posta, Son Online,
+Kullanıcı Cari, Kullanıcı Rolü) with invented values only.
 """
 import os
 
@@ -80,13 +85,18 @@ def sales_rows():
     L.append(_line(next(n), "2025-08-12", "910.00.0009", "Sentetik Dokuz", 1_500, channel="B2B web"))
     L.append(_line(next(n), "2026-06-30", "090.00.0001", "Sentetik Sifir", 2_500, channel="B2B"))
     L.append(_line(next(n), "2026-06-20", "910.00.0010", "Sentetik Bos Kanal", 700, channel=None))
+    L.append(_line(mixed, "2026-02-01", "910.00.0010", "Sentetik Bos Kanal", 300))             # identifier collision
     return L
 
 
+REG_HEADERS = ["Id", "Kod No", "Kullanıcı Adı", "Kullanıcı E-posta", "Son Online", "Kullanıcı Cari", "Kullanıcı Rolü"]
+
+
 def registration_rows():
-    return [("A", "910.00.0001", "Kullanici 1"), ("A", "910.00.0001", "Kullanici 2"), ("A", "910.00.0002", "K"),
-            ("A", "910.00.0005", "K"), ("A", "910.00.0006", "K"), ("A", "910.99.0001", "K"), ("A", "090.00.0001", "K"),
-            ("A", "910.00.0099", "K"), ("A", 12345, "K")]
+    codes = ["910.00.0001", "910.00.0001", "910.00.0002", "910.00.0005", "910.00.0006", "910.99.0001", "090.00.0001",
+             "910.00.0099", 12345, None]
+    return [[i + 1, c, f"kullanici{i}", f"kullanici{i}@ornek.invalid", "-", f"Sentetik Kayit Firma {i}", "Kullanıcı"]
+            for i, c in enumerate(codes)]
 
 
 def write_all(folder, registration=True):
@@ -98,6 +108,6 @@ def write_all(folder, registration=True):
     if registration:
         reg_dir = os.path.join(folder, "kayit")
         os.makedirs(reg_dir, exist_ok=True)
-        pd.DataFrame(registration_rows(), columns=["Firma", "Cari Kodu", "Kullanici"]).to_excel(
+        pd.DataFrame(registration_rows(), columns=REG_HEADERS).to_excel(
             os.path.join(reg_dir, REG_FILE), index=False)
     return folder

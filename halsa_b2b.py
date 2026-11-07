@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import collections
 import math
 
 import pandas as pd
@@ -34,6 +35,8 @@ CHANNEL_INDEX = 32                      # A=0 … AG=32 (physical position)
 CHANNEL_VALUE = "B2B"
 REGISTRATION_COLUMN = "B"
 REGISTRATION_FILE = "b2b_kullanici_rapor.xlsx"
+REGISTRATION_HEADER = "Kod No"          # physical column B header of the supplied registration export
+REGISTRATION_NAME_HEADER = "Kullanıcı Cari"   # company name, used only to label registration-only codes
 REVIEW_DAYS = 365                       # provisional review window, not an approved business rule
 ANCHOR = "</script></div></body></html>"  # the exact ending of both dashboards' HTML templates
 
@@ -44,12 +47,17 @@ STATUS_TEXT = {
     "not_found": "Listede bulunamadı",
     "unknown": "Liste yok",
 }
+REG_STATE_TEXT = {"missing": "bu rapora verilmedi", "unreadable": "okunamadı",
+                  "wrong_layout": "beklenen düzende değil (B sütunu başlığı 'Kod No' değil)",
+                  "empty": "B sütununda hiç müşteri kodu yok"}
 FLAG_TEXT = {"confirmed": "B2B", "ws": "Belirsiz", "inv": "Belirsiz", "not_found": "", "unknown": "—"}
 VIEW_TITLES = {
     "A": "A · Bizden alışveriş yapan, B2B kaydı olmayan müşteriler",
     "B": "B · B2B kaydı olan, ancak B2B'den alışveriş yapmayan müşteriler",
     "C": "C · Eskiden B2B'den alıp son zamanlarda almayan müşteriler",
+    "V": "Doğrulanacak · Belirsiz kayıt eşleşmeleri ve listede olmayan B2B alıcıları",
 }
+VIEWS = ("A", "B", "C", "V")
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -78,10 +86,13 @@ def sheet_header(source) -> list:
         wb.close()
 
 
-def read_registration(data: bytes | None, name: str = REGISTRATION_FILE) -> dict:
-    """Column B of the first worksheet (row 1 = header). Never infers absence as 'not registered'."""
+def read_registration(data: bytes | None, name: str = REGISTRATION_FILE,
+                      expected_header: str | None = REGISTRATION_HEADER) -> dict:
+    """Column B of the first worksheet (row 1 = header). Never infers absence as 'not registered': a missing,
+    unreadable, wrong-layout (column B header is not ``expected_header``) or empty workbook is 'unknown'."""
     reg = {"file": name, "status": "missing", "sha256": None, "sheets": [], "header": None, "rows": 0,
-           "codes": [], "unique": [], "duplicates": {}, "numeric_cells": 0, "blank_cells": 0, "other_columns": []}
+           "codes": [], "unique": [], "duplicates": {}, "numeric_cells": 0, "blank_cells": 0, "other_columns": [],
+           "missing_code_rows": [], "names": {}, "expected_header": expected_header}
     if data is None:
         return reg
     reg["sha256"] = hashlib.sha256(data).hexdigest()
@@ -98,11 +109,14 @@ def read_registration(data: bytes | None, name: str = REGISTRATION_FILE) -> dict
         head = next(rows, ())
         reg["header"] = None if len(head) < 2 or head[1] is None else str(head[1])
         reg["other_columns"] = [None if h is None else str(h) for i, h in enumerate(head) if i != 1]
+        heads = [None if h is None else str(h).strip() for h in head]
+        name_ix = heads.index(REGISTRATION_NAME_HEADER) if REGISTRATION_NAME_HEADER in heads else None
         for excel_row, r in enumerate(rows, start=2):
             v = r[1] if len(r) > 1 else None
             if _blank(v):
                 if any(not _blank(x) for x in r):
                     reg["blank_cells"] += 1
+                    reg["missing_code_rows"].append(excel_row)
                 continue
             reg["rows"] += 1
             if isinstance(v, bool):
@@ -114,6 +128,9 @@ def read_registration(data: bytes | None, name: str = REGISTRATION_FILE) -> dict
                 text, numeric = str(v), False
             reg["numeric_cells"] += numeric
             reg["codes"].append({"row": excel_row, "code": text, "numeric": numeric})
+            nm = r[name_ix] if name_ix is not None and len(r) > name_ix else None
+            if not _blank(nm):
+                reg["names"].setdefault(text, str(nm).strip())
     finally:
         wb.close()
     seen = {}
@@ -121,7 +138,12 @@ def read_registration(data: bytes | None, name: str = REGISTRATION_FILE) -> dict
         seen[c["code"]] = seen.get(c["code"], 0) + 1
     reg["unique"] = list(seen)
     reg["duplicates"] = {k: n for k, n in seen.items() if n > 1}
-    reg["status"] = "ok" if reg["header"] is not None or reg["codes"] else "unreadable"
+    if expected_header is not None and (reg["header"] or "").strip() != expected_header:
+        reg["status"] = "wrong_layout"
+    elif not reg["codes"]:
+        reg["status"] = "empty"
+    else:
+        reg["status"] = "ok"
     return reg
 
 
@@ -267,11 +289,17 @@ def analyse(raw: pd.DataFrame, base: pd.DataFrame, attrs: dict, registration: di
         }
 
     # ---- documents and years -----------------------------------------------------------------------------------------
-    docs = d[~d["doc_missing"]].groupby("ord").agg(has_b=("b2b", "any"), all_b=("b2b", "all"),
-                                                  custs=("cust", lambda s: sorted(set(s))))
-    mixed_docs = docs[docs["has_b"] & ~docs["all_b"]]
-    mixed_set = set(mixed_docs.index)
-    d["mixed"] = d["ord"].isin(mixed_set) & ~d["doc_missing"]
+    # The order identifier (seri|sıra) is checked before it is used: an identifier recorded for more than one
+    # customer or year is reported, and a mixed-channel document is judged within one customer only (never across
+    # customers). Order counts keep the dashboards' established rule (distinct identifiers per customer and year).
+    keyed = d[~d["doc_missing"]]
+    per_doc = keyed.groupby("ord").agg(n_cust=("cust", "nunique"), n_year=("yr", "nunique"), has_b=("b2b", "any"))
+    doc_multi_cust = per_doc[per_doc["n_cust"] > 1]
+    doc_multi_year = per_doc[per_doc["n_year"] > 1]
+    pairs = keyed.groupby(["cust", "ord"]).agg(has_b=("b2b", "any"), all_b=("b2b", "all"))
+    mixed_pairs = pairs[pairs["has_b"] & ~pairs["all_b"]]
+    mixed_docs = sorted(f"{o} → {c}" for c, o in mixed_pairs.index)
+    d["mixed"] = pd.MultiIndex.from_arrays([d["cust"], d["ord"]]).isin(mixed_pairs.index) & ~d["doc_missing"]
     yearly = {}
     dated = d[~d["undated"]]
     for (c, y), sub in dated.groupby(["cust", "yr"]):
@@ -284,28 +312,52 @@ def analyse(raw: pd.DataFrame, base: pd.DataFrame, attrs: dict, registration: di
         }
 
     # ---- views -------------------------------------------------------------------------------------------------------
-    views = {"A": [], "B": [], "C": []}
-    closed_out = {"A": 0, "B": 0, "C": 0}
+    # A  definite gaps: bought from Halsa, code not in the list (exact, nor ambiguous), no B2B-channel purchase.
+    # B  registered (exact) without B2B-channel purchases, incl. codes with no sales at all. Needs a verified AG.
+    # C  B2B-channel buyers without B2B purchases in the provisional window. Needs a verified AG.
+    # V  verification: ambiguous registration matches (customer side and registration side) and B2B-channel buyers
+    #    whose code is absent from the list. Never counted as registered or unregistered.
+    ch_ok = bool(chinfo["ok"])
+    views = {k: [] for k in VIEWS}
+    closed_out = {k: 0 for k in VIEWS}
     common = ("code", "name", "rep", "sector", "reg")
+    reg_names = registration.get("names") or {}
+    reg_rows = {}
+    for c in registration.get("codes") or []:
+        reg_rows.setdefault(c["code"], c["row"])
+    excluded_inv_b2b = []
+
+    def vrow(p, kind):
+        row = {k: p[k] for k in common}
+        row.update(cat="V", kind=kind, recent=p["recent"], total=p["total"], last=p["last"],
+                   b2b_seen=(None if not ch_ok else "Evet" if p["has_b2b"] else "Belirsiz kanal" if p["unclear"] else "Hayır"),
+                   b2b_total=p["b2b_total"] if p["has_b2b"] else None, last_b2b=p["last_b2b"], excel_row=None,
+                   linked="")
+        return row
+
     if reg_ok:
         for c, p in per.items():
             if p["status"] == "confirmed":
                 continue
             if p["closed"]:
-                closed_out["A"] += 1
+                closed_out["V" if (p["status"] != "not_found" or p["has_b2b"] or p["unclear"]) else "A"] += 1
                 continue
-            row = {k: p[k] for k in common}
-            row.update(cat="A", recent=p["recent"], total=p["total"], last=p["last"],
-                       b2b_seen=(None if not chinfo["ok"] else "Evet" if p["has_b2b"] else "Belirsiz kanal" if p["unclear"] else "Hayır"))
-            views["A"].append(row)
-        reg_rows = {}
-        for c in registration.get("codes") or []:
-            reg_rows.setdefault(c["code"], c["row"])
-        excluded_inv_b2b = []
+            if p["status"] in ("ws", "inv"):
+                views["V"].append(vrow(p, "Belirsiz kayıt eşleşmesi — " + ("boşluk farkı" if p["status"] == "ws"
+                                                                         else "fatura hesabı kayıtlı")))
+            elif ch_ok and p["has_b2b"]:
+                views["V"].append(vrow(p, "B2B'den alıyor, kodu kayıt listesinde yok"))
+            elif ch_ok and p["unclear"]:
+                views["V"].append(vrow(p, "Kanal yazımı belirsiz ('B2B' farklı yazılmış)"))
+            else:
+                row = {k: p[k] for k in common}
+                row.update(cat="A", recent=p["recent"], total=p["total"], last=p["last"],
+                           b2b_seen=("Hayır" if ch_ok else None))
+                views["A"].append(row)
         for r in registration.get("unique") or []:
             p = per.get(r)
             if p is not None:
-                if p["has_b2b"]:
+                if not ch_ok or p["has_b2b"] or p["unclear"]:
                     continue
                 if p["closed"]:
                     closed_out["B"] += 1
@@ -318,25 +370,26 @@ def analyse(raw: pd.DataFrame, base: pd.DataFrame, attrs: dict, registration: di
             ws = sorted(cust_strip.get(r.strip(), set()))
             inv_hits = sorted(inv_strip.get(r.strip(), set())) if not ws else []
             inv_c = sorted({x for i in inv_hits for x in custs_of_inv.get(i, ())})
+            nm = reg_names.get(r, "")
             if ws or inv_c:
                 linked = ws or inv_c
                 lines = d[d["cust"].isin(ws)] if ws else d[d["inv"].isin(inv_hits)]
-                if lines["b2b"].any():
+                bought_b2b = bool(lines["b2b"].any())
+                if bought_b2b:
                     excluded_inv_b2b.append(r)
-                    continue
-                sub = ("Belirsiz — boşluk farkıyla satış müşterisi" if ws
-                       else "Belirsiz — yalnız fatura hesabı olarak satışta")
-                views["B"].append({"code": r, "name": "", "rep": "", "sector": "", "reg": STATUS_TEXT["confirmed"],
-                                   "cat": "B", "sub": sub, "recent": None, "total": None, "last": None,
-                                   "excel_row": reg_rows.get(r), "linked": ", ".join(linked[:10])})
-            else:
-                views["B"].append({"code": r, "name": "", "rep": "", "sector": "", "reg": STATUS_TEXT["confirmed"],
-                                   "cat": "B", "sub": "Satış verisinde eşleşme yok", "recent": None,
-                                   "total": None, "last": None, "excel_row": reg_rows.get(r)})
-    else:
-        excluded_inv_b2b = []
+                kind = ("Kayıt kodu yalnız boşluk farkıyla satış müşterisi" if ws else
+                        "Kayıt kodu yalnız fatura hesabı olarak satışta")
+                views["V"].append({"code": r, "name": nm, "rep": "", "sector": "", "reg": STATUS_TEXT["confirmed"],
+                                   "cat": "V", "kind": kind, "recent": None, "total": None, "last": None,
+                                   "b2b_seen": None if not ch_ok else ("Evet" if bought_b2b else "Hayır"),
+                                   "b2b_total": None, "last_b2b": None, "excel_row": reg_rows.get(r),
+                                   "linked": ", ".join(linked[:10]) + (f" … (+{len(linked) - 10})" if len(linked) > 10 else "")})
+            elif ch_ok:
+                views["B"].append({"code": r, "name": nm, "rep": "", "sector": "", "reg": STATUS_TEXT["confirmed"],
+                                   "cat": "B", "sub": "Satış verisinde eşleşme yok" + (" (ad: kayıt listesi)" if nm else ""),
+                                   "recent": None, "total": None, "last": None, "excel_row": reg_rows.get(r)})
     for c, p in per.items():
-        if not p["has_b2b"] or p["recent_b2b"]:
+        if not ch_ok or not p["has_b2b"] or p["recent_b2b"]:
             continue
         if p["closed"]:
             closed_out["C"] += 1
@@ -350,6 +403,7 @@ def analyse(raw: pd.DataFrame, base: pd.DataFrame, attrs: dict, registration: di
     views["A"].sort(key=lambda r: (big(r["recent"]), big(r["total"]), r["code"]))
     views["B"].sort(key=lambda r: (r["sub"], big(r["recent"]), r["code"]))
     views["C"].sort(key=lambda r: (-(int((r["last_b2b"] or "0000-00-00").replace("-", ""))), r["code"]))
+    views["V"].sort(key=lambda r: (r["kind"], big(r["recent"]), r["code"]))
 
     # ---- counts and warnings -----------------------------------------------------------------------------------------
     b2b_lines = d[d["b2b"]]
@@ -357,31 +411,37 @@ def analyse(raw: pd.DataFrame, base: pd.DataFrame, attrs: dict, registration: di
     ws_c = sorted(c for c, s in st.items() if s == "ws")
     inv_c = sorted(c for c, s in st.items() if s == "inv")
     reg_unmatched = [r for r in (registration.get("unique") or []) if r not in custs]
+    vk = collections.Counter(r["kind"] for r in views["V"])
     counts = {
         "lines": int(len(d)), "lines_identity_missing": int(len(base) - len(d)),
-        "channel_ok": bool(chinfo["ok"]), "channel_header": chinfo["header"],
+        "channel_ok": ch_ok, "channel_header": chinfo["header"],
         "b2b_lines": int(len(b2b_lines)), "blank_channel_lines": int(d["ch"].eq("blank").sum()),
         "unclear_channel_lines": int(d["ch"].eq("unclear").sum()),
         "b2b_amount_missing": int(b2b_lines["amt_missing"].sum()), "b2b_amount_negative": int(b2b_lines["amt"].lt(0).sum()),
         "b2b_amount_zero": int(b2b_lines["amt"].eq(0).sum()), "b2b_undated": int(b2b_lines["undated"].sum()),
         "undated_lines": int(d["undated"].sum()), "doc_missing_lines": int(d["doc_missing"].sum()),
-        "b2b_documents": int(b2b_lines.loc[~b2b_lines["doc_missing"], "ord"].nunique()),
-        "mixed_documents": int(len(mixed_docs)),
+        "documents": int(per_doc.shape[0]), "b2b_documents": int(b2b_lines.loc[~b2b_lines["doc_missing"], "ord"].nunique()),
+        "doc_ids_multi_customer": int(len(doc_multi_cust)), "doc_ids_multi_customer_b2b": int(doc_multi_cust["has_b"].sum()),
+        "doc_ids_multi_year": int(len(doc_multi_year)), "doc_ids_multi_year_b2b": int(doc_multi_year["has_b"].sum()),
+        "mixed_documents": int(len(mixed_pairs)),
         "customers": int(len(per)), "b2b_customers": int(sum(p["has_b2b"] for p in per.values())),
-        "registration_status": registration.get("status"), "registration_rows": int(registration.get("rows") or 0),
+        "registration_status": registration.get("status"), "registration_header": registration.get("header"),
+        "registration_rows": int(registration.get("rows") or 0),
         "registration_unique": int(len(R)), "registration_duplicate_codes": int(len(registration.get("duplicates") or {})),
+        "registration_missing_code_rows": int(len(registration.get("missing_code_rows") or [])),
         "registration_numeric_cells": int(registration.get("numeric_cells") or 0),
         "registration_matched_exact": int(len(R & custs)), "registration_unmatched": int(len(reg_unmatched)),
         "status_confirmed": int(sum(s == "confirmed" for s in st.values())), "status_ambiguous_ws": len(ws_c),
         "status_ambiguous_inv": len(inv_c), "status_not_found": int(sum(s == "not_found" for s in st.values())),
         "status_unknown": int(sum(s == "unknown" for s in st.values())),
-        "b2b_buyers_not_confirmed": len(unreg_buyers), "registration_inv_with_b2b_excluded": len(excluded_inv_b2b),
-        "view_A": len(views["A"]), "view_B": len(views["B"]), "view_C": len(views["C"]),
+        "b2b_buyers_not_confirmed": len(unreg_buyers),
+        "b2b_lines_not_confirmed": int(b2b_lines["cust"].isin(set(unreg_buyers)).sum()),
+        "registration_inv_with_b2b": len(excluded_inv_b2b),
+        "view_A": len(views["A"]), "view_B": len(views["B"]), "view_C": len(views["C"]), "view_V": len(views["V"]),
         "view_B_other_channels": sum(r["sub"].startswith("Diğer kanallardan") for r in views["B"]),
         "view_B_no_sales": sum(r["sub"].startswith("Satış verisinde") for r in views["B"]),
-        "view_B_ambiguous": sum(r["sub"].startswith("Belirsiz") for r in views["B"]),
-        "view_A_with_b2b": sum(r["b2b_seen"] == "Evet" for r in views["A"]),
-        "closed_excluded_A": closed_out["A"], "closed_excluded_B": closed_out["B"], "closed_excluded_C": closed_out["C"],
+        "view_V_kinds": dict(sorted(vk.items())),
+        "closed_excluded": dict(closed_out),
         "asof": _iso(asof), "window_start": _iso(start), "review_days": review_days,
     }
     warnings = _warnings(counts, registration, chinfo, ws_c, inv_c, unreg_buyers, excluded_inv_b2b, mixed_docs)
@@ -404,12 +464,14 @@ def _w(code, title, issue, evidence, question, resolution, severity="orta", code
 def _warnings(c, reg, chinfo, ws_c, inv_c, unreg, inv_b2b, mixed_docs):
     out = []
     if reg.get("status") != "ok":
-        out.append(_w("B2B-KAYIT-YOK", f"B2B kayıt listesi yok: {reg.get('file')}",
-                      "Kayıt listesi okunamadı veya bu rapora verilmedi. Bu, müşterilerin kayıtsız olduğu anlamına GELMEZ; "
-                      "A ve B listeleri bu nedenle oluşturulmadı ve Büyüme / Küçülme'deki B2B sütunu — gösterir.",
-                      f"Dosya durumu: {'bulunamadı' if reg.get('status') == 'missing' else 'okunamadı'}.",
-                      "Güncel b2b_kullanici_rapor.xlsx dosyası nerede? B sütunu hâlâ müşteri kodu mu?",
-                      "Dosyayı sağlayın ve raporu yeniden oluşturun.", "yuksek"))
+        out.append(_w("B2B-KAYIT-YOK", f"B2B kayıt listesi kullanılamadı: {reg.get('file')}",
+                      "Kayıt listesi " + REG_STATE_TEXT.get(reg.get("status"), "kullanılamadı") + ". Bu, müşterilerin "
+                      "kayıtsız olduğu anlamına GELMEZ; A, B ve Doğrulanacak listeleri oluşturulmadı ve Büyüme / "
+                      "Küçülme'deki B2B sütunu — gösterir.",
+                      f"Dosya durumu: {reg.get('status')}; B sütunu başlığı: {reg.get('header') or 'yok'} "
+                      f"(beklenen: {reg.get('expected_header') or '—'}); kod sayısı: {reg.get('rows') or 0}.",
+                      "Güncel b2b_kullanici_rapor.xlsx dosyası nerede? B sütunu ('Kod No') hâlâ müşteri kodu mu?",
+                      "Doğru dosyayı sağlayın ve raporu yeniden oluşturun.", "yuksek"))
     out.append(_w("B2B-KANAL", "B2B satışı = AG sütunu tam olarak 'B2B'",
                   f"Satış dosyasının fiziksel {CHANNEL_COLUMN} sütunu (başlık: {chinfo.get('header') or 'bulunamadı'}) "
                   "satır bazında okunur; yalnız tam 'B2B' değeri B2B kanalıdır, diğer değerler başka kanal sayılır.",
@@ -419,6 +481,12 @@ def _warnings(c, reg, chinfo, ws_c, inv_c, unreg, inv_b2b, mixed_docs):
                   "AG sütununda B2B dışındaki değerler satıcı/temsilci adı mı? B2B siparişi her zaman 'B2B' olarak mı yazılıyor?",
                   "Farklı yazım görülürse ERP kaydını kontrol edin; rapor yalnız tam eşleşmeyi B2B sayar.",
                   "orta" if chinfo.get("ok") else "yuksek"))
+    if not chinfo.get("ok"):
+        out.append(_w("B2B-KANAL-YOK", "B ve C listeleri oluşturulmadı",
+                      "B2B alımı doğrulanamadığı için 'B2B'den almayan' (B) ve 'eskiden B2B'den alan' (C) listeleri "
+                      "sıfır B2B alımı varsayılarak üretilmez.", f"Neden: {chinfo.get('reason')}.",
+                      "Satış dosyasında B2B kanalı hâlâ AG sütununda mı?", "Doğru düzendeki satış dosyasıyla yeniden oluşturun.",
+                      "yuksek"))
     out.append(_w("B2B-PENCERE", f"'Son zamanlarda' = son {c['review_days']} gün (geçici inceleme ölçütü)",
                   "Onaylı iş kuralı değildir; kolayca değiştirilebilir. Pencere bilgisayarın tarihinden değil, satış "
                   "dosyasındaki en son işlem tarihinden geriye sayılır.",
@@ -428,12 +496,14 @@ def _warnings(c, reg, chinfo, ws_c, inv_c, unreg, inv_b2b, mixed_docs):
     out.append(_w("B2B-BELGE", "Sipariş sayısı = farklı sipariş belgesi (seri|sıra), satır değil",
                   "sip_evrakno_seri + sip_evrakno_sira sipariş evrakını gösterir; fatura sayısı değildir. Aynı belgede "
                   "hem B2B hem başka kanal satırı varsa belge her kanalda bir kez sayılır ve doğrulama için listelenir.",
-                  f"Karışık kanal belgesi: {c['mixed_documents']}. Belge numarası eksik satır: {c['doc_missing_lines']}."
-                  + (f" Örnekler (belge → müşteri): {_codes([k + ' → ' + '/'.join(v) for k, v in mixed_docs['custs'].items()], 40)}."
-                     if len(mixed_docs) else ""),
+                  f"Belge: {c['documents']}; B2B belgesi: {c['b2b_documents']}. Birden çok müşteride kullanılan belge "
+                  f"numarası: {c['doc_ids_multi_customer']} (B2B satırı olan: {c['doc_ids_multi_customer_b2b']}); birden "
+                  f"çok yılda: {c['doc_ids_multi_year']} (B2B: {c['doc_ids_multi_year_b2b']}). Karışık kanal yalnız aynı "
+                  f"müşterinin belgesinde aranır: {c['mixed_documents']}. Belge numarası eksik satır: {c['doc_missing_lines']}."
+                  + (f" Örnekler (belge → müşteri): {_codes(mixed_docs, 40)}." if mixed_docs else ""),
                   "Bir sipariş belgesinde B2B ve başka kanal satırı birlikte olabilir mi? Bu belgeler B2B siparişi mi?",
-                  "Karışık belgeleri ERP sipariş ekranında kontrol edin.", "orta" if c["mixed_documents"] else "dusuk",
-                  list(mixed_docs.index)))
+                  "Karışık belgeleri ERP sipariş ekranında kontrol edin.", "orta" if (c["mixed_documents"] or c["doc_ids_multi_customer_b2b"]) else "dusuk",
+                  mixed_docs))
     if c["b2b_amount_missing"] or c["b2b_amount_negative"] or c["b2b_amount_zero"] or c["b2b_undated"]:
         out.append(_w("B2B-TUTAR", "B2B satırlarında eksik / sıfır / negatif tutar veya eksik tarih",
                       "Eksik tutar 0 sayılmaz (ilgili toplam — olur); sıfır ve negatif satırlar olduğu gibi toplanır; "
@@ -446,27 +516,27 @@ def _warnings(c, reg, chinfo, ws_c, inv_c, unreg, inv_b2b, mixed_docs):
         if ws_c:
             out.append(_w("B2B-BOSLUK", "Kayıt kodu yalnız boşluk farkıyla eşleşiyor",
                           "Kodlar kırpılmadan karşılaştırılır; yalnız baştaki/sondaki boşlukla eşleşen müşteri kayıtlı "
-                          "sayılmaz, 'Belirsiz' gösterilir.", f"Müşteri: {len(ws_c)} — {_codes(ws_c)}.",
+                          "sayılmaz; 'Doğrulanacak' listesinde gösterilir.", f"Müşteri: {len(ws_c)} — {_codes(ws_c)}.",
                           "Bu kodlar kayıt listesindekiyle aynı müşteri mi?",
                           "ERP'de kodun doğru yazımını düzeltin veya teyit edin.", "orta", ws_c))
         if inv_c:
             out.append(_w("B2B-FATURA", "Fatura hesabı kayıtlı, sipariş müşterisi değil",
                           "Müşteri kimliği sipariş kaynağıdır (Pro_kodu; boşsa Musterikod). Bu müşterilerin siparişleri "
                           "kayıt listesindeki bir fatura hesabına faturalanmış; müşterinin kendisinin kayıtlı olduğu "
-                          "kanıtlanmadı. 'Belirsiz' gösterilir ve kayıtlı sayılmaz.",
+                          "kanıtlanmadı. 'Doğrulanacak' listesinde gösterilir; kayıtlı da kayıtsız da sayılmaz.",
                           f"Müşteri: {len(inv_c)} — {_codes(inv_c)}.",
                           "B2B kullanıcısı bayi/fatura hesabı adına mı açılıyor, yoksa sipariş veren müşteri adına mı?",
                           "Hangi kodun B2B kaydı için esas olduğunu belirtin.", "yuksek", inv_c))
         if inv_b2b:
             out.append(_w("B2B-FATURA-B2B", "Yalnız fatura hesabı olarak eşleşen kayıt kodunun B2B alımı var",
-                          "Bu kayıt kodları sipariş müşterisi olarak görünmüyor, ama fatura hesabı olarak B2B satırları "
-                          "var; B listesine konmadı.", f"Kayıt kodu: {len(inv_b2b)} — {_codes(inv_b2b)}.",
+                          "Bu kayıt kodları sipariş müşterisi olarak görünmüyor, ama bağlı satışlarda B2B satırları "
+                          "var; B listesine konmadı, 'Doğrulanacak' listesinde gösterilir.", f"Kayıt kodu: {len(inv_b2b)} — {_codes(inv_b2b)}.",
                           "Bu B2B kullanıcıları bayi hesabı mı?", "Kodun eşleşme kuralını teyit edin.", "orta", inv_b2b))
         if unreg:
             out.append(_w("B2B-KAYITSIZ-ALIM", "B2B'den alım var ama kayıt listesinde teyit edilmedi",
                           "AG = B2B satırı olan müşterinin kodu B sütununda birebir yok. Kayıt başka kodla (ör. fatura "
-                          "hesabı) yapılmış olabilir; müşteri A listesinde 'B2B\'den alım = Evet' olarak işaretlenir.",
-                          f"Müşteri: {len(unreg)} — {_codes(unreg)}.",
+                          "hesabı) yapılmış olabilir; müşteri A'ya değil 'Doğrulanacak' listesine alınır.",
+                          f"Müşteri: {len(unreg)}; B2B satırı: {c['b2b_lines_not_confirmed']} — {_codes(unreg)}.",
                           "Bu müşterilerin B2B kullanıcısı hangi kodla tanımlı?",
                           "Kayıt listesindeki kodu düzeltin veya eşleşmeyi teyit edin.", "yuksek", unreg))
         if reg.get("duplicates"):
@@ -477,11 +547,19 @@ def _warnings(c, reg, chinfo, ws_c, inv_c, unreg, inv_b2b, mixed_docs):
                           "Tekrarlar aynı firmanın farklı kullanıcıları mı?", "Bilgi amaçlıdır.", "dusuk", dups))
         if c["registration_unmatched"]:
             out.append(_w("B2B-KAYIT-SATISSIZ", "Kayıtlı ama satış müşterisi olarak bulunamayan kodlar",
-                          "Bu kodlar B listesinde 'satış verisinde eşleşme yok' veya 'Belirsiz' olarak gösterilir; adı ve "
-                          "temsilcisi satış dosyasından alınamaz.",
+                          "Bu kodlar B listesinde 'satış verisinde eşleşme yok' veya 'Doğrulanacak' listesinde gösterilir; "
+                          "temsilci satış dosyasından alınamaz, ad varsa kayıt listesinin 'Kullanıcı Cari' sütunundandır.",
                           f"Kod: {c['registration_unmatched']} / {c['registration_unique']}.",
                           "Bu kayıtlar yeni müşteri mi, yoksa farklı kodla mı satış yapılıyor?",
                           "Kodları ERP cari listesinde kontrol edin.", "orta"))
+        if c["registration_missing_code_rows"]:
+            rows = reg.get("missing_code_rows") or []
+            out.append(_w("B2B-KAYIT-KODSUZ", "Kayıt listesinde müşteri kodu boş satırlar",
+                          "Bu kullanıcı satırlarının B sütunu (Kod No) boş; hangi müşteriye ait oldukları bilinmiyor ve "
+                          "hiçbir müşteriyle eşleştirilmedi.", f"Satır: {len(rows)} — Excel satırları: "
+                          f"{_codes([str(x) for x in rows], 40)}.",
+                          "Bu B2B kullanıcıları hangi müşteri koduna bağlı?", "Kod No alanını ERP/B2B panelinde tamamlayın.",
+                          "orta"))
         if c["registration_numeric_cells"]:
             out.append(_w("B2B-KAYIT-SAYI", "Kayıt listesinde sayı olarak saklanmış kod",
                           "Sayı hücresi metne çevrildi; baştaki sıfırlar Excel'de kaybolmuş olabilir.",
@@ -490,7 +568,7 @@ def _warnings(c, reg, chinfo, ws_c, inv_c, unreg, inv_b2b, mixed_docs):
     out.append(_w("B2B-KAPALI", "KAPALI firmalar arama listelerinden çıkarıldı",
                   "Panonun mevcut kuralı: satırların en az yarısında 'Açık / Kapalı' = KAPALI olan müşteri fırsat listelerine "
                   "alınmaz. Yıllık detay ve Büyüme / Küçülme kuralları değişmedi.",
-                  f"Çıkarılan: A {c['closed_excluded_A']} · B {c['closed_excluded_B']} · C {c['closed_excluded_C']}.",
+                  "Çıkarılan: " + " · ".join(f"{k} {v}" for k, v in c["closed_excluded"].items()) + ".",
                   "KAPALI bilgisi sipariş müşterisine mi ait?", "Bilgi amaçlıdır.", "dusuk"))
     return out
 
@@ -505,28 +583,33 @@ def view_cols(days=REVIEW_DAYS):
               {"k": "sector", "l": "Sektör"}]
     return {
         "A": common + [money("recent", f"Son {days} gün alım"), money("total", "Toplam alım (dosya)"),
-                       {"k": "last", "l": "Son alış"}, {"k": "reg", "l": "B2B kayıt durumu"},
-                       {"k": "b2b_seen", "l": "B2B'den alım"}],
+                       {"k": "last", "l": "Son alış"}, {"k": "reg", "l": "B2B kayıt durumu"}],
         "B": common + [{"k": "sub", "l": "Durum"}, money("recent", f"Son {days} gün alım"),
                        money("total", "Toplam alım (dosya)"), {"k": "last", "l": "Son alış"},
                        n("excel_row", "Kayıt satırı")],
-        "C": common + [{"k": "last_b2b", "l": "Son B2B alış"}, money("b2b_total", "B2B alımı (toplam)"),
-                       n("b2b_orders", "B2B sipariş"), money("recent_other", f"Son {days} gün diğer kanal"),
-                       n("recent_other_orders", "Diğer kanal sipariş"), {"k": "reg", "l": "B2B kayıt durumu"}],
+        "C": common[:3] + [{"k": "last_b2b", "l": "Son B2B alış"}, money("b2b_total", "B2B alımı (toplam)"),
+                           n("b2b_orders", "B2B sipariş"), money("recent_other", f"Diğer kanal ({days} gün)"),
+                           {"k": "reg", "l": "B2B kaydı"}],
+        "V": common[:3] + [{"k": "kind", "l": "Doğrulama nedeni"}, money("recent", f"Son {days} gün alım"),
+                           {"k": "b2b_seen", "l": "B2B'den alım"}, money("b2b_total", "B2B alımı"),
+                           {"k": "linked", "l": "Bağlı satış kodu"}],
     }
 
 
 def view_notes(counts):
     days = counts["review_days"]
     return {
-        "A": ("Satış dosyasında alışverişi olan ve kodu B2B kayıt listesinin B sütununda birebir bulunmayan müşteriler. "
-              "'Listede bulunamadı' kesin kayıtsızlık değildir; 'Belirsiz' satırlar kayıtlı sayılmadı, doğrulanmalıdır. "
-              "'B2B'den alım = Evet': AG sütununda B2B satırı var ama kod listede yok — kontrol edin. Son "
-              f"{days} gün alıma göre sıralı. KAPALI firmalar çıkarıldı."),
+        "A": ("Satış dosyasında alışverişi olan, kodu B2B kayıt listesinin B sütununda (Kod No) ne birebir ne de belirsiz "
+              "biçimde bulunan ve hiç B2B kanalından (AG) alımı olmayan müşteriler. Belirsiz eşleşmeler ve B2B'den alıp "
+              f"listede olmayanlar 'Doğrulanacak' listesindedir. Son {days} gün alıma göre sıralı. KAPALI firmalar çıkarıldı."),
         "B": ("Kayıt listesindeki kodlar (B sütunu) içinde AG = B2B satışı olmayanlar: diğer kanallardan alanlar, satış "
-              "verisinde hiç eşleşmeyenler (ad/temsilci bilinmiyor) ve belirsiz eşleşmeler ayrı durumla gösterilir."),
+              "verisinde hiç eşleşmeyenler (temsilci bilinmiyor; ad varsa kayıt listesinden). Belirsiz eşleşen kayıt "
+              "kodları 'Doğrulanacak' listesindedir."),
         "C": (f"Geçmişte en az bir B2B satırı olan, ancak son {days} günde (en son satış tarihi {counts['asof']}'den geriye; "
               "GEÇİCİ inceleme ölçütü, onaylı kural değil) hiç B2B satırı olmayan müşteriler. Son B2B alışa göre sıralı."),
+        "V": ("Kesin sınıflanamayan kayıtlar — kayıtlı da kayıtsız da sayılmadı: kodu yalnız boşluk farkıyla veya yalnız "
+              "fatura hesabı üzerinden eşleşenler, B2B'den aldığı halde kodu listede olmayanlar ve satışta yalnız fatura "
+              "hesabı / boşluk farkıyla görünen kayıt kodları. Aramadan önce doğru kodu teyit edin."),
     }
 
 
@@ -536,11 +619,13 @@ def module(result: dict, *, review_html: str | None = None) -> dict:
     cols = view_cols(c["review_days"])
     notes = view_notes(c)
     views = {k: {"label": VIEW_TITLES[k], "rows": result["views"][k], "cols": cols[k], "note": notes[k]}
-             for k in ("A", "B", "C")}
+             for k in VIEWS}
     unavailable = c["registration_status"] != "ok"
     m = {"title": "B2B Takip", "rows": [], "cols": cols["A"], "filter": "rep", "note": notes["A"],
          "views": views, "b2b_warnings": result["warnings"], "b2b_unavailable": unavailable,
-         "b2b_reg_file": result["registration"]["file"]}
+         "b2b_reg_file": result["registration"]["file"],
+         "b2b_reg_state": REG_STATE_TEXT.get(c["registration_status"], ""),
+         "b2b_channel_unavailable": not c["channel_ok"]}
     if review_html:
         m["review_html"] = review_html
     return m
@@ -623,7 +708,9 @@ EXTENSION_JS = r"""
        (mixed?` * ${mixed} siparişte B2B ve diğer kanal satırları birlikte — doğrulanmalı.`:'')+' — = bilinmiyor.</div></div>';
     return y;
   };
-  window.detailHTML=function(d){
+  // B2B Takip has thousands of rows: its detail is built when a row is first opened (same markup, same data).
+  let CUR=null, SEQ=0; const LAZY=new Map();
+  const fullDetail=function(d){
     if(!d) return '<div class="detail"><span style="color:#888">Detay yok.</span></div>';
     if(d.buyers){
       let bh='<div class="prods" style="min-width:420px"><div class="prods-h">Bu ürünü alan müşteriler (çağrı listesi)</div>';
@@ -639,6 +726,10 @@ EXTENSION_JS = r"""
       p+='</div>';}
     return `<div class="detail">${y}${p}</div>`;
   };
+  window.detailHTML=function(d){
+    if(CUR==='b2b'&&d){const id=++SEQ; LAZY.set(id,d); return `<div class="detail" data-lazy="${id}"></div>`;}
+    return fullDetail(d);
+  };
   const baseDraw=draw;
   const deco=function(id){
     const m=DATA[id]; if(!m||!m.cols) return; const ix=m.cols.findIndex(c=>c.k==='b2b'); if(ix<0) return;
@@ -647,21 +738,25 @@ EXTENSION_JS = r"""
       if(t==='B2B') td.innerHTML='<span class="b2b-flag">B2B</span>';
       else if(t==='Belirsiz') td.innerHTML='<span class="b2b-amb" title="Kayıt eşleşmesi belirsiz — kayıtlı sayılmadı">Belirsiz</span>';});
   };
-  window.draw=function(id){baseDraw(id); deco(id);};
+  window.draw=function(id){if(id==='b2b') LAZY.clear(); CUR=id; try{baseDraw(id);} finally{CUR=null;} deco(id);};
   const B=DATA.b2b;
   if(B&&B.views){
     const p=document.getElementById('b2b'); const tb=p.querySelector('.toolbar');
-    const all=[].concat(...['A','B','C'].map(k=>B.views[k].rows));
+    const keys=Object.keys(B.views);
+    const all=[].concat(...keys.map(k=>B.views[k].rows));
     const sel=p.querySelector('.repsel');
     if(sel){const vals=[...new Set(all.map(r=>r.rep).filter(x=>x))].sort((a,b)=>String(a).localeCompare(String(b),'tr'));
       sel.replaceChildren(new Option('Tüm temsilciler','')); vals.forEach(v=>sel.append(new Option(v,v)));}
     const bar=document.createElement('div'); bar.className='b2b-views';
-    ['A','B','C'].forEach(k=>{const b=document.createElement('button'); b.type='button'; b.className='b2b-view'; b.dataset.v=k;
+    keys.forEach(k=>{const b=document.createElement('button'); b.type='button'; b.className='b2b-view'; b.dataset.v=k;
       b.textContent=B.views[k].label+' ('+B.views[k].rows.length+')'; bar.append(b);});
     tb.after(bar);
     let anchor=bar;
     if(B.b2b_unavailable){const m=document.createElement('div'); m.className='b2b-miss';
-      m.textContent='B2B kayıt listesi ('+B.b2b_reg_file+') bu rapora verilmedi veya okunamadı. Bu, müşterilerin kayıtsız olduğu anlamına gelmez; A ve B listeleri oluşturulmadı. C listesi yalnız AG sütununa dayanır.';
+      m.textContent='B2B kayıt listesi ('+B.b2b_reg_file+') '+(B.b2b_reg_state||'kullanılamadı')+'. Bu, müşterilerin kayıtsız olduğu anlamına gelmez; A, B ve Doğrulanacak listeleri oluşturulmadı. C listesi yalnız AG sütununa dayanır.';
+      anchor.after(m); anchor=m;}
+    if(B.b2b_channel_unavailable){const m=document.createElement('div'); m.className='b2b-miss';
+      m.textContent='Satış dosyasında B2B kanalı (AG sütunu) doğrulanamadı. B ve C listeleri, B2B alımı sıfırmış gibi üretilmedi.';
       anchor.after(m); anchor=m;}
     if(!B.review_html&&B.b2b_warnings&&B.b2b_warnings.length){
       const box=document.createElement('div'); box.className='b2b-warn';
@@ -673,6 +768,9 @@ EXTENSION_JS = r"""
       state.b2b.sort=null; state.b2b.dir=1; if('page' in state.b2b) state.b2b.page=0;
       bar.querySelectorAll('.b2b-view').forEach(b=>b.classList.toggle('on',b.dataset.v===k)); draw('b2b');};
     bar.addEventListener('click',e=>{const b=e.target.closest('.b2b-view'); if(b) setView(b.dataset.v);});
+    p.addEventListener('click',e=>{const tr=e.target.closest('tr.exp'); if(!tr||!p.contains(tr)) return;
+      const ph=tr.nextElementSibling&&tr.nextElementSibling.querySelector('[data-lazy]');
+      if(ph) ph.outerHTML=fullDetail(LAZY.get(+ph.dataset.lazy));});
     const t=document.querySelector('.tab[data-t="b2b"] .cnt'); if(t) t.textContent=all.length;
     setView('A');
   }

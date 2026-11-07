@@ -1,5 +1,22 @@
 # STATUS.md — current checkpoint
 
+**2026-11-07 (later) — D-080 review corrections + complete November B2B reports; PR #51 updated, NOT merged / deployed / sent.**
+- ChatGPT review of PR #51 at `f0af472` addressed in `halsa_b2b.py` only: A = definite gaps; new "Doğrulanacak" view for
+  ambiguous matches, B2B buyers absent from the list and unclear channel spellings; B and C withheld unless AG verifies;
+  registration column B must be headed `Kod No` with ≥1 code (wrong layout / empty / unreadable = unknown); order-id
+  collisions counted, mixed documents judged within one customer, order counts unchanged; `Kullanıcı Cari` labels
+  registration-only codes (no user names / e-mails read); B2B Takip detail built on first open (≈4,700-row list A).
+- Registration workbook found in the private `data/` folder, SHA-256 `dbad60b3…` verified: `Kod No`, 2,113 codes,
+  1,996 distinct, 107 repeated, 31 rows without code. Real November: A 4,739 · B 1,142 (676 other channels, 466 no sales)
+  · C 415 · Doğrulanacak 360; exact matches 1,527; invoice-account ambiguous 368; 29 B2B buyers not confirmed (358 lines);
+  22 / 4 order ids span customers / years (no B2B), 0 mixed documents.
+- Independent openpyxl reconciliation 171,000 checks, 0 discrepancies; original Klasik vs variant 7,706 checks, 0;
+  offline DOM 30 + 31 checks, 0 JS errors. Chromium only on synthetic (incl. November-scale timing). Originals and the
+  registration workbook unchanged. New private outputs `reports/private/b2b-tracking/Halsa_Kasim_2026_Klasik_B2B_Tam.html`
+  `e382b2af…`, `Halsa_Kasim_2026_Genel_B2B_Tam.html` `0e97dce7…`; earlier reports kept; two intermediate drafts moved to
+  `superseded-drafts/`.
+- Tests: `tests/test_b2b_tracking.py` 25 (incl. Chromium); full suite **2146 passed, 8 skipped, 1 xfailed** (857 s; JS + browser required). STOP for ChatGPT's final review.
+
 **2026-11-07 — D-080 father's B2B tracking: Klasik B2B variant + V1 `--b2b`; draft PR, NOT merged / deployed / sent.**
 - Branch `claude/b2b-tracking` from verified baseline `9084b11`. New `halsa_b2b.py` (one shared calculation),
   `classic/klasik_b2b.py` (separate generator; frozen builder + `generate.py` untouched), `services/b2b_review.py` and

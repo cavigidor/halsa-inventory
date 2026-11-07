@@ -85,18 +85,44 @@ def test_channel_column_is_refused_when_the_header_row_differs():
 
 def test_registration_is_column_b_exact_with_duplicates_and_numeric_cells(core, src):
     reg = HB.read_registration(open(_paths(src)[2], "rb").read())
-    assert reg["header"] == "Cari Kodu" and reg["rows"] == 9 and reg["numeric_cells"] == 1
+    assert reg["status"] == "ok" and reg["header"] == "Kod No" and reg["rows"] == 9 and reg["numeric_cells"] == 1
     assert reg["duplicates"] == {"910.00.0001": 2} and "090.00.0001" in reg["unique"]   # leading zero kept
+    assert reg["missing_code_rows"] == [11] and reg["names"]["910.00.0099"] == "Sentetik Kayit Firma 7"
+    assert not any("@" in str(v) for v in reg["names"].values())                       # e-mails never read
     st = core["status"]
     assert st["910.00.0001"] == st["090.00.0001"] == "confirmed"
     assert st["910.00.0006 "] == "ws"                         # trailing space: never trimmed into a match
     assert st["910.00.0007"] == "inv"                         # only its invoice account is registered
     assert st["910.00.0003"] == "not_found"
+    c = core["counts"]
+    assert c["registration_missing_code_rows"] == 1 and c["registration_duplicate_codes"] == 1
+    assert "B2B-KAYIT-KODSUZ" in {w["code"] for w in core["warnings"]}
 
 
-def test_ambiguous_matches_are_never_counted_as_registered(core):
-    a = {r["code"]: r for r in core["views"]["A"]}
-    assert a["910.00.0006 "]["reg"].startswith("Belirsiz") and a["910.00.0007"]["reg"].startswith("Belirsiz")
+@pytest.mark.parametrize("headers,rows,state", [
+    (["Id", "Cari Kodu", "x"], [[1, "910.00.0001", "y"]], "wrong_layout"),       # another column B header
+    (S.REG_HEADERS, [], "empty"),                                                # header only
+    (S.REG_HEADERS, [[1, None, "a", "b@ornek.invalid", "-", "F", "Kullanıcı"]], "empty"),
+])
+def test_wrong_layout_or_empty_registration_is_never_zero_registrations(src, tmp_path, headers, rows, state):
+    path = tmp_path / "reg.xlsx"
+    pd.DataFrame(rows, columns=headers).to_excel(path, index=False)
+    reg = HB.read_registration(path.read_bytes())
+    assert reg["status"] == state
+    _, sales, _ = _paths(src)
+    base = DB.load_sales(sales)
+    res = HB.analyse(pd.read_excel(sales), base, DB.cust_attrs(base), reg, HB.sheet_header(sales))
+    assert res["views"]["A"] == res["views"]["B"] == res["views"]["V"] == []
+    assert set(res["status"].values()) == {"unknown"} and HB.momentum_flag(res, "910.00.0003") == "—"
+    assert HB.read_registration(b"not a workbook")["status"] == "unreadable"
+
+
+def test_ambiguous_matches_are_separate_and_never_counted_as_registered(core):
+    v = {r["code"]: r for r in core["views"]["V"]}
+    assert v["910.00.0006 "]["kind"].endswith("boşluk farkı") and v["910.00.0007"]["kind"].endswith("fatura hesabı kayıtlı")
+    assert v["910.00.0006"]["kind"].startswith("Kayıt kodu yalnız boşluk") and v["910.00.0006"]["linked"] == "910.00.0006 "
+    assert v["910.99.0001"]["kind"].startswith("Kayıt kodu yalnız fatura") and v["910.99.0001"]["linked"] == "910.00.0007"
+    assert v["910.99.0001"]["name"] == "Sentetik Kayit Firma 5"                 # name from 'Kullanıcı Cari'
     assert HB.momentum_flag(core, "910.00.0007") == "Belirsiz" and HB.momentum_flag(core, "910.00.0003") == ""
     assert HB.momentum_flag(core, "910.00.0001") == "B2B"
     assert core["counts"]["status_confirmed"] == 4          # 0001, 0002, 0005, 090.00.0001
@@ -104,21 +130,38 @@ def test_ambiguous_matches_are_never_counted_as_registered(core):
     assert "910.00.0007" in codes["B2B-FATURA"]["codes"] and "910.00.0006 " in codes["B2B-BOSLUK"]["codes"]
 
 
-def test_the_three_call_lists(core):
+def test_the_call_lists_and_the_verification_list(core):
     v = {k: {r["code"]: r for r in rows} for k, rows in core["views"].items()}
-    assert set(v["A"]) == {"910.00.0003", "910.00.0004", "910.00.0006 ", "910.00.0007", "910.00.0009", "910.00.0010"}
-    assert v["A"]["910.00.0004"]["b2b_seen"] == "Evet"                       # buys via B2B but not in the list
-    assert v["A"]["910.00.0009"]["b2b_seen"] == "Belirsiz kanal"
-    assert "910.00.0008" not in v["A"] and core["counts"]["closed_excluded_A"] == 1     # KAPALI
+    assert set(v["A"]) == {"910.00.0003", "910.00.0010"}                         # definite gaps only
+    assert all(r["reg"] == "Listede bulunamadı" for r in v["A"].values())
+    assert v["V"]["910.00.0004"]["kind"] == "B2B'den alıyor, kodu kayıt listesinde yok"
+    assert v["V"]["910.00.0009"]["kind"].startswith("Kanal yazımı belirsiz")
+    assert set(v["V"]) == {"910.00.0004", "910.00.0006 ", "910.00.0007", "910.00.0009", "910.00.0006", "910.99.0001"}
+    assert "910.00.0008" not in v["A"] and core["counts"]["closed_excluded"]["A"] == 1     # KAPALI
     assert v["B"]["910.00.0002"]["sub"] == "Diğer kanallardan alıyor"
-    assert v["B"]["910.00.0099"]["sub"] == "Satış verisinde eşleşme yok" and v["B"]["910.00.0099"]["name"] == ""
-    assert v["B"]["12345"]["sub"] == "Satış verisinde eşleşme yok"
-    assert v["B"]["910.99.0001"]["sub"].startswith("Belirsiz") and v["B"]["910.00.0006"]["sub"].startswith("Belirsiz")
-    assert "910.00.0005" not in v["B"] and "910.00.0001" not in v["B"]         # they did buy via B2B
+    assert v["B"]["910.00.0099"]["sub"].startswith("Satış verisinde eşleşme yok")
+    assert v["B"]["910.00.0099"]["name"] == "Sentetik Kayit Firma 7" and v["B"]["910.00.0099"]["excel_row"] == 9
+    assert v["B"]["12345"]["sub"].startswith("Satış verisinde eşleşme yok")
+    assert set(v["B"]) == {"910.00.0002", "910.00.0099", "12345"}
     assert set(v["C"]) == {"910.00.0004", "910.00.0005"}
     c5 = v["C"]["910.00.0005"]
     assert c5["last_b2b"] == "2023-05-10" and c5["b2b_total"] == 9000 and c5["b2b_orders"] == 1
     assert c5["recent_other"] == 4000 and c5["recent_other_orders"] == 1
+    kinds = core["counts"]["view_V_kinds"]
+    assert sum(kinds.values()) == core["counts"]["view_V"] == 6
+
+
+def test_unverified_channel_never_produces_b_or_c(src):
+    _, sales, reg = _paths(src)
+    raw = pd.read_excel(sales)
+    base = DB.load_sales(None, raw)
+    hdr = list(S.HEADERS)
+    hdr[32] = "Baska"
+    res = HB.analyse(raw, base, DB.cust_attrs(base), HB.read_registration(open(reg, "rb").read()), hdr)
+    assert res["views"]["B"] == [] and res["views"]["C"] == []
+    assert "B2B-KANAL-YOK" in {w["code"] for w in res["warnings"]}
+    assert HB.module(res)["b2b_channel_unavailable"] is True
+    assert all(r["b2b_total"] is None for r in res["per"].values())
 
 
 def test_window_counts_back_from_the_latest_transaction_not_today(core, src):
@@ -130,23 +173,27 @@ def test_window_counts_back_from_the_latest_transaction_not_today(core, src):
     assert "910.00.0001" in {r["code"] for r in short["views"]["C"]}           # last B2B 2026-03-01 → old for 30 days
 
 
-def test_amounts_documents_missing_negative_and_mixed(core):
+def test_amounts_documents_missing_negative_mixed_and_identifier_collisions(core):
     y = core["yearly"]["910.00.0001"]
     assert y[2025]["b2b"] is None and y[2025]["b2b_orders"] == 2              # missing amount → unknown, never 0
     assert y[2026]["b2b"] == 7000 and y[2026]["b2b_orders"] == 2              # 8000 − 1000; distinct documents
     assert y[2026]["b2b_mixed"] == 1 and core["counts"]["mixed_documents"] == 1
-    assert core["counts"]["b2b_amount_negative"] == 1 and core["counts"]["b2b_amount_missing"] == 1
+    c = core["counts"]
+    assert c["doc_ids_multi_customer"] == 1 and c["doc_ids_multi_customer_b2b"] == 1
+    assert core["yearly"]["910.00.0010"][2026]["b2b_mixed"] == 0              # the collision is not "mixed" for it
+    assert c["b2b_amount_negative"] == 1 and c["b2b_amount_missing"] == 1
     a = {r["code"]: r for r in core["views"]["A"]}
     assert a["910.00.0003"]["total"] == 59000                                 # identical lines both kept
     assert core["yearly"]["910.00.0009"][2025]["b2b"] is None                 # unclear channel → unknown
     assert HB.year_fields(core, "910.00.0002", 2025) == {"b2b": 0, "b2b_orders": 0, "b2b_mixed": 0}
+    assert c["b2b_buyers_not_confirmed"] == 1 and c["b2b_lines_not_confirmed"] == 1   # 910.00.0004 only
 
 
 def test_missing_registration_is_unknown_not_unregistered(src):
     _, sales, _ = _paths(src)
     base = DB.load_sales(sales)
     res = HB.analyse(pd.read_excel(sales), base, DB.cust_attrs(base), HB.read_registration(None), HB.sheet_header(sales))
-    assert res["views"]["A"] == [] and res["views"]["B"] == []
+    assert res["views"]["A"] == [] and res["views"]["B"] == [] and res["views"]["V"] == []
     assert {r["code"] for r in res["views"]["C"]} == {"910.00.0004", "910.00.0005"}
     assert set(res["status"].values()) == {"unknown"} and HB.momentum_flag(res, "910.00.0001") == "—"
     w = res["warnings"][0]
@@ -159,7 +206,7 @@ def test_the_shared_module_imports_nothing_of_either_application():
         tree = ast.parse(open(os.path.join(ROOT, f), encoding="utf-8").read())
         mods = {a.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
         mods |= {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
-        allowed = {"__future__", "datetime", "hashlib", "io", "json", "math", "pandas", "openpyxl", "argparse", "os",
+        allowed = {"__future__", "collections", "datetime", "hashlib", "io", "json", "math", "pandas", "openpyxl", "argparse", "os",
                    "shutil", "subprocess", "sys", "tempfile", "generate"}
         assert mods <= allowed, (f, mods - allowed)
     assert "import original_builder" in KB.CHILD and "spec_from_file_location('halsa_b2b'" in KB.CHILD
@@ -296,20 +343,29 @@ def test_b2b_takip_views_search_filter_sort_and_detail_in_the_browser(browser, c
     assert tabs[tabs.index("margin") + 1] == "b2b"
     page.click('.tab[data-t="b2b"]')
     panel = page.locator("#b2b")
-    assert panel.locator(".b2b-view").count() == 3
-    assert panel.locator("tbody tr.main").count() == 6
-    panel.locator(".search").fill("910.00.0004")                               # code search
+    assert panel.locator(".b2b-view").count() == 4
+    assert panel.locator("tbody tr.main").count() == 2                          # A: definite gaps only
+    panel.locator(".search").fill("910.00.0010")                               # code search
     assert panel.locator("tbody tr.main").count() == 1
     panel.locator(".search").fill("")
+    panel.locator('.b2b-view[data-v="V"]').click()
+    assert panel.locator("tbody tr.main").count() == 6 and "Belirsiz kayıt eşleşmesi" in panel.inner_text()
     panel.locator(".repsel").select_option("TEMSILCI-B")
-    assert panel.locator("tbody tr.main").count() == 1
+    assert panel.locator("tbody tr.main").count() == 1 and "910.00.0004" in panel.inner_text()
     panel.locator(".repsel").select_option("")
     panel.locator('.b2b-view[data-v="B"]').click()
-    assert panel.locator("tbody tr.main").count() == 5 and "Satış verisinde eşleşme yok" in panel.inner_text()
+    assert panel.locator("tbody tr.main").count() == 3 and "Satış verisinde eşleşme yok" in panel.inner_text()
     panel.locator('.b2b-view[data-v="C"]').click()
     assert panel.locator("tbody tr.main").count() == 2
     panel.locator('th[data-k="b2b_total"]').click()
     assert "910.00.0005" in panel.locator("tbody tr.main").first.inner_text()   # largest B2B total first
+    if which == "classic":                                                      # detail built on first open
+        assert panel.locator("[data-lazy]").count() == 2
+        panel.locator("tr.exp").first.click()
+        det = panel.locator("tr.det.open")
+        assert [h.inner_text().strip().upper() for h in det.locator("table.sub th").all()] == \
+            ["YIL", "HARCAMA", "SİPARİŞ", "B2B ALIMI", "SİPARİŞ (B2B)"]
+        assert det.locator(".prods-h").count() == 1 and panel.locator("[data-lazy]").count() == 1
     page.click('.tab[data-t="momentum"]')
     assert page.locator("#momentum .b2b-flag").count() == 2
     if which == "classic":

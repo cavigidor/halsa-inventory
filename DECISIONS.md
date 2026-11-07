@@ -1555,3 +1555,14 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   0 discrepancies; original vs variant 7,699 checks, 0 discrepancies.
 - **Open (father):** the registration file; which code a B2B user is opened under (ordering customer vs invoice account);
   the "son zamanlarda" period; zero-amount B2B lines; KAPALI in call lists. Ambiguous cases stay unconfirmed until answered.
+- **Review corrections (ChatGPT review of PR #51 at `f0af472`, 2026-11-07):** list A holds only definite gaps; ambiguous
+  matches (customer or registration side), B2B-channel buyers absent from the list and unclear channel spellings move to
+  a separate "Doğrulanacak" view, counted as neither registered nor unregistered. B and C are not produced unless column
+  AG is verified. The registration workbook must have column B header `Kod No` and at least one code; a wrong-layout,
+  empty or unreadable workbook is "unknown". Order-identifier collisions across customers / years are counted and a mixed
+  document is judged within one customer; order counts keep the established per-customer-year rule. Column F
+  `Kullanıcı Cari` labels registration-only codes; user names / e-mails are never read. In the Klasik variant the B2B
+  Takip detail is built on first open (performance at ≈4,700 rows); original tabs unchanged.
+- **Real data with the supplied registration file (`dbad60b3…`):** A 4,739 · B 1,142 · C 415 · Doğrulanacak 360;
+  independent reconciliation 171,000 checks, 0 discrepancies; original vs variant 7,706 checks, 0 discrepancies
+  (`docs/b2b_tracking.md`). Open questions for the father are listed there.
