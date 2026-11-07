@@ -17,7 +17,8 @@
   Outputs (private, gitignored): `reports/private/b2b-tracking/Halsa_Kasim_2026_Klasik_B2B.html` `00c5d9bc…`,
   `Halsa_Kasim_2026_Genel_B2B.html` `f024daf6…`.
 - Tests: new `tests/test_b2b_tracking.py` (19, incl. Chromium); Klasik golden tests unchanged and passing. Full suite:
-  see next commit (run in progress). STOP for ChatGPT review; regenerate once the registration file arrives.
+  **2142 passed, 8 skipped, 1 xfailed** (815.7 s; AI disabled, JS + browser required; the extra skip vs CI is the
+  71f5f2f git-history check in a shallow clone). STOP for ChatGPT review; regenerate once the registration file arrives.
 
 **2026-11-06 — D-079 provisional Stock/Sales dashboard + private offline father report; new draft review checkpoint, NOT merged/deployed.**
 - Phase A completed exactly as authorized: PR #49 marked ready and squash-merged as `112062384d22d32a542088aedd34da80a6019a84`.
