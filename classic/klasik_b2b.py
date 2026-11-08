@@ -8,7 +8,7 @@ observes it:
   arguments after three additions: the "B2B" column in Büyüme / Küçülme (after Temsilci), the B2B Alımı / Sipariş (B2B)
   fields in each yearly detail entry, and a "B2B Takip" tab placed right after Kâr Marjı;
 - one style block and one script are appended (shared `halsa_b2b` presentation; the original page ends with a fixed
-  template, asserted): the five-column yearly table, the B2B badge and the three call lists A / B / C.
+  template, asserted): the five-column yearly table, the B2B badge and the single B2B Takip table (İzahat filter).
 No original formula, threshold, sort order, inclusion rule, label or tab changes; "Öne Çıkan Ürünler" is rendered with
 the original markup. The B2B rules come only from `halsa_b2b.py` (stdlib + pandas + openpyxl; loaded by file path), the
 same calculation the V1 general report uses. Nothing of the new Halsa application (services / config / app / schemas /
@@ -17,8 +17,10 @@ dashboard_builder) may be loaded: the child refuses to finish if one is.
 Usage:
     python classic/klasik_b2b.py --stock STOK.xlsx --sales "satışlar.xlsx" [--b2b-registration b2b_kullanici_rapor.xlsx]
         [--cari "Cari ….xlsx"] --out reports/private/Halsa_Kasim_2026_Klasik_B2B.html [--date 2026-11-07]
-        [--b2b-review-days 365]
+        [--b2b-review-days 365] [--b2b-list-complete]
 Without --b2b-registration the report states that the registration list is missing (never "not registered").
+--b2b-list-complete is the owner's declaration that the export lists every B2B user; only then is a code with no
+exact, ambiguous or invoice-account match shown as 'YOK' (otherwise 'Listede yok').
 Prints counts and the output's SHA-256 only; never a business value.
 """
 from __future__ import annotations
@@ -39,7 +41,7 @@ REGISTRATION_NAME = "b2b_kullanici_rapor.xlsx"
 
 CHILD = r"""
 import json, os, sys, datetime as dt, importlib.util
-classic, folder, out, day, roles, core, reg, reg_name, days = sys.argv[1:10]
+classic, folder, out, day, roles, core, reg, reg_name, days, complete = sys.argv[1:11]
 roles = json.loads(roles)
 sys.path.insert(0, classic)
 import original_builder as ob
@@ -92,16 +94,19 @@ if 'base' in cap:
         hb.add_year_fields(m['rows'], res)
     if 'momentum' in modules:
         hb.add_flag_column(modules['momentum'], res, after='rep')
-    mod = hb.module(res)
-    for k, v in mod['views'].items():
-        codes = {r['code'] for r in v['rows'] if r.get('name') or r['code'] in res['per']}
-        det = ob._cust_detail(cap['base'][cap['base']['_cust'].isin(codes)])
-        for r in v['rows']:
-            if r['code'] in det: r['detail'] = det[r['code']]
-        hb.add_year_fields(v['rows'], res)
+    mod = hb.module(res, registration_complete=complete == '1')
+    cust_rows = [r for r in mod['rows'] if r['side'] == 'musteri']
+    det = ob._cust_detail(cap['base'][cap['base']['_cust'].isin({r['code'] for r in cust_rows})])
+    for r in cust_rows:
+        if r['code'] in det: r['detail'] = det[r['code']]
+    hb.add_year_fields(mod['rows'], res)
     mod['expand'] = True
+    unified = hb.unified_counts(mod['rows'])
+    # the frozen renderer draws every panel once at start-up, before the shared script can page B2B Takip: ship the
+    # rows under b2b_rows (the script moves them back and rebuilds the representative list), not the full 7k table
+    mod['b2b_rows'], mod['rows'] = mod['rows'], []
     modules = hb.insert_after(modules, 'margin', 'b2b', mod)
-    b2b = res['counts']
+    b2b = dict(res['counts'], unified=unified, registration_complete=complete == '1')
 page = hb.inject(real_html(modules, stats, meta, later))
 with open(out, 'w', encoding='utf-8') as f: f.write(page)
 loaded = sorted(m for m in sys.modules if m.split('.')[0] in %(forbidden)r)
@@ -115,13 +120,15 @@ print(json.dumps({"counts": counts, "b2b": b2b, "pandas": __import__('pandas')._
 
 def generate_b2b(stock: str, sales: str, out: str, registration: str | None = None, cari: str | None = None,
                  day: dt.date | None = None, overwrite: bool = False, review_days: int = 365,
-                 python: str | None = None) -> dict:
+                 python: str | None = None, registration_complete: bool = False) -> dict:
     if G._sha(G.BUILDER) != G.BUILDER_SHA256:
         raise G.ClassicError("classic/original_builder.py değişmiş; orijinal pano üretilemez")
     if not os.path.isfile(CORE):
         raise G.ClassicError("halsa_b2b.py bulunamadı")
     if review_days < 1:
         raise G.ClassicError("inceleme süresi en az 1 gün olmalı")
+    if registration_complete and registration is None:
+        raise G.ClassicError("kayıt listesi tamlık beyanı için B2B kayıt dosyası gerekir")
     day = day or dt.date.today()
     inputs = {"stock": stock, "sales": sales, **({"aging": cari} if cari else {})}
     for role, p in list(inputs.items()):
@@ -171,7 +178,8 @@ def generate_b2b(stock: str, sales: str, out: str, registration: str | None = No
         env = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "SYSTEMROOT")}
         env["PYTHONHASHSEED"] = G.HASH_SEED
         r = subprocess.run([python or sys.executable, "-s", "-P", "-c", CHILD, G.HERE, folder, staged, day.isoformat(),
-                            json.dumps(names, ensure_ascii=False), CORE, reg_copy, reg_name, str(int(review_days))],
+                            json.dumps(names, ensure_ascii=False), CORE, reg_copy, reg_name, str(int(review_days)),
+                            "1" if registration_complete else "0"],
                            capture_output=True, text=True, env=env, cwd=tmp)
         last = (r.stdout.strip().splitlines() or ["{}"])[-1]
         try:
@@ -201,18 +209,23 @@ def _cli(argv=None) -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--date", help="rapor tarihi YYYY-MM-DD (varsayılan: bugün)")
     ap.add_argument("--b2b-review-days", type=int, default=365, help="geçici 'son zamanlarda' süresi (gün)")
+    ap.add_argument("--b2b-list-complete", action="store_true",
+                    help="sahip beyanı: kayıt listesi tüm B2B kullanıcılarını içerir (listede olmayan kod 'YOK' gösterilir)")
     ap.add_argument("--overwrite", action="store_true")
     a = ap.parse_args(argv)
     try:
         res = generate_b2b(a.stock, a.sales, a.out, registration=a.b2b_registration, cari=a.cari,
                            overwrite=a.overwrite, review_days=a.b2b_review_days,
-                           day=dt.date.fromisoformat(a.date) if a.date else None)
+                           day=dt.date.fromisoformat(a.date) if a.date else None,
+                           registration_complete=a.b2b_list_complete)
     except (G.ClassicError, ValueError) as e:
         print(f"B2B klasik rapor oluşturulamadı: {e}", file=sys.stderr)
         return 2
     b = res.get("b2b") or {}
     print(f"B2B klasik rapor hazır: {res['out']}")
-    print(f"  B2B Takip — A {b.get('view_A')} · B {b.get('view_B')} · C {b.get('view_C')} · kayıt listesi: "
+    u = b.get("unified") or {}
+    print(f"  B2B Takip — {u.get('rows')} satır (müşteri {u.get('customers')}, yalnız kayıt kodu "
+          f"{u.get('registration_only')}) · B2B Kaydı {u.get('b2b_kaydi')} · kayıt listesi: "
           f"{b.get('registration_status')} · B2B satırı {b.get('b2b_lines')}")
     print(f"  SHA-256 {res['sha256'][:16]} · pandas {res['pandas']} · openpyxl {res['openpyxl']} · Python {res['python']}")
     return 0

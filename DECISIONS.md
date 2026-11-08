@@ -1598,3 +1598,22 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **Unchanged:** metric register and certification, access roles, D-070 / D-071 retirements, Classic, the B2B reports.
 - **Open (father):** the binding overdue rule; collections report filter; Cari / Kredi snapshot dates; Gider/Gelir rows
   59 / 82 / 165; Bütçe file of record; Hedef ownership and Net Ciro; Trodat units and SKU mapping.
+
+### D-082 · 2026-11-08 · B2B Takip as one table with İzahat (father's feedback)
+- **Request (father):** use the rightmost explanation instead of four choices; B2B record VAR or YOK, no "bulunamadı";
+  four choices leave no "Tümü".
+- **Decision:** one table (default Tümü), B2B Kaydı and İzahat as the last columns, an İzahat select; the D-080
+  classification is unchanged and each of its rows appears once (C ∩ Doğrulanacak merged, Kontrol reason first),
+  plus registered customers in no call list. Registration-only codes stay separate rows; KAPALI excluded as before.
+- **YOK is not inferred** from an exact-code miss. "Listede yok" is shown until the owner declares the registration export
+  complete (`--b2b-list-complete`); Kontrol rows never become YOK; without a usable list B2B Kaydı is "—".
+- **Evidence:** read-only reconciliation (`docs/b2b_tracking.md`, D-082 section): the misses are not formatting (1 space
+  pair); 4,695 of the 4,739 have no candidate in the list. Shared by the Klasik B2B variant and the V1 `--b2b` report.
+- **Unchanged:** `analyse()` and its counts, B2B amounts, Büyüme / Küçülme B2B column, yearly detail, every other tab,
+  the frozen Classic builder, the delivered reports.
+- **PR #53 review:** registration identity and sales channel are separate — an exact Kod No match is VAR even when an
+  AG spelling is ambiguous (İzahat explains it; B2B amount unknown); Kontrol only for unresolved identity. Klasik's B2B
+  Takip is paged (200 rows) by the shared script with filter / search / sort over every row; the rows ship apart so the
+  frozen renderer's start-up draw stays light. `classic/original_builder.py` unchanged; V1 keeps its own paging.
+- **Open (father):** whether the registration export lists every B2B user (then YOK); bayi-account registrations; the
+  14 B2B buyers not in the list; codeless rows; same-name codes; the Turkish guide after acceptance.

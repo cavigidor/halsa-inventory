@@ -18,6 +18,9 @@ Scenarios (latest transaction 2026-06-30 → provisional 365-day window starts a
   910.00.0099  registration only                                                   → B (satış eşleşmesi yok)
   12345        a numeric registration cell
   (row 11)     a registration row without a customer code (Kod No blank)
+  Opt-in (`registered_unclear=True`, D-082 review): two EXACTLY registered customers with an ambiguous channel
+  spelling — 910.00.0011 (other channels + one 'B2B web' line) and 910.00.0012 (recent exact B2B + one 'b2b ' line).
+  Registration stays VAR; only the B2B channel is unverified.
   SNB|1003 is also recorded for 910.00.0010 (a document identifier used by two customers): the B2B line of
   910.00.0001 and the other-channel line of 910.00.0010 must NOT make a cross-customer "mixed" document.
 The registration workbook has the supplied export's columns (Id, Kod No, Kullanıcı Adı, Kullanıcı E-posta, Son Online,
@@ -55,7 +58,7 @@ def _line(doc, date, pro, name, amount, channel="SATICI-X", inv=None, rep="TEMSI
     return r
 
 
-def sales_rows():
+def sales_rows(registered_unclear=False):
     L = []
     n = iter(range(1000, 9999))
     c1 = "910.00.0001"
@@ -86,28 +89,33 @@ def sales_rows():
     L.append(_line(next(n), "2026-06-30", "090.00.0001", "Sentetik Sifir", 2_500, channel="B2B"))
     L.append(_line(next(n), "2026-06-20", "910.00.0010", "Sentetik Bos Kanal", 700, channel=None))
     L.append(_line(mixed, "2026-02-01", "910.00.0010", "Sentetik Bos Kanal", 300))             # identifier collision
+    if registered_unclear:
+        L.append(_line(next(n), "2026-03-03", "910.00.0011", "Sentetik Onbir", 4_200, rep="TEMSILCI-B"))
+        L.append(_line(next(n), "2026-04-04", "910.00.0011", "Sentetik Onbir", 800, channel="B2B web", rep="TEMSILCI-B"))
+        L.append(_line(next(n), "2026-05-05", "910.00.0012", "Sentetik Oniki", 3_300, channel="B2B"))
+        L.append(_line(next(n), "2026-05-06", "910.00.0012", "Sentetik Oniki", 600, channel="b2b "))
     return L
 
 
 REG_HEADERS = ["Id", "Kod No", "Kullanıcı Adı", "Kullanıcı E-posta", "Son Online", "Kullanıcı Cari", "Kullanıcı Rolü"]
 
 
-def registration_rows():
+def registration_rows(registered_unclear=False):
     codes = ["910.00.0001", "910.00.0001", "910.00.0002", "910.00.0005", "910.00.0006", "910.99.0001", "090.00.0001",
-             "910.00.0099", 12345, None]
+             "910.00.0099", 12345, None] + (["910.00.0011", "910.00.0012"] if registered_unclear else [])
     return [[i + 1, c, f"kullanici{i}", f"kullanici{i}@ornek.invalid", "-", f"Sentetik Kayit Firma {i}", "Kullanıcı"]
             for i, c in enumerate(codes)]
 
 
-def write_all(folder, registration=True):
+def write_all(folder, registration=True, registered_unclear=False):
     os.makedirs(folder, exist_ok=True)
     F.write_all(folder)
     for x in (F.SALES_FILE, F.AGING_FILE):
         os.remove(os.path.join(folder, x))
-    pd.DataFrame(sales_rows(), columns=HEADERS).to_excel(os.path.join(folder, SALES_FILE), index=False)
+    pd.DataFrame(sales_rows(registered_unclear), columns=HEADERS).to_excel(os.path.join(folder, SALES_FILE), index=False)
     if registration:
         reg_dir = os.path.join(folder, "kayit")
         os.makedirs(reg_dir, exist_ok=True)
-        pd.DataFrame(registration_rows(), columns=REG_HEADERS).to_excel(
+        pd.DataFrame(registration_rows(registered_unclear), columns=REG_HEADERS).to_excel(
             os.path.join(reg_dir, REG_FILE), index=False)
     return folder

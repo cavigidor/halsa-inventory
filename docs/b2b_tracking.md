@@ -1,4 +1,4 @@
-# B2B Takip — father's B2B call lists (D-080)
+# B2B Takip — father's B2B call lists (D-080; one table with İzahat: D-082)
 
 Two separately named, offline, read-only November reports help Halsa decide whom to call about its B2B platform:
 
@@ -25,27 +25,44 @@ Both use one calculation, `halsa_b2b.py` (standard library + pandas + openpyxl o
 | "Son zamanlarda" | **Provisional** 365 days (`--b2b-review-days`), counted back from the latest transaction date in the sales file — never the computer's date. Not an approved rule. |
 | KAPALI | The dashboards' existing rule (at least half of the customer's lines `KAPALI`) removes the customer from the call lists; counts are shown. |
 
-### The call lists (B2B Takip tab, right after Kâr Marjı)
+### One table with İzahat (B2B Takip tab, right after Kâr Marjı) — D-082
 
-- **A · Bizden alışveriş yapan, B2B kaydı olmayan müşteriler** — definite gaps only: customers with sales lines whose
-  code is in column B neither exactly nor ambiguously, and who have no B2B-channel line. Columns: customer, code,
-  representative, sector, last-365-day purchases, total in the file, last purchase, registration status. Sorted by
-  recent purchases.
-- **B · B2B kaydı olan, ancak B2B'den alışveriş yapmayan müşteriler** — exact registration codes without B2B lines:
-  "Diğer kanallardan alıyor", or "Satış verisinde eşleşme yok" (name from `Kullanıcı Cari` when present; Excel row of
-  the registration). **Not produced when column AG cannot be verified.**
-- **C · Eskiden B2B'den alıp son zamanlarda almayan müşteriler** — at least one B2B line, none in the review window:
-  last B2B purchase, historical B2B amount, B2B order count, last-365-day other-channel amount, registration status.
-  **Not produced when column AG cannot be verified.**
-- **Doğrulanacak · Belirsiz kayıt eşleşmeleri ve listede olmayan B2B alıcıları** — never counted as registered or
-  unregistered: customers matching only by surrounding spaces or only through their invoice account; customers with
-  B2B-channel purchases whose code is not in the list; unclear channel spellings; and registration codes that appear in
-  sales only with extra spaces or only as an invoice account ("Bağlı satış kodu" shows the linked customers).
+Father's feedback on the delivered report (2026-11-08): "go by the rightmost column instead of four choices; B2B record
+should be VAR or YOK, not 'bulunamadı'; with four choices there is no 'Tümü'". The four buttons are replaced by **one
+table** (default: Tümü) with **B2B Kaydı** and **İzahat** as the last two columns and an **İzahat** select next to the
+representative filter. The classification below (A / B / C / Doğrulanacak, kept internally as `views`) is unchanged;
+each row of it appears exactly once, plus the registered customers that no call list showed (B2B buyers in the window).
 
-In the Klasik report the customer detail inside B2B Takip is built when a row is first opened (same markup and data),
-because list A holds thousands of rows; the original tabs are rendered exactly as before.
+| İzahat (filter label) | B2B Kaydı | From |
+|---|---|---|
+| B2B kaydı var · B2B'den alıyor | VAR | registered (exact), B2B line in the window — previously in no list |
+| B2B kaydı var · eskiden B2B'den alıyordu | VAR | C, registered |
+| B2B kaydı var · B2B'den hiç almamış | VAR | B, other channels |
+| B2B kaydı var · bu kodla satış yok | VAR | B, registration-only code (separate row; name from the list, no representative) |
+| B2B kayıt listesinde yok | **Listede yok** (YOK only with the owner's declaration) | A |
+| Kontrol · fatura hesabı (bayi) kayıtlı | Kontrol | Doğrulanacak |
+| Kontrol · B2B'den alıyor, kodu listede yok | Kontrol | Doğrulanacak (+ "eskiden B2B'den alıyordu" when also in C) |
+| Kontrol · boşluk farkı / kayıt kodu satışta başka biçimde | Kontrol | Doğrulanacak |
+| Kontrol · kodu listede yok, kanal yazımı belirsiz | Kontrol | Doğrulanacak (no list match; may be a B2B buyer) |
+| B2B kaydı var · kanal yazımı belirsiz | **VAR** | registered (exact) with an ambiguous AG spelling — registration and channel kept apart |
 
-Each list has search (incl. codes), representative filter, sorting and (Klasik) the customer detail.
+- **YOK is never inferred.** An exact-code miss is not proof of no registration. "Listede yok" becomes "YOK" only with
+  `--b2b-list-complete` (both generators): the owner's declaration that `b2b_kullanici_rapor.xlsx` lists every B2B user.
+  Kontrol rows never become YOK; without a usable list the column is "—" and the table shows only the former B2B buyers.
+- A sales customer and a registration-only code are always separate rows (a code differing only by spaces is not merged).
+- KAPALI customers stay out (existing rule). Columns: customer, code, representative, sector, last-365-day purchases,
+  total, last purchase, last B2B purchase, B2B total, B2B Kaydı, İzahat. Search covers every column incl. İzahat.
+
+- **Registration identity and sales channel are separate:** an exact Kod No match is VAR whatever the AG spelling; the
+  İzahat explains the unverified channel (B2B amount stays "—"). Kontrol is only for an unresolved registration identity
+  (space difference, invoice account, a code not in the list but with B2B or B2B-like purchases).
+- **Klasik paging (B2B Takip only):** the frozen renderer draws every row, which took 0.5–1.8 s per interaction at
+  7,000 rows. The shared script pages B2B Takip by 200 rows; representative filter, search and sort run over every row of
+  the current İzahat choice (the original rules) before one page is drawn, and the rows are shipped apart
+  (`b2b_rows`) so the start-up draw of every panel no longer renders the full table. V1 keeps its own paging.
+
+In the Klasik report the customer detail inside B2B Takip is built when a row is first opened (same markup and data);
+the original tabs are rendered exactly as before.
 
 ### Other changes
 
@@ -154,3 +171,51 @@ unchanged. Two intermediate `_Tam` drafts made during this checkpoint were moved
 
 Screenshots (synthetic data): `docs/images/b2b_takip_synthetic.png` (A), `docs/images/b2b_takip_V_synthetic.png`
 (Doğrulanacak), `docs/images/b2b_takip_C_synthetic.png` (C with an opened detail), `docs/images/b2b_customer_detail_synthetic.png`.
+
+## D-082 — registration reconciliation and the unified table (2026-11-08, counts only)
+
+Read-only reconciliation of the verified files (registration `dbad60b3…`, sales `c23967fe…`); the delivered report's
+classification was reproduced exactly first. Row-level table (codes, reasons, candidates) stays private on the Mac:
+`reports/private/b2b-tracking/eslesme-mutabakati-2026-11-08/`.
+
+- **Formats:** every code is text in both files (no numeric cells), and 1,994 of 1,996 registration codes and 6,794 of
+  6,801 customer codes share the shape `999.99.9999`. Whitespace, case, number/text, leading zeros and separators were
+  tested: only **1 pair** differs by spaces (already Kontrol). **"Listede bulunamadı" is not a formatting problem.**
+- **Sales customers without an exact match (5,274):** 4,852 have no candidate in the list at all (A: 4,695, of which
+  1,014 bought in the last 365 days; 146 KAPALI; 11 B2B buyers), 368 have their invoice account (bayi) registered,
+  44 share a name with a different registered code (34 of those codes are separate sales customers), 9 a similar name.
+  Names are weak evidence: on the 1,527 exact matches, registration and sales names agree on 718.
+- **Registration side:** 2,144 user rows; 31 have no Kod No and no company name; 107 codes repeat (117 extra rows; each a
+  different user e-mail, none identical). 469 distinct codes are not sales customers: 436 no candidate, 28 same name
+  under another code, 2 similar name, 2 only as invoice account, 1 only with spaces.
+- **Unified table (November):** 7,056 rows = 6,587 customers + 469 registration-only codes; B2B Kaydı VAR 1,957 ·
+  Listede yok 4,739 · Kontrol 360. 420 registered active B2B buyers were in no previous list.
+- Previews (private, not sent): `reports/private/b2b-tracking/onizleme-2026-11-08/` — Klasik and Genel, plus a Klasik
+  preview with the declaration (illustration only). Verified against the delivered `_Tam` files: every other tab
+  identical, every list row present once with the same amounts, the 420 new rows recomputed independently.
+
+### PR #53 review (2026-11-08)
+
+- **466 vs 469 registration codes:** different scopes, both correct. 466 = codes that appear nowhere in sales (not as
+  ordering customer, not as invoice account, not with spaces) — the owner question "satışı olmayan kayıtlı kod". 469 =
+  codes that are not exactly an ordering-customer code = those 466 + 3 that appear in sales only in another form
+  (2 only as invoice account, 1 only with a space difference; Doğrulanacak, now "Kontrol · kayıt kodu satışta başka
+  biçimde"). The unified table has exactly these 469 registration-only rows. (The private table's `views` column shows
+  "—" for the 3; they are the Doğrulanacak registration-side rows.)
+- Name-based candidates (44 customers + 28 registration codes) and invoice-account cases (368 + 2) stay unresolved.
+- **Responsiveness (headless Chromium, synthetic report at the November size: 7,078 rows, 11 MB; 2 vCPU; median of 3;
+  event → next painted frame):**
+
+| Interaction | D-080 layout (main) | D-082 unpaged | D-082 paged | paged, CPU ×4 |
+|---|---|---|---|---|
+| open file | 3.7 s | 5.3 s | 3.7 s | 17.5 s (D-080: 17.0 s) |
+| open B2B Takip | 0.50 s | 1.47 s | 0.08 s | 0.28 s |
+| search keystroke (max) | 0.83 s | 1.71 s | 0.11 s | 0.24 s |
+| change view / İzahat | 0.56 s | 1.83 s | 0.04 s | 0.18 s |
+| sort by purchases | 0.54 s | 1.48 s | 0.04 s | 0.15 s |
+| open customer detail | 0.17 s | 0.33 s | 0.01 s | 0.03 s |
+| back to B2B Takip | 0.41 s | 0.91 s | 0.05 s | 0.23 s |
+
+  Not a real-browser acceptance: no Chrome was connected, the built-in browser cannot open local files, and the private
+  preview stays on the Mac. The real previews passed jsdom DOM checks (filters, a last-page code search, global sort,
+  paging, detail, representative filter, every tab; 0 JS errors). Safari / Chrome acceptance remains with the owner.

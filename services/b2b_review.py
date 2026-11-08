@@ -2,7 +2,7 @@
 
 Applies the shared `halsa_b2b` calculation — the same one the Klasik B2B variant uses — to the V1 report's modules:
 the "B2B" registration column in Büyüme / Küçülme (after the representative), B2B Alımı / Sipariş (B2B) in the yearly
-customer table, and a "B2B Takip" section right after the profitability section. Existing producers, thresholds,
+customer table, and a single "B2B Takip" table (İzahat last) right after the profitability section. Existing producers, thresholds,
 masks and warnings are unchanged; nothing here is a registered metric, an API, an action or AI input.
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ from services import sales_review as SALES
 
 
 def apply(modules: dict, raw, header, registration: dict, *, source: str, sha256: str, generation: str,
-          review_days: int = HB.REVIEW_DAYS):
+          review_days: int = HB.REVIEW_DAYS, registration_complete: bool = False):
     import dashboard_builder as DB
     base = DB.load_sales(None, raw)
     result = HB.analyse(raw, base, DB.cust_attrs(base), registration, header, review_days=review_days)
@@ -37,11 +37,15 @@ def apply(modules: dict, raw, header, registration: dict, *, source: str, sha256
                   sha256=sha256 + (f" · kayıt {result['registration']['sha256']}" if result['registration']['sha256'] else ''),
                   generation=generation, report_date=None, date_origin='beyan edilmedi',
                   observed_start=None, observed_end=c['asof'],
-                  formula=(f"A/B/C çağrı listeleri: B2B satışı = satış dosyası AG sütunu tam 'B2B'; kayıt = "
-                           f"{HB.REGISTRATION_FILE} B sütunu, sipariş müşterisi koduyla birebir. 'Son zamanlarda' = "
-                           f"son {c['review_days']} gün (geçici)."),
+                  formula=(f"Tek B2B Takip tablosu, İzahat son sütunda: B2B satışı = satış dosyası AG sütunu tam "
+                           f"'B2B'; B2B Kaydı VAR = {HB.REGISTRATION_FILE} B sütununda sipariş müşterisi koduyla birebir; "
+                           "belirsiz eşleşme = Kontrol"
+                           + ("; listede olmayan = YOK (liste tamlığı beyan edildi)" if registration_complete
+                              else "; listede olmayan = 'Listede yok' (liste tamlığı teyit edilmedi)")
+                           + f". 'Son zamanlarda' = son {c['review_days']} gün (geçici)."),
                   warnings=[{k: w[k] for k in ('code', 'title', 'issue', 'evidence', 'question', 'resolution',
                                                'severity')} for w in result['warnings']])
-    mod = HB.module(result, review_html=SALES.warning_html(review))
+    mod = HB.module(result, review_html=SALES.warning_html(review), registration_complete=registration_complete)
+    result['counts']['unified'] = HB.unified_counts(mod['rows'])
     mod['page_size'] = 100
     return HB.insert_after(modules, 'margin', 'b2b', mod), result

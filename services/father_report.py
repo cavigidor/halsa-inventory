@@ -16,14 +16,17 @@ from services import sales_review as SALES, stock_review as STOCK
 
 
 def generate(data_folder, output, *, today=None, b2b=False, b2b_registration=None, b2b_review_days=365,
-             hedef=None, trodat=None, trodat_year=None):
+             hedef=None, trodat=None, trodat_year=None, b2b_list_complete=False):
     """b2b=True adds the father's B2B tracking (D-080; services/b2b_review.py). Without it the output is unchanged.
     b2b_registration: explicit b2b_kullanici_rapor.xlsx path; None = the list is missing (never 'not registered').
+    b2b_list_complete: the owner's declaration that the list holds every B2B user (only then 'YOK'; else 'Listede yok').
     hedef / trodat (D-081): explicit shared-audience workbooks for the Hedef / Trodat sections; without them the
     output is unchanged. Owner / financial sources are never read here (services/owner_report.py)."""
     import dashboard_builder as DB
     today=today or dt.date.today()
     data_folder=str(Path(data_folder).resolve())
+    if b2b_list_complete and (not b2b or b2b_registration is None):
+        raise ValueError('Kayıt listesi tamlık beyanı için --b2b ve --b2b-registration gerekir.')
     target=Path(output).absolute()
     if target.suffix.lower()!='.html': raise ValueError('Çıktı yeni bir .html dosyası olmalı.')
     if target.exists() or target.is_symlink(): raise FileExistsError('Çıktı dosyası zaten var; yeni bir ad seçin.')
@@ -83,12 +86,13 @@ def generate(data_folder, output, *, today=None, b2b=False, b2b_registration=Non
                                           reg_source.file if reg_source else HB.REGISTRATION_FILE)
         modules,b2b_result=B2B.apply(modules,frames['sales'],HB.sheet_header(frozen['sales'].stream()),registration,
                                      source=frozen['sales'].file,sha256=frozen['sales'].sha256,
-                                     generation=manifest.core_id,review_days=b2b_review_days)
+                                     generation=manifest.core_id,review_days=b2b_review_days,
+                                     registration_complete=b2b_list_complete)
         b2b_counts=b2b_result['counts']
         modules['report_scope']['rows'].append({'section':'B2B Takip','state':'Ön inceleme' if registration['status']=='ok' else 'Kayıt listesi yok',
-            'need':'B2B satışı = satış dosyası AG sütunu; kayıt = b2b_kullanici_rapor.xlsx B sütunu. Belirsiz eşleşmeler kayıtlı sayılmaz; kayıt listesi yoksa A/B listeleri üretilmez. "Son zamanlarda" süresi geçicidir.'})
+            'need':'B2B satışı = satış dosyası AG sütunu; kayıt = b2b_kullanici_rapor.xlsx B sütunu. Tek tablo, İzahat son sütunda; belirsiz eşleşmeler (Kontrol) kayıtlı sayılmaz; listede olmayan kod liste tamlığı teyit edilmeden YOK yazılmaz; kayıt listesi yoksa B2B Kaydı gösterilmez. "Son zamanlarda" süresi geçicidir.'})
         modules['report_scope']=modules.pop('report_scope')
-        meta['intro']+=' B2B Takip bölümü, satış dosyasının AG sütunu ve B2B kayıt listesinin B sütunuyla hazırlanmış ön inceleme arama listeleridir.'
+        meta['intro']+=' B2B Takip bölümü, satış dosyasının AG sütunu ve B2B kayıt listesinin B sütunuyla hazırlanmış ön inceleme müşteri tablosudur (İzahat son sütunda).'
     extra_counts={}
     if extra_paths:
         from services import general_sources as GS
@@ -135,22 +139,26 @@ def main():
     parser.add_argument('--b2b',action='store_true',help='B2B Takip bölümünü ekle (D-080)')
     parser.add_argument('--b2b-registration',help='b2b_kullanici_rapor.xlsx (B sütunu = kayıtlı müşteri kodu)')
     parser.add_argument('--b2b-review-days',type=int,default=365,help="geçici 'son zamanlarda' süresi (gün)")
+    parser.add_argument('--b2b-list-complete',action='store_true',
+                        help="sahip beyanı: kayıt listesi tüm B2B kullanıcılarını içerir (listede olmayan kod 'YOK')")
     parser.add_argument('--hedef',help='Hedef çalışma kitabı (genel rapora Hedef / Bölge bölümü; D-081)')
     parser.add_argument('--trodat',help='Trodat satış raporu (genel rapora model düzeyinde bölüm; D-081)')
     parser.add_argument('--trodat-year',type=int,help='Trodat rapor yılı (dosya adında yoksa)')
     args=parser.parse_args()
-    if (args.b2b_registration or args.b2b_review_days!=365) and not args.b2b: parser.error('--b2b gerekir')
+    if (args.b2b_registration or args.b2b_review_days!=365 or args.b2b_list_complete) and not args.b2b: parser.error('--b2b gerekir')
+    if args.b2b_list_complete and not args.b2b_registration: parser.error('--b2b-list-complete için --b2b-registration gerekir')
     if args.b2b_review_days<1: parser.error('--b2b-review-days en az 1 olmalı')
     try:
         result=generate(args.data,args.output,b2b=args.b2b,b2b_registration=args.b2b_registration,
                         b2b_review_days=args.b2b_review_days,hedef=args.hedef,trodat=args.trodat,
-                        trodat_year=args.trodat_year)
+                        trodat_year=args.trodat_year,b2b_list_complete=args.b2b_list_complete)
     except (ValueError,OSError,KeyError):
         parser.exit(2,'Rapor oluşturulamadı. Kaynak seçimini/sütunlarını ve yeni çıktı adını kontrol edin; dosyalar değiştirilmedi.\n')
     print('Özel çevrimdışı rapor oluşturuldu. Cari hesap bakiyesi içermez; yalnız yetkili alıcıyla özel paylaşın.')
     print('İnceleme bölümü: '+str(len(result['sections'])))
     if result.get('b2b'):
-        b=result['b2b']; print(f"B2B Takip — A {b['view_A']} · B {b['view_B']} · C {b['view_C']} · kayıt listesi: {b['registration_status']}")
+        b=result['b2b']; u=b.get('unified') or {}
+        print(f"B2B Takip — {u.get('rows')} satır · B2B Kaydı {u.get('b2b_kaydi')} · kayıt listesi: {b['registration_status']}")
 
 
 if __name__=='__main__': main()
