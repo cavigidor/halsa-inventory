@@ -595,7 +595,10 @@ IZAHAT = {
     "b2b_kayitsiz": ("kontrol", "Kontrol · B2B'den alıyor ama kodu listede yok",
                      "Kontrol · B2B'den alıyor, kodu listede yok"),
     "bosluk": ("kontrol", "Kontrol · kod listede yalnız boşluk farkıyla var", "Kontrol · boşluk farkı"),
-    "kanal": ("kontrol", "Kontrol · B2B kanalı yazımı belirsiz ('B2B' farklı yazılmış)", "Kontrol · kanal yazımı belirsiz"),
+    "kanal_var": ("var", "B2B kaydı var · B2B kanalı yazımı belirsiz ('B2B' farklı yazılmış satır var); B2B alımı "
+                  "doğrulanmadı", "B2B kaydı var · kanal yazımı belirsiz"),
+    "kanal": ("kontrol", "Kontrol · kodu listede yok; B2B kanalı yazımı belirsiz (B2B alıcısı olabilir)",
+              "Kontrol · kodu listede yok, kanal yazımı belirsiz"),
     "kayit_bagli": ("kontrol", "Kontrol · kayıt kodu satışta yalnız fatura hesabı veya boşluk farkıyla görünüyor",
                     "Kontrol · kayıt kodu satışta başka biçimde"),
     "liste_kullanilamadi": ("bilinmiyor", "Kayıt listesi kullanılamadı · eskiden B2B'den alıyordu, son {d} günde almadı",
@@ -611,6 +614,7 @@ V_KIND_KEY = {"Belirsiz kayıt eşleşmesi — boşluk farkı": "bosluk",
               "Kayıt kodu yalnız boşluk farkıyla satış müşterisi": "kayit_bagli",
               "Kayıt kodu yalnız fatura hesabı olarak satışta": "kayit_bagli"}
 IZAHAT_ORDER = tuple(IZAHAT)
+CLASSIC_PAGE_SIZE = 200          # Klasik B2B Takip page (its frozen renderer has no paging); V1 keeps its own paging
 
 
 def _complete(result, registration_complete):
@@ -678,7 +682,8 @@ def unified_rows(result: dict, *, registration_complete: bool = False) -> list:
         for code, p in sorted(per.items()):
             if p["status"] != "confirmed" or p["closed"] or ("musteri", code) in by:
                 continue
-            key = ("kanal_yok" if not c["channel_ok"] else "kanal" if p["unclear"] else
+            # registration identity (exact → VAR) is kept apart from sales-channel uncertainty (explained in İzahat)
+            key = ("kanal_yok" if not c["channel_ok"] else "kanal_var" if p["unclear"] else
                    "aktif" if p["has_b2b"] and p["recent_b2b"] else None)
             if key:
                 add("musteri", code, key, p, "")
@@ -729,7 +734,8 @@ def module(result: dict, *, review_html: str | None = None, registration_complet
          "b2b_reg_file": result["registration"]["file"],
          "b2b_reg_state": REG_STATE_TEXT.get(c["registration_status"], ""),
          "b2b_channel_unavailable": not c["channel_ok"],
-         "b2b_registration_complete": _complete(result, registration_complete)}
+         "b2b_registration_complete": _complete(result, registration_complete),
+         "b2b_page_size": CLASSIC_PAGE_SIZE}
     if review_html:
         m["review_html"] = review_html
     return m
@@ -787,6 +793,10 @@ def insert_after(modules: dict, after: str, key: str, value: dict) -> dict:
 
 EXTENSION_CSS = """
 .b2b-izahat{max-width:100%}
+.b2b-pager{display:flex;gap:10px;align-items:center;justify-content:flex-end;margin:10px 0;font-size:12px;color:var(--muted)}
+.b2b-pager button{border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-weight:600;
+padding:6px 12px;border-radius:8px;cursor:pointer}
+.b2b-pager button:disabled{opacity:.4;cursor:default}
 .b2b-flag{font-family:"SF Mono",Menlo,monospace;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:#0e7490;color:#fff}
 .b2b-amb{font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:#fef6e7;color:#b45309;border:1px dashed #b45309}
 .b2b-warn{border:1px solid #f1d39b;background:#fef6e7;border-radius:10px;padding:10px 14px;margin:0 0 12px;font-size:12px}
@@ -852,10 +862,52 @@ EXTENSION_JS = r"""
       if(t==='B2B') td.innerHTML='<span class="b2b-flag">B2B</span>';
       else if(t==='Belirsiz') td.innerHTML='<span class="b2b-amb" title="Kayıt eşleşmesi belirsiz — kayıtlı sayılmadı">Belirsiz</span>';});
   };
-  window.draw=function(id){if(id==='b2b') LAZY.clear(); CUR=id; try{baseDraw(id);} finally{CUR=null;} deco(id);};
+  // Klasik only (its frozen renderer draws every row): B2B Takip is paged. Representative filter, search and sort run
+  // first over EVERY row of the current İzahat choice — the original draw()'s own rules — and only then one page is
+  // handed to the original renderer. The V1 renderer pages natively ('page' in its state) and is left alone.
+  const pager={i:0,key:''};
+  const classicPaged=id=>id==='b2b'&&DATA.b2b&&DATA.b2b.b2b_page_size&&state.b2b&&!('page' in state.b2b);
+  const b2bRows=function(){
+    const m=DATA.b2b, s=state.b2b; let rows=m.rows.slice();
+    if(s.fval) rows=rows.filter(r=>String(r[m.filter]??'')===s.fval);
+    if(s.q) rows=rows.filter(r=>m.cols.some(c=>String(r[c.k]??'').toLowerCase().includes(s.q)));
+    if(s.sort){const c=s.sort; rows.sort((a,b)=>{let x=a[c],y=b[c];
+      if(typeof x==='number'||typeof y==='number'){x=x??-Infinity;y=y??-Infinity;return (x-y)*s.dir;}
+      return String(x??'').localeCompare(String(y??''),'tr')*s.dir;});}
+    return rows;
+  };
+  const pagedDraw=function(){
+    const m=DATA.b2b, s=state.b2b, full=m.rows, size=m.b2b_page_size, rows=b2bRows();
+    const izs=document.querySelector('#b2b select.b2b-izahat');
+    const key=[s.q,s.fval,s.sort,s.dir,full.length,izs?izs.value:''].join('|');
+    if(key!==pager.key){pager.key=key; pager.i=0;}
+    const pages=Math.max(1,Math.ceil(rows.length/size)); pager.i=Math.min(pager.i,pages-1);
+    const saved={q:s.q,fval:s.fval,sort:s.sort};
+    m.rows=rows.slice(pager.i*size,(pager.i+1)*size); s.q=''; s.fval=''; s.sort=null;
+    try{baseDraw('b2b');} finally{m.rows=full; Object.assign(s,saved);}
+    const p=document.getElementById('b2b');
+    if(s.sort){const ar=p.querySelector(`th[data-k="${s.sort}"] .ar`); if(ar) ar.textContent=s.dir>0?'▲':'▼';}
+    p.querySelector('.count').textContent=rows.length+' satır'+(pages>1?` · sayfa ${pager.i+1} / ${pages}`:'');
+    let pg=p.querySelector('.b2b-pager');
+    if(!pg){pg=document.createElement('div'); pg.className='b2b-pager';
+      pg.innerHTML='<button type="button" class="b2b-prev">‹ Önceki</button><span class="b2b-pinfo"></span><button type="button" class="b2b-next">Sonraki ›</button>';
+      p.querySelector('.tbl').after(pg);
+      const go=d=>{pager.i+=d; draw('b2b'); if(p.scrollIntoView) p.scrollIntoView({block:'start'});};
+      pg.querySelector('.b2b-prev').addEventListener('click',()=>go(-1));
+      pg.querySelector('.b2b-next').addEventListener('click',()=>go(1));}
+    pg.style.display=pages>1?'':'none';
+    pg.querySelector('.b2b-pinfo').textContent=`${pager.i*size+1}–${Math.min(rows.length,(pager.i+1)*size)} / ${rows.length} satır · sayfa ${pager.i+1} / ${pages}`;
+    pg.querySelector('.b2b-prev').disabled=pager.i===0; pg.querySelector('.b2b-next').disabled=pager.i>=pages-1;
+  };
+  window.draw=function(id){if(id==='b2b') LAZY.clear(); CUR=id;
+    try{if(classicPaged(id)) pagedDraw(); else baseDraw(id);} finally{CUR=null;} deco(id);};
   const B=DATA.b2b;
   if(B&&B.izahat){
     const p=document.getElementById('b2b'); const tb=p.querySelector('.toolbar');
+    if(B.b2b_rows){B.rows=B.b2b_rows;         // Klasik ships the rows apart (no full draw at start-up)
+      const sel=tb.querySelector('.repsel');
+      if(sel){const vals=[...new Set(B.rows.map(r=>r.rep).filter(x=>x))].sort((a,b)=>String(a).localeCompare(String(b),'tr'));
+        sel.replaceChildren(new Option('Tüm temsilciler','')); vals.forEach(v=>sel.append(new Option(v,v)));}}
     const all=B.rows.slice();                 // every row; the İzahat choice only narrows what is drawn
     const iz=document.createElement('select'); iz.className='repsel b2b-izahat'; iz.title='İzahat';
     iz.append(new Option('İzahat: Tümü ('+all.length+')',''));

@@ -101,8 +101,12 @@ if 'base' in cap:
         if r['code'] in det: r['detail'] = det[r['code']]
     hb.add_year_fields(mod['rows'], res)
     mod['expand'] = True
+    unified = hb.unified_counts(mod['rows'])
+    # the frozen renderer draws every panel once at start-up, before the shared script can page B2B Takip: ship the
+    # rows under b2b_rows (the script moves them back and rebuilds the representative list), not the full 7k table
+    mod['b2b_rows'], mod['rows'] = mod['rows'], []
     modules = hb.insert_after(modules, 'margin', 'b2b', mod)
-    b2b = dict(res['counts'], unified=hb.unified_counts(mod['rows']), registration_complete=complete == '1')
+    b2b = dict(res['counts'], unified=unified, registration_complete=complete == '1')
 page = hb.inject(real_html(modules, stats, meta, later))
 with open(out, 'w', encoding='utf-8') as f: f.write(page)
 loaded = sorted(m for m in sys.modules if m.split('.')[0] in %(forbidden)r)

@@ -42,7 +42,9 @@ each row of it appears exactly once, plus the registered customers that no call 
 | B2B kayıt listesinde yok | **Listede yok** (YOK only with the owner's declaration) | A |
 | Kontrol · fatura hesabı (bayi) kayıtlı | Kontrol | Doğrulanacak |
 | Kontrol · B2B'den alıyor, kodu listede yok | Kontrol | Doğrulanacak (+ "eskiden B2B'den alıyordu" when also in C) |
-| Kontrol · boşluk farkı / kanal yazımı belirsiz / kayıt kodu satışta başka biçimde | Kontrol | Doğrulanacak |
+| Kontrol · boşluk farkı / kayıt kodu satışta başka biçimde | Kontrol | Doğrulanacak |
+| Kontrol · kodu listede yok, kanal yazımı belirsiz | Kontrol | Doğrulanacak (no list match; may be a B2B buyer) |
+| B2B kaydı var · kanal yazımı belirsiz | **VAR** | registered (exact) with an ambiguous AG spelling — registration and channel kept apart |
 
 - **YOK is never inferred.** An exact-code miss is not proof of no registration. "Listede yok" becomes "YOK" only with
   `--b2b-list-complete` (both generators): the owner's declaration that `b2b_kullanici_rapor.xlsx` lists every B2B user.
@@ -50,6 +52,14 @@ each row of it appears exactly once, plus the registered customers that no call 
 - A sales customer and a registration-only code are always separate rows (a code differing only by spaces is not merged).
 - KAPALI customers stay out (existing rule). Columns: customer, code, representative, sector, last-365-day purchases,
   total, last purchase, last B2B purchase, B2B total, B2B Kaydı, İzahat. Search covers every column incl. İzahat.
+
+- **Registration identity and sales channel are separate:** an exact Kod No match is VAR whatever the AG spelling; the
+  İzahat explains the unverified channel (B2B amount stays "—"). Kontrol is only for an unresolved registration identity
+  (space difference, invoice account, a code not in the list but with B2B or B2B-like purchases).
+- **Klasik paging (B2B Takip only):** the frozen renderer draws every row, which took 0.5–1.8 s per interaction at
+  7,000 rows. The shared script pages B2B Takip by 200 rows; representative filter, search and sort run over every row of
+  the current İzahat choice (the original rules) before one page is drawn, and the rows are shipped apart
+  (`b2b_rows`) so the start-up draw of every panel no longer renders the full table. V1 keeps its own paging.
 
 In the Klasik report the customer detail inside B2B Takip is built when a row is first opened (same markup and data);
 the original tabs are rendered exactly as before.
@@ -183,3 +193,29 @@ classification was reproduced exactly first. Row-level table (codes, reasons, ca
 - Previews (private, not sent): `reports/private/b2b-tracking/onizleme-2026-11-08/` — Klasik and Genel, plus a Klasik
   preview with the declaration (illustration only). Verified against the delivered `_Tam` files: every other tab
   identical, every list row present once with the same amounts, the 420 new rows recomputed independently.
+
+### PR #53 review (2026-11-08)
+
+- **466 vs 469 registration codes:** different scopes, both correct. 466 = codes that appear nowhere in sales (not as
+  ordering customer, not as invoice account, not with spaces) — the owner question "satışı olmayan kayıtlı kod". 469 =
+  codes that are not exactly an ordering-customer code = those 466 + 3 that appear in sales only in another form
+  (2 only as invoice account, 1 only with a space difference; Doğrulanacak, now "Kontrol · kayıt kodu satışta başka
+  biçimde"). The unified table has exactly these 469 registration-only rows. (The private table's `views` column shows
+  "—" for the 3; they are the Doğrulanacak registration-side rows.)
+- Name-based candidates (44 customers + 28 registration codes) and invoice-account cases (368 + 2) stay unresolved.
+- **Responsiveness (headless Chromium, synthetic report at the November size: 7,078 rows, 11 MB; 2 vCPU; median of 3;
+  event → next painted frame):**
+
+| Interaction | D-080 layout (main) | D-082 unpaged | D-082 paged | paged, CPU ×4 |
+|---|---|---|---|---|
+| open file | 3.7 s | 5.3 s | 3.7 s | 17.5 s (D-080: 17.0 s) |
+| open B2B Takip | 0.50 s | 1.47 s | 0.08 s | 0.28 s |
+| search keystroke (max) | 0.83 s | 1.71 s | 0.11 s | 0.24 s |
+| change view / İzahat | 0.56 s | 1.83 s | 0.04 s | 0.18 s |
+| sort by purchases | 0.54 s | 1.48 s | 0.04 s | 0.15 s |
+| open customer detail | 0.17 s | 0.33 s | 0.01 s | 0.03 s |
+| back to B2B Takip | 0.41 s | 0.91 s | 0.05 s | 0.23 s |
+
+  Not a real-browser acceptance: no Chrome was connected, the built-in browser cannot open local files, and the private
+  preview stays on the Mac. The real previews passed jsdom DOM checks (filters, a last-page code search, global sort,
+  paging, detail, representative filter, every tab; 0 JS errors). Safari / Chrome acceptance remains with the owner.

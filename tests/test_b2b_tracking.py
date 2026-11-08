@@ -34,6 +34,12 @@ def _data(path):
     return json.loads(m.group(1).replace("<\\/", "</"))
 
 
+def _b2b(d):
+    """B2B Takip rows: Klasik ships them as b2b_rows (no full draw at start-up), V1 as rows."""
+    m = d["b2b"]
+    return m["b2b_rows"] if "b2b_rows" in m else m["rows"]
+
+
 @pytest.fixture(scope="module")
 def src(tmp_path_factory):
     return S.write_all(str(tmp_path_factory.mktemp("b2b_src")))
@@ -296,15 +302,16 @@ def modern(src, tmp_path_factory):
 def test_v1_report_shows_the_same_b2b_classification_as_klasik(classic, modern):
     k, m = _data(classic[1]), _data(modern[1])
     strip = lambda rows: [{x: r[x] for x in r if x != "detail"} for r in rows]
-    assert strip(k["b2b"]["rows"]) == strip(m["b2b"]["rows"]) and len(k["b2b"]["rows"]) == 14
+    assert k["b2b"]["rows"] == [] and "b2b_rows" not in m["b2b"]
+    assert strip(_b2b(k)) == strip(_b2b(m)) and len(_b2b(k)) == 14
     assert k["b2b"]["izahat"] == m["b2b"]["izahat"] and k["b2b"]["cols"] == m["b2b"]["cols"]
     assert {r["code"]: r["b2b"] for r in k["momentum"]["rows"]} == {r["code"]: r["b2b"] for r in m["momentum"]["rows"]}
     ky = {(r["code"], y["y"]): (y["b2b"], y["b2b_orders"], y["b2b_mixed"])
-          for r in k["b2b"]["rows"] for y in r.get("detail", {}).get("years", [])}
+          for r in _b2b(k) for y in r.get("detail", {}).get("years", [])}
     my = {(r["code"], r["year"]): (r["b2b_amount"], r["b2b_orders"], r["b2b_mixed"])
           for r in m["purchases_yearly"]["rows"]}
     assert ky and all(my[key] == val for key, val in ky.items())
-    assert not any(r.get("detail") for r in k["b2b"]["rows"] if r["side"] == "kayit")   # no sales → no detail
+    assert not any(r.get("detail") for r in _b2b(k) if r["side"] == "kayit")   # no sales → no detail
     assert list(m)[list(m).index("margin") + 1] == "b2b"
     assert classic[0]["b2b"]["view_A"] == modern[0]["b2b"]["view_A"]
     assert classic[0]["b2b"]["unified"] == modern[0]["b2b"]["unified"]
@@ -379,7 +386,7 @@ def test_b2b_takip_single_table_izahat_filter_search_sort_and_detail_in_the_brow
     assert sorted(_cells(panel, "code")) == ["910.00.0002", "910.00.0004"]
     panel.locator(".repsel").first.select_option("")
     panel.locator('th[data-k="b2b_total"]').click()
-    top = max((r for r in _data(path)["b2b"]["rows"] if r["b2b_total"] is not None), key=lambda r: r["b2b_total"])
+    top = max((r for r in _b2b(_data(path)) if r["b2b_total"] is not None), key=lambda r: r["b2b_total"])
     assert top["code"] in panel.locator("tbody tr.main").first.inner_text()    # largest B2B total first
     if which == "classic":                                                      # detail built on first open
         assert panel.locator("[data-lazy]").count() == 10                      # customer rows only
@@ -516,4 +523,131 @@ def test_declared_preview_shows_yok_in_the_browser(browser, src, tmp_path):
     assert "beyan edildi" in panel.locator("p.note").inner_text()
     assert "B2B kaydı yok" in panel.locator("select.b2b-izahat").inner_text()
     assert not errors
+    page.close()
+
+
+# ---------------------------------------------------------------------------------------------
+# 6. registration identity is kept apart from sales-channel uncertainty (PR #53 review)
+# ---------------------------------------------------------------------------------------------
+UNCLEAR_REGISTERED = ("910.00.0011", "910.00.0012")      # exact Kod No; one ambiguous AG spelling each
+
+
+@pytest.fixture(scope="module")
+def unclear_reports(tmp_path_factory):
+    from services.father_report import generate
+    from tests.test_v1_sales_review import case
+    src2 = S.write_all(str(tmp_path_factory.mktemp("b2b_src_unclear")), registered_unclear=True)
+    stock, sales, reg = _paths(src2)
+    d = tmp_path_factory.mktemp("unclear_out")
+    k = KB.generate_b2b(stock, sales, str(d / "k.html"), registration=reg, day=DAY)
+    folder, *_ = case(d / "v1", lambda raw: pd.DataFrame(S.sales_rows(registered_unclear=True), columns=S.HEADERS))
+    g = generate(folder, d / "g.html", b2b=True, b2b_registration=reg)
+    raw = pd.read_excel(sales)
+    base = DB.load_sales(None, raw)
+    res = HB.analyse(raw, base, DB.cust_attrs(base), HB.read_registration(open(reg, "rb").read()), HB.sheet_header(sales))
+    return res, (k, str(d / "k.html")), (g, str(d / "g.html"))
+
+
+def test_exact_registration_stays_var_when_the_channel_is_ambiguous(unclear_reports, core):
+    res, (k, kp), (g, gp) = unclear_reports
+    assert all(res["status"][c] == "confirmed" and res["per"][c]["unclear"] for c in UNCLEAR_REGISTERED)
+    assert res["per"]["910.00.0012"]["has_b2b"] and res["per"]["910.00.0012"]["recent_b2b"]
+    for path in (kp, gp):                                                       # Classic and V1 outputs
+        rows = {r["code"]: r for r in _b2b(_data(path))}
+        for c in UNCLEAR_REGISTERED:
+            r = rows[c]
+            assert r["b2b_reg"] == "VAR" and r["izahat_key"] == "kanal_var"
+            assert r["izahat"].startswith("B2B kaydı var") and "kanal" in r["izahat"] and "Kontrol" not in r["izahat"]
+            assert r["b2b_total"] is None                                       # B2B amount stays unknown, not 0
+        n9 = rows["910.00.0009"]                                                # no list match + ambiguous channel
+        assert n9["b2b_reg"] == "Kontrol" and n9["izahat_key"] == "kanal" and "kodu listede yok" in n9["izahat"]
+        assert "YOK" not in {r["b2b_reg"] for r in rows.values()}
+    # everything else identical to the base scenario: classification, counts, amounts, warnings
+    assert {k: [r["code"] for r in v] for k, v in res["views"].items()} == \
+        {k: [r["code"] for r in v] for k, v in core["views"].items()}
+    base_rows = {(r["side"], r["code"]): r for r in HB.unified_rows(core)}
+    new_rows = {(r["side"], r["code"]): r for r in HB.unified_rows(res)}
+    assert set(new_rows) - set(base_rows) == {("musteri", c) for c in UNCLEAR_REGISTERED}
+    changed = [k for k in base_rows if base_rows[k] != new_rows[k]]
+    assert changed == []
+    assert [w["code"] for w in res["warnings"]] == [w["code"] for w in core["warnings"]]
+    assert res["counts"]["unclear_channel_lines"] == core["counts"]["unclear_channel_lines"] + 2
+    assert k["b2b"]["unified"] == g["b2b"]["unified"]
+    assert k["b2b"]["unified"]["b2b_kaydi"] == {"Kontrol": 6, "Listede yok": 2, "VAR": 8}
+
+
+def test_ambiguous_channel_var_in_the_browser(browser, unclear_reports):
+    _, (_, kp), (_, gp) = unclear_reports
+    for path in (kp, gp):
+        page, errors, _ = _open(browser, path)
+        page.click('.tab[data-t="b2b"]')
+        panel = page.locator("#b2b")
+        panel.locator("select.b2b-izahat").select_option("kanal_var")
+        assert sorted(_cells(panel, "code")) == list(UNCLEAR_REGISTERED)
+        assert _cells(panel, "b2b_reg") == ["VAR", "VAR"] and panel.locator("tbody .b2b-flag").count() == 2
+        panel.locator("select.b2b-izahat").select_option("kanal")
+        assert _cells(panel, "code") == ["910.00.0009"] and _cells(panel, "b2b_reg") == ["Kontrol"]
+        assert not errors
+        page.close()
+
+
+def test_klasik_b2b_paging_searches_filters_and_sorts_the_complete_table(browser, unclear_reports, tmp_path):
+    """Klasik's frozen renderer has no paging, so B2B Takip is paged by the shared script; every search, filter and
+    sort still runs over all rows. The V1 report keeps its own paging (no extra pager)."""
+    _, (_, kp), (_, gp) = unclear_reports
+    html = open(kp, encoding="utf-8").read()
+    assert html.count('"b2b_page_size": 200') + html.count('"b2b_page_size":200') == 1
+    small = tmp_path / "k5.html"
+    small.write_text(html.replace('"b2b_page_size": 200', '"b2b_page_size": 5').replace('"b2b_page_size":200',
+                                                                                      '"b2b_page_size":5'), encoding="utf-8")
+    rows = _b2b(_data(kp))
+    for r in rows:
+        r["code"] = r["code"].strip()                                           # cell text is trimmed by the browser
+    assert len(rows) == 16
+    page, errors, _ = _open(browser, str(small))
+    page.click('.tab[data-t="b2b"]')
+    panel = page.locator("#b2b")
+    count = lambda: panel.locator(".count").inner_text()
+    assert panel.locator("tbody tr.main").count() == 5 and count() == "16 satır · sayfa 1 / 4"
+    assert [c for c in _cells(panel, "code")] == [r["code"] for r in rows[:5]]          # default order kept
+    seen = list(_cells(panel, "code"))
+    for _ in range(3):
+        panel.locator(".b2b-next").click()
+        seen += _cells(panel, "code")
+    assert seen == [r["code"] for r in rows] and panel.locator(".b2b-next").is_disabled()   # every row, once
+    assert count() == "16 satır · sayfa 4 / 4"
+    last = rows[-1]["code"]
+    panel.locator(".b2b-prev").click(); panel.locator(".b2b-prev").click(); panel.locator(".b2b-prev").click()
+    panel.locator(".search").fill(last)                                         # a code on the last page, from page 1
+    assert _cells(panel, "code") == [last] and count() == "1 satır" and not panel.locator(".b2b-pager").is_visible()
+    panel.locator(".search").fill("")
+    assert count() == "16 satır · sayfa 1 / 4"
+    panel.locator('th[data-k="recent"]').click()                               # sort spans every page
+    money = [r["recent"] for r in rows if r["recent"] is not None]
+    first = panel.locator("tbody tr.main").first.inner_text()
+    top = max(rows, key=lambda r: r["recent"] if r["recent"] is not None else -1e18)
+    assert top["code"] in first and "▼" in panel.locator('th[data-k="recent"]').inner_text()
+    order = []
+    for i in range(4):
+        order += _cells(panel, "code")
+        if i < 3:
+            panel.locator(".b2b-next").click()
+    want = [r["code"] for r in sorted(rows, key=lambda r: -(r["recent"] if r["recent"] is not None else -1e18))]
+    assert [order.index(c) for c in want if c in order][:len(money)] == list(range(len(money)))
+    panel.locator("select.b2b-izahat").select_option("listede_yok")            # filter resets to page 1
+    assert sorted(_cells(panel, "code")) == ["910.00.0003", "910.00.0010"] and count() == "2 satır"
+    panel.locator("select.b2b-izahat").select_option("")
+    panel.locator(".repsel").first.select_option("TEMSILCI-B")                 # representative filter spans all rows
+    assert sorted(_cells(panel, "code")) == sorted(r["code"] for r in rows if r["rep"] == "TEMSILCI-B")
+    panel.locator(".repsel").first.select_option("")
+    panel.locator(".b2b-next").click()                                         # detail opens on a later page
+    exp = panel.locator("tr.exp", has=page.locator("td.mono", has_text="910.00.0")).first
+    exp.click()
+    assert panel.locator("tr.det.open table.sub").count() == 1
+    page.click('.tab[data-t="winback"]'); page.click('.tab[data-t="b2b"]')
+    assert panel.locator("tbody tr.main").count() == 5 and not errors
+    page.close()
+    page, errors, _ = _open(browser, gp)                                        # V1: native pager only
+    page.click('.tab[data-t="b2b"]')
+    assert page.locator("#b2b .b2b-pager").count() == 0 and page.locator("#b2b .pager").count() == 1 and not errors
     page.close()

@@ -1611,5 +1611,9 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
   pair); 4,695 of the 4,739 have no candidate in the list. Shared by the Klasik B2B variant and the V1 `--b2b` report.
 - **Unchanged:** `analyse()` and its counts, B2B amounts, Büyüme / Küçülme B2B column, yearly detail, every other tab,
   the frozen Classic builder, the delivered reports.
+- **PR #53 review:** registration identity and sales channel are separate — an exact Kod No match is VAR even when an
+  AG spelling is ambiguous (İzahat explains it; B2B amount unknown); Kontrol only for unresolved identity. Klasik's B2B
+  Takip is paged (200 rows) by the shared script with filter / search / sort over every row; the rows ship apart so the
+  frozen renderer's start-up draw stays light. `classic/original_builder.py` unchanged; V1 keeps its own paging.
 - **Open (father):** whether the registration export lists every B2B user (then YOK); bayi-account registrations; the
   14 B2B buyers not in the list; codeless rows; same-name codes; the Turkish guide after acceptance.

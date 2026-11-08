@@ -6,6 +6,10 @@
 - Reconciliation (private table on the Mac): misses are not formatting (1 space pair); 4,695 of list A have no candidate.
 - Previews `reports/private/b2b-tracking/onizleme-2026-11-08/` (Klasik, Genel, Klasik declared): 7,056 rows; other tabs
   identical to the delivered `_Tam`; DOM checks pass. Full suite **2163 passed, 8 skipped, 1 xfailed**. STOP for PM review.
+- PR #53 review corrections: exact registration = VAR even with an ambiguous AG spelling (Kontrol only for unresolved
+  identity); Klasik B2B Takip paged (200 rows; filter / search / sort over all rows; ~10× faster in headless Chromium at
+  the November size). Previews `_onizleme2` (Klasik `075e2a91…`, Genel `d5de74e1…`): B2B rows identical to `_onizleme1`,
+  other tabs identical to the delivered `_Tam`. Real Safari / Chrome check: NOT performed (no browser connected).
 - D-081 (PR #52) and D-080 (PR #51) are **merged** (`81cf126`, `6f560e5`), code only; nothing deployed or sent.
 
 **2026-11-07 — D-081 Advanced V1: seven additional sources; general + separate owner / financial offline reports; PR #52 merged `81cf126` (code only), NOT deployed / sent.**
