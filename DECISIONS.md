@@ -1587,6 +1587,13 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
     --trodat`: Hedef (without Risk / Kredi / discount) and Trodat (model level) in the general file. The general
     generator never reads an owner / financial source; without the new flags its output is unchanged.
   - Renderer: optional `eyebrow` / `title` / `subline` meta keys; defaults reproduce the previous header exactly.
+  - Source currency and units (PR #52 review): the shared `money` column always prints ₺ and `n` rounds to two
+    decimals, so they are not used for amounts outside TL or for rates. Collections `Evrak tutarı` is shown in the
+    document's own currency (`Orj. döviz`, e.g. EUR) next to the TL open amount; Kredi amounts in the contract currency;
+    Bütçe cells by importer type: amounts with their verbatim `YTL` / `TL` label (the BÜTÇE ÖZET panel states no unit,
+    so none is shown), `$ kur` / `€ kur` as exchange rates. Every stored digit is shown (shortest round-trip decimal);
+    nothing is converted. Mechanism: an opt-in renderer column `disp` (pre-formatted text, numeric sort); existing
+    column types render exactly as before.
 - **Evidence:** `docs/advanced_v1_sources.md` (counts only): 101,668 independent checks, 0 discrepancies.
 - **Unchanged:** metric register and certification, access roles, D-070 / D-071 retirements, Classic, the B2B reports.
 - **Open (father):** the binding overdue rule; collections report filter; Cari / Kredi snapshot dates; Gider/Gelir rows

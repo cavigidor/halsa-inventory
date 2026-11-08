@@ -20,6 +20,7 @@ import io
 import os
 import tempfile
 from collections import defaultdict
+from decimal import Decimal
 from pathlib import Path
 
 ROLES = ("cari", "collections", "kredi", "gider_gelir", "butce")
@@ -62,6 +63,34 @@ def _money(k, l, exact=True, sign=False):
 
 def _n(k, l):
     return {"k": k, "l": l, "n": 1}
+
+
+# Source currency and unit (PR #52 review). The shared `money` column always prints a lira sign, and `n` rounds to two
+# decimals. Amounts in a document's own currency, Kredi amounts in their contract currency and Bütçe cells (YTL / TL
+# amounts, `$ kur` / `€ kur` exchange rates) are therefore rendered from a pre-formatted text carrying the source unit
+# (`disp` column: the numeric value still sorts). No conversion; the numeric source value is kept unchanged.
+def exact_text(v, min_decimals=0):
+    """Turkish-formatted number with every digit of the stored value (shortest round-trip decimal), never rounded."""
+    if v is None:
+        return None
+    s = format(Decimal(v) if isinstance(v, int) else Decimal(repr(float(v))), "f")
+    neg = s.startswith("-")
+    ip, _, fp = s.lstrip("-").partition(".")
+    fp = fp.rstrip("0").ljust(min_decimals, "0")
+    body = f"{int(ip):,}".replace(",", ".") + ("," + fp if fp else "")
+    return ("-" if neg and body.strip("0.,") else "") + body
+
+
+def amount_text(v, unit):
+    """An amount in its source currency label, e.g. `1.234,50 EUR`; None stays unknown."""
+    return None if v is None else f"{exact_text(v, 2)} {unit}".rstrip()
+
+
+def _shown(k, l, sign=False):
+    c = {"k": k, "l": l, "disp": f"{k}_shown"}
+    if sign:
+        c["sign"] = 1
+    return c
 
 
 def _num(nv):
@@ -181,6 +210,7 @@ def collections_sections(src, res, cari_bal, generation):
                  "legal_document_no": d.legal_document_no, "document_date": d.document_date.isoformat(),
                  "due_date": d.due_date.isoformat(), "term_days": d.term_days, "days_to_due": d.days_to_due,
                  "open_tl": d.open_amount_tl, "document_total": d.document_total, "currency": d.currency,
+                 "document_total_shown": amount_text(d.document_total, d.currency),
                  "order_no": d.order_no, "order_date": _iso(d.order_date), "order_term_days": d.order_term_days,
                  "order_due_date": _iso(d.order_due_date), "days_to_order_due": d.days_to_order_due,
                  "red": "Kırmızı" if d.source_red else ("Bilinmiyor" if d.order_due_date is None else ""),
@@ -230,7 +260,8 @@ def collections_sections(src, res, cari_bal, generation):
     formula_acc = ("Hesap başına: açık TL = Σ 'Ana döviz TL bakiye'; fatura vadesi geçmiş = J < 0; kırmızı = kaynak kuralı "
                    "W < 0 (yalnız sipariş tarihi varken). Sıralama hesap koduna göre; genel toplam yok.")
     formula_doc = ("Her satır bir açık evrak satırıdır. Vadeye kalan gün = vade tarihi − rapor tarihi; sipariş vadesine "
-                   "kalan gün = sipariş tarihi + sipariş vadesi − rapor tarihi (siparişsiz satırda bilinmiyor).")
+                   "kalan gün = sipariş tarihi + sipariş vadesi − rapor tarihi (siparişsiz satırda bilinmiyor). Evrak "
+                   "tutarı kaynaktaki orijinal döviziyle gösterilir (çevrilmez); açık tutar kaynaktaki TL karşılığıdır.")
     review_acc = _review("collections.detailed", src["name"], src["sha"], formula_acc, warnings, report_date=rep,
                          origin=c.report_date_origin, generation=generation)
     review_doc = _review("collections.detailed", src["name"], src["sha"], formula_doc, warnings, report_date=rep,
@@ -245,8 +276,8 @@ def collections_sections(src, res, cari_bal, generation):
     doc_cols = [_n("excel_row", "Excel satırı"), {"k": "name", "l": "Hesap", "sub": "code"}, {"k": "rep", "l": "Temsilci"},
                 {"k": "project", "l": "Proje (müşteri) kodu"}, {"k": "document_no", "l": "Evrak no"},
                 {"k": "document_date", "l": "Evrak tarihi"}, {"k": "due_date", "l": "Vade tarihi"},
-                _n("days_to_due", "Vadeye gün"), _money("open_tl", "Açık TL"), _money("document_total", "Evrak tutarı"),
-                {"k": "currency", "l": "Döviz"}, {"k": "order_no", "l": "Sipariş no"},
+                _n("days_to_due", "Vadeye gün"), _money("open_tl", "Açık TL (TL karşılığı)"),
+                _shown("document_total", "Evrak tutarı (orijinal döviz)"), {"k": "currency", "l": "Orijinal döviz"}, {"k": "order_no", "l": "Sipariş no"},
                 {"k": "order_due_date", "l": "Sipariş vadesi"}, _n("days_to_order_due", "Sipariş vadesine gün"),
                 {"k": "red", "l": "Kaynak işareti"}, {"k": "status", "l": "Durum"}]
     return ({"title": "Tahsilat — Hesap Özeti", "rows": acc_rows, "cols": acc_cols, "filter": "rep", "page_size": 100,
@@ -273,6 +304,8 @@ def kredi_sections(src, res, generation, as_of):
                       "installments": s["past_due"]["installments"], "amount": s["past_due"]["amount"]})
         srows.append({"currency": cur, "window": "Toplam kalan (aynı para birimi)",
                       "installments": s["total_remaining"]["installments"], "amount": s["total_remaining"]["amount"]})
+    for r in srows:
+        r["amount_shown"] = amount_text(r["amount"], r["currency"])
     con = {k.contract_key: k for k in res.contracts}
     irows = []
     for i in res.installments:
@@ -285,6 +318,8 @@ def kredi_sections(src, res, generation, as_of):
                       "installment_total": _num(i.installment_total), "remaining": rem,
                       "remaining_principal": _num(i.remaining_principal), "status": i.status.value,
                       "payment_date": _iso(i.payment_date.value)})
+        for f in ("installment_total", "remaining", "remaining_principal"):
+            irows[-1][f"{f}_shown"] = amount_text(irows[-1][f], k.currency)
     irows.sort(key=lambda r: (r["currency"], r["due_date"] or "", r["contract"], r["installment"]))
     c = res.counts
     warnings = [_w(w["code"], w["message"].split(".")[0], w["message"], f"Sayı: {w['count']}.",
@@ -305,14 +340,14 @@ def kredi_sections(src, res, generation, as_of):
                 report_date=v.snapshot_date, origin=v.snapshot_origin or "beyan edilmedi", generation=generation)
     return ({"title": "Kredi — Ödeme Takvimi", "rows": srows,
              "cols": [{"k": "currency", "l": "Para birimi"}, {"k": "window", "l": "Pencere"},
-                      _n("installments", "Taksit"), _money("amount", "Kalan tutar")], "note": formula,
+                      _n("installments", "Taksit"), _shown("amount", "Kalan tutar (sözleşme dövizi)")], "note": formula,
              "review_html": _review("owner.kredi", head["source"], head["sha"], formula, warnings,
                                     report_date=head["report_date"], origin=head["origin"], generation=generation)},
             {"title": "Kredi — Açık Taksitler", "rows": irows, "page_size": 100,
              "cols": [_n("excel_row", "Excel satırı"), {"k": "contract", "l": "Sözleşme"}, {"k": "lender", "l": "Banka kodu"},
                       {"k": "currency", "l": "Para birimi"}, _n("installment", "Taksit no"), {"k": "due_date", "l": "Vade"},
-                      _money("installment_total", "Taksit tutarı"), _money("remaining", "Kalan", sign=True),
-                      _money("remaining_principal", "Kalan anapara"), {"k": "status", "l": "DURUM (doğrulanmadı)"},
+                      _shown("installment_total", "Taksit tutarı"), _shown("remaining", "Kalan", sign=True),
+                      _shown("remaining_principal", "Kalan anapara"), {"k": "status", "l": "DURUM (doğrulanmadı)"},
                       {"k": "payment_date", "l": "Ödeme fişi tarihi"}],
              "note": "Kalan tutarı sıfırdan farklı her taksit; kaynak satırıyla.",
              "review_html": _review("owner.kredi", head["source"], head["sha"], formula, warnings,
@@ -372,14 +407,31 @@ def gider_gelir_sections(src, res, generation):
     return out, {"months": len(months), "excluded_rows": [x["excel_row"] for x in v.allocation_excluded]}
 
 
+BUTCE_AMOUNT_UNITS = ("YTL", "TL")       # the importer's verbatim amount labels; any other AMOUNT label has no unit
+
+
+def butce_value(f):
+    """(kind, unit, display text) of one Bütçe fact by its importer type: an amount keeps its YTL / TL label (the
+    BÜTÇE ÖZET panel states none, so none is shown); a `$ kur` / `€ kur` cell is an exchange rate, never an amount.
+    Every digit of the cached value is shown."""
+    from services.importers.butce import ValueType
+    v = _num(f.value) if f.usable else None
+    if f.value_type is ValueType.CURRENCY_RATE:
+        return "Döviz kuru", f.source_label, None if v is None else f"{exact_text(v)} ({f.source_label})"
+    unit = f.source_label if f.source_label in BUTCE_AMOUNT_UNITS else None
+    return ("Tutar", unit or "kaynakta yazılı değil", None if v is None else amount_text(v, unit or ""))
+
+
 def butce_section(src, res, generation):
     from services import owner_view as OV
     h = OV.build_butce_view(res).health
     rows = []
     for f in res.facts:
+        kind, unit, shown = butce_value(f)
         rows.append({"region": f.region.value, "block": f.block.value if f.block else None, "year": f.year,
                      "scenario": f.scenario.value, "month": MONTHS[f.month - 1] if f.month else None,
                      "label": f.source_label, "component": f.component, "line": f.line_label,
+                     "value_kind": kind, "unit": unit, "value_shown": shown,
                      "value": _num(f.value) if f.usable else None, "validity": f.validity.value,
                      "flags": "; ".join(x for x, on in (("dış bağlantı", f.external_dependency),
                                                        ("başlık çelişkisi", f.title_conflict)) if on),
@@ -396,13 +448,16 @@ def butce_section(src, res, generation):
         _w("BUTCE-YIL", "Planlama yılı beyan edildi", "Dosya adında yıl yok; yıl rapor oluşturulurken beyan edildi.",
            f"Planlama yılı: {h['planning_year']} ({h['planning_year_origin']}).", "—", "Bilgi amaçlıdır.", "dusuk"),
     ]
-    formula = "Hücre düzeyinde kaynak değerleri; Excel'in son hesapladığı değerler, yeniden hesaplanmaz. Geçersiz hücre = —."
+    formula = ("Hücre düzeyinde kaynak değerleri; Excel'in son hesapladığı değerler, yeniden hesaplanmaz. Geçersiz hücre = —. "
+               "Tutarlar kaynak etiketiyle (YTL / TL), '$ kur' / '€ kur' sütunları döviz kuru olarak, tüm basamaklarıyla "
+               "gösterilir; çevrim yapılmaz.")
     return {"title": "Bütçe — Hücreler", "rows": rows, "page_size": 100, "note": formula,
             "review_html": _review("owner.butce", src["name"], src["sha"], formula, warnings,
                                    origin=f"planlama yılı {h['planning_year']}", generation=generation),
             "cols": [{"k": "region", "l": "Bölge"}, {"k": "block", "l": "Blok"}, _n("year", "Yıl"),
                      {"k": "scenario", "l": "Senaryo"}, {"k": "month", "l": "Ay"}, {"k": "label", "l": "Kaynak etiketi"},
-                     {"k": "component", "l": "Bileşen"}, {"k": "line", "l": "Satır"}, _money("value", "Değer", sign=True),
+                     {"k": "component", "l": "Bileşen"}, {"k": "line", "l": "Satır"}, {"k": "value_kind", "l": "Değer türü"},
+                     {"k": "unit", "l": "Birim (kaynak)"}, _shown("value", "Değer", sign=True),
                      {"k": "validity", "l": "Geçerlilik"}, {"k": "flags", "l": "Uyarı"}, {"k": "cell", "l": "Hücre"}]}, h
 
 

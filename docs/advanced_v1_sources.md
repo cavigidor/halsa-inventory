@@ -55,6 +55,22 @@ expense as unknown (—, warning); the offline report shows the consistent-row s
 
 Not rounding of a displayed percentage: in 10 of 12 months the allocations differ from the month total by total × (sum − 1).
 
+## Source currency and units (PR #52 review)
+
+The shared table renderer's `money` column always prints a lira sign and its `n` column rounds to two decimals. The
+owner report therefore shows these values as text carrying the source unit (an opt-in `disp` column; the numeric value
+still sorts and is unchanged; no conversion):
+
+| Table | Value | Shown as |
+|---|---|---|
+| Tahsilat — Evraklar | `Evrak tutarı` (`Orj. döviz`) | original currency, e.g. `100,00 EUR`, `1.234,50 TL`; `Açık TL (TL karşılığı)` stays ₺ |
+| Kredi — Ödeme Takvimi / Açık Taksitler | remaining, installment, principal | contract currency, e.g. `250.000,00 USD`; never summed across currencies |
+| Bütçe — Hücreler | `ValueType.AMOUNT` | with the verbatim label `YTL` / `TL`; BÜTÇE ÖZET panel: no unit in the source, none shown |
+| Bütçe — Hücreler | `ValueType.CURRENCY_RATE` | exchange rate, e.g. `2,5625 ($ kur)` — never an amount |
+
+Every stored digit is shown (shortest round-trip decimal of the cached value). Cari balances, collections TL open
+amounts, Gider/Gelir and the general report are unchanged (TL).
+
 ## Bütçe
 
 The file-name pattern check is skipped by the existing explicit source-type mechanism (`explicit_source_type()`,
@@ -127,6 +143,14 @@ synthetic reports (`tests/test_advanced_v1_sources.py`).
 |---|---:|---|
 | `Halsa_Kasim_2026_Yonetim_Finans.html` | 1,264,812 | `565a8126edd499587ff632fb8de4b573b165278c9e4478dffdd4cf6bb887dc07` |
 | `Halsa_Kasim_2026_Genel_Gelismis.html` | 22,033,122 | `40dbf854c46917830cdf040f96fb6c5ccf197955d3ebfe76053827cf796e7c04` |
+| `Halsa_Kasim_2026_Yonetim_Finans_r2.html` (currency / unit correction; supersedes the first owner file for review) | 1,513,177 | `f9f2bad1fe8ce3714c879de3fdc42dc437439d3b31d5b52e318d1a3142b46ae3` |
+
+The `_r2` owner file has the same sections, rows and source values as the first one; only the display fields of
+Tahsilat — Evraklar, Kredi and Bütçe changed. Rendered in jsdom on every page and checked against the Excel sources read
+independently (openpyxl): 12,941 checks, 0 failed (316 documents: 315 TL, 1 EUR; 2,873 Bütçe cells: 1,468 YTL and 927
+TL amounts, 50 BÜTÇE ÖZET panel amounts without a unit, 214 `$ kur` and 214 `€ kur` rates; 182 Kredi installments, TL).
+The general file was not regenerated: its data never uses the new column, and a synthetic old-vs-new comparison
+differs only in three inert template lines.
 
 ## Complete, provisional, unsupported
 

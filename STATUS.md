@@ -11,6 +11,11 @@
   `Halsa_Kasim_2026_Genel_Gelismis.html` `40dbf854…`. Details and father's questions: `docs/advanced_v1_sources.md`.
 - Tests: `tests/test_advanced_v1_sources.py` 10 (incl. Chromium); updated Gider/Gelir ratio test and the M6-4 guard test.
   Full suite **2156 passed, 8 skipped, 1 xfailed** (JS + browser required). STOP for PM / owner review.
+- PR #52 review correction (source currency and units): collections `Evrak tutarı` in its own currency (EUR stays
+  EUR), Kredi amounts in the contract currency, Bütçe amounts with `YTL` / `TL` and `$ kur` / `€ kur` as exchange rates,
+  every stored digit; opt-in renderer column `disp` (existing columns unchanged; general report payload identical).
+  Real November `Halsa_Kasim_2026_Yonetim_Finans_r2.html` `f9f2bad1…`: 12,941 rendered-cell checks against the Excel
+  sources, 0 failed; earlier file kept. Tests +2 (Chromium DOM); full suite **2158 passed, 8 skipped, 1 xfailed**.
 
 **2026-11-07 (later) — D-080 review corrections + complete November B2B reports; PR #51 updated, NOT merged / deployed / sent.**
 - ChatGPT review of PR #51 at `f0af472` addressed in `halsa_b2b.py` only: A = definite gaps; new "Doğrulanacak" view for

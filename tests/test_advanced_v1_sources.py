@@ -252,3 +252,93 @@ def test_owner_and_general_reports_work_offline(browser, owner, general):
         assert page.locator(f"#{key} table").count() == 1
     assert not errors and not any(u.startswith(("http:", "https:")) for u in requests)
     page.close()
+
+
+# ---------------------------------------------------------------------------------------------
+# 5. source currency and units (PR #52 review): never a lira sign on a foreign amount or an exchange rate
+# ---------------------------------------------------------------------------------------------
+def _parse_tr(text):
+    """'1.234,5625' → 1234.5625 (independent of the report's formatter)."""
+    return float(text.replace(".", "").replace(",", "."))
+
+
+def _rendered(page, panel, query):
+    """Header → cell text for every rendered row of `panel` after typing `query` in its search box."""
+    page.click(f'.tab[data-t="{panel}"]')
+    page.locator(f"#{panel} .search").fill(query)
+    return page.evaluate("""p => { const t = document.querySelector('#' + p + ' table');
+        const h = [...t.querySelectorAll('thead th')].map(th => th.childNodes[0].textContent.trim());
+        return [...t.querySelectorAll('tbody tr.main')].map(tr =>
+            Object.fromEntries([...tr.children].map((td, i) => [h[i], td.textContent]))); }""", panel)
+
+
+def test_exact_text_keeps_every_digit():
+    from services.owner_report import amount_text, exact_text
+    assert exact_text(2.5625) == "2,5625" and exact_text(3.1006250000000004) == "3,1006250000000004"
+    assert exact_text(1234567.5, 2) == "1.234.567,50" and exact_text(-27591.94, 2) == "-27.591,94"
+    assert exact_text(-0.0, 2) == "0,00" and exact_text(3600) == "3.600" and exact_text(None) is None
+    assert amount_text(100.0, "EUR") == "100,00 EUR" and amount_text(None, "EUR") is None
+
+
+def test_rendered_amounts_keep_their_source_currency_and_units(browser, owner, tmp_path):
+    from services.importers.butce import ValueType
+    from services.owner_report import generate
+    from tests.fixtures import owner_synth as O
+    _, path, src, _ = owner
+    D, _ = _data(path)
+    page, errors, _ = _open(browser, path)
+
+    # collections: the EUR document in EUR, a TL document in TL, the open amount explicitly TL (₺)
+    docs = {r["Evrak no"]: r for r in _rendered(page, "tahsilat_evrak", "120.90.0004")}
+    eur = next(r for r in D["tahsilat_evrak"]["rows"] if r["currency"] == "EUR")
+    cell = docs[eur["document_no"]]["Evrak tutarı (orijinal döviz)"]
+    assert cell.endswith(" EUR") and "₺" not in cell and _parse_tr(cell[:-4]) == eur["document_total"]
+    assert docs[eur["document_no"]]["Açık TL (TL karşılığı)"].startswith("₺")
+    tl = next(r for r in D["tahsilat_evrak"]["rows"] if r["currency"] == "TL")
+    t_cell = next(r for r in _rendered(page, "tahsilat_evrak", tl["code"])
+                  if r["Evrak no"] == tl["document_no"])["Evrak tutarı (orijinal döviz)"]
+    assert t_cell.endswith(" TL") and "₺" not in t_cell and _parse_tr(t_cell[:-3]) == tl["document_total"]
+
+    # Bütçe: exchange rates as rates with every digit, amounts with their YTL / TL label, the panel without a unit
+    from services.importers.base import explicit_source_type
+    from services.importers.butce import import_butce
+    with explicit_source_type():                                                # as the report reads it (no renaming)
+        res = import_butce(src["butce"], planning_year=2026)
+    assert res.ok
+    by_cell = {f.source_cell: f for f in res.facts}
+    rate_rows = [r for r in _rendered(page, "butce", "€ kur") if r["Değer"] != "—"]
+    assert rate_rows
+    for r in rate_rows:
+        f = by_cell[r["Hücre"]]
+        assert f.value_type is ValueType.CURRENCY_RATE and r["Değer türü"] == "Döviz kuru" and r["Birim (kaynak)"] == "€ kur"
+        assert "₺" not in r["Değer"] and r["Değer"].endswith(" (€ kur)")
+        assert _parse_tr(r["Değer"][:-len(" (€ kur)")]) == f.value.value        # full precision (e.g. 2,5625)
+    assert any(len(r["Değer"].split(" ")[0].split(",")[-1]) > 2 for r in rate_rows)   # beyond two decimals
+    assert all(r["Birim (kaynak)"] == "$ kur" and r["Değer"].endswith(" ($ kur)") and "₺" not in r["Değer"]
+               for r in _rendered(page, "butce", "$ kur") if r["Değer"] != "—")
+    amounts = [r for r in _rendered(page, "butce", "YTL") if r["Değer"] != "—"]
+    assert amounts and all(r["Değer türü"] == "Tutar" and r["Değer"].endswith(" YTL") and "₺" not in r["Değer"]
+                           and _parse_tr(r["Değer"][:-4]) == by_cell[r["Hücre"]].value.value for r in amounts)
+    panel = [r for r in _rendered(page, "butce", "BÜTÇE ÖZET") if r["Değer"] != "—"]
+    assert panel and all(r["Birim (kaynak)"] == "kaynakta yazılı değil" and "₺" not in r["Değer"]
+                         and _parse_tr(r["Değer"]) == by_cell[r["Hücre"]].value.value for r in panel)
+    page.locator("#butce .search").fill("")
+    page.locator('#butce th[data-k="value"]').click()                          # still sorts numerically
+    first = _rendered(page, "butce", "")[0]["Değer"]
+    top = max(r["value"] for r in D["butce"]["rows"] if r["value"] is not None)
+    assert _parse_tr(first.split(" ")[0]) == top
+    assert not errors
+    page.close()
+
+    # Kredi: a USD contract stays USD, never summed with TL, never a lira sign
+    k = O.write_kredi(tmp_path / "k", dt.date(2026, 11, 5), currency2="USD")
+    generate(tmp_path / "k.html", kredi=k, as_of=dt.date(2026, 11, 5), today=dt.date(2026, 11, 7))
+    page, errors, _ = _open(browser, tmp_path / "k.html")
+    usd = _rendered(page, "kredi_taksit", "USD")
+    assert usd and all(r[c].endswith(" USD") and "₺" not in r[c] for r in usd
+                       for c in ("Taksit tutarı", "Kalan", "Kalan anapara") if r[c] != "—")
+    sched = _rendered(page, "kredi_takvim", "")
+    assert {r["Kalan tutar (sözleşme dövizi)"].split(" ")[-1] for r in sched} == {"TL", "USD"}
+    assert all(r["Kalan tutar (sözleşme dövizi)"].endswith(" " + r["Para birimi"]) for r in sched)
+    assert not any("₺" in v for r in sched for v in r.values()) and not errors
+    page.close()

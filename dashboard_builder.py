@@ -3077,7 +3077,7 @@ function draw(id){{
     return String(x??'').localeCompare(String(y??''),'tr')*s.dir;}});}}
   const totalRows=rows.length;
   if(m.page_size){{s.page=Math.min(s.page,Math.max(0,Math.ceil(totalRows/m.page_size)-1)); rows=rows.slice(s.page*m.page_size,(s.page+1)*m.page_size);}}
-  const isnum=c=>c.n!=null||c.money;
+  const isnum=c=>c.n!=null||c.money||c.disp;
   let h='<table><thead><tr>'+m.cols.map(c=>`<th class="${{isnum(c)?'r':''}}" data-k="${{c.k}}">${{c.l}} <span class=ar>${{s.sort===c.k?(s.dir>0?'▲':'▼'):'↕'}}</span></th>`).join('')+'</tr></thead><tbody>';
   if(!rows.length) h+=`<tr><td class="empty" colspan="${{m.cols.length}}">Gösterilecek kayıt yok.</td></tr>`;
   rows.forEach((r,i)=>{{
@@ -3087,6 +3087,7 @@ function draw(id){{
       if(m.review&&v==null) return '<td>—</td>';
       if(c.raw) return `<td class="r mono">${{v==null?'—':esc(v)}}</td>`;
       if(c.k==='tier') return `<td><span class="tier t${{v}}">K${{v}}</span></td>`;
+      if(c.disp) return `<td class="money ${{(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}}">${{r[c.disp]==null?'—':esc(r[c.disp])}}</td>`;  // D-081: source unit text, numeric sort
       if(c.money&&c.exact) return `<td class="money ${{(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}}">${{v==null?'—':fmtMoneyExact(v)}}</td>`;
       if(c.money) return `<td class="money ${{c.k==='overdue'?'od':(c.k==='inv'?'val':'')}} ${{(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}}">${{v?fmtMoney(v):(v===0?'₺0':'—')}}</td>`;
       if(c.n!=null) return `<td class="r mono ${{(id==='reorder'&&r.crit&&(c.k==='cov'||c.k==='stock'))?'crit':''}} ${{(c.sign&&v<0)?'neg':(c.sign&&v>0?'pos':'')}}">${{v==null?'—':fmtNum(v,String(v).includes('.')?2:0)}}</td>`;
@@ -3108,7 +3109,7 @@ function draw(id){{
   if(m.page_size){{p.querySelector('.prev-page').disabled=s.page===0; p.querySelector('.next-page').disabled=(s.page+1)*m.page_size>=totalRows;}}
   p.querySelectorAll('th').forEach(th=>th.addEventListener('click',()=>{{
     const k=th.dataset.k, col=DATA[id].cols.find(c=>c.k===k);
-    if(state[id].sort===k) state[id].dir*=-1; else {{state[id].sort=k;state[id].dir=(col.money||col.n!=null)?-1:1;}}
+    if(state[id].sort===k) state[id].dir*=-1; else {{state[id].sort=k;state[id].dir=(col.money||col.n!=null||col.disp)?-1:1;}}
     state[id].page=0;draw(id);}}));
   if(m.expand) p.querySelectorAll('tr.exp').forEach(tr=>tr.addEventListener('click',()=>{{
     const d=tr.nextElementSibling; tr.classList.toggle('open'); d.classList.toggle('open');}}));
