@@ -406,11 +406,29 @@ def test_20_ratios_sum_to_one_pass(tmp_path):
     assert (res.counts.ratio_rows_checked, res.counts.ratio_rows_failed) == (4, 0)   # incl. 0.333/0.333/0.334
 
 
-def test_21_ratio_sum_mismatch_fails(tmp_path):
+def test_21_ratio_sum_mismatch_isolates_the_row(tmp_path):
+    """D-081: a row whose ratios do not sum to 1 no longer rejects the workbook. Its totals stay valid; its
+    business-line allocations are flagged (Excel row named) and excluded from business-line totals."""
     exps = [list(e) for e in EXPENSES]
     exps[0][2] = (0.5, 0.3, 0.1, 0.05)
     res = run(tmp_path, expenses=[tuple(e) for e in exps])
-    assert not res.ok and "allocation_ratio_sum" in codes(res, G.Severity.ERROR)
+    assert res.ok and "allocation_ratio_sum" in codes(res, G.Severity.WARNING)
+    assert "allocation_ratio_sum" not in codes(res, G.Severity.ERROR)
+    bad = [e for e in res.expenses if not e.allocation_consistent]
+    assert len(bad) == 1 and bad[0].ratio_sum == 0.95
+    assert res.counts.allocation_inconsistent_rows == [bad[0].source_row]
+    msg = next(i.message for i in res.report.issues if i.code == "allocation_ratio_sum")
+    assert f"row(s) {bad[0].source_row}" in msg
+    from services import owner_view as OV
+    v = OV.build_gider_gelir_view(res)
+    assert all(l["allocated_expense"] is None for l in v.lines)          # never an incomplete total as complete
+    assert all(not p["complete"] for p in v.allocation_partial)
+    assert [x["excel_row"] for x in v.allocation_excluded] == [bad[0].source_row]
+    assert any(w["code"] == "allocation_ratio_sum" for w in v.warnings)
+    (tmp_path / "ok").mkdir()
+    ok = OV.build_gider_gelir_view(run(tmp_path / "ok"))
+    assert all(p["complete"] for p in ok.allocation_partial) and not ok.allocation_excluded
+    assert [l["allocated_expense"] for l in ok.lines] == [p["allocated_expense_consistent_rows"] for p in ok.allocation_partial]
 
 
 def test_22_ratio_outside_unit_interval_is_warning(tmp_path):

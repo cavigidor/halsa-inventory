@@ -37,6 +37,9 @@ GitHub (`cavigidor/halsa-inventory`) is the source of truth. Do not rely on chat
   **D-080 exception (variant only):** `classic/klasik_b2b.py` runs the unmodified frozen builder and may load only
   `halsa_b2b.py` (stdlib + pandas + openpyxl; imports neither application) for the father's B2B Takip report; the
   original Klasik workflow and output stay unchanged. `services/b2b_review.py` applies the same module to the V1 report.
+- **Advanced V1 (D-081):** the general offline report (`father_report`) never reads Cari, detailed collections, Kredi,
+  Gider/Gelir or Bütçe and never exports Hedef `Risk` / `Kredi` / discount; those sources go only to the separate private
+  `services/owner_report.py`. The collections red marker is the source's own rule, never a certified overdue result.
 - **V1 review-first presentation (owner directive 2026-11-06, D-078):** explicitly implemented preliminary source
   review may display calculable factual evidence with concrete Turkish warnings, without certification or action
   propagation. First surface: `services/stock_review.py`, stock-only, generation/fingerprint-bound on every served
