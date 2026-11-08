@@ -3003,9 +3003,9 @@ table.sub th{{cursor:default;padding:7px 12px}}table.sub td{{padding:6px 12px;fo
 .aw-msg{{font-weight:700;margin:0 0 6px;font-size:15px}}.aw-why{{margin:0;padding-left:18px;color:var(--muted);font-size:13px}}
 .aw-why li{{margin:3px 0}}
 {_ACCESS_CSS}</style></head><body><div class="wrap">
-<header><div class="eyebrow">Şirket Panosu</div>
-<h1>Şirket Panosu — {meta['date']}</h1>
-<div class="sub">{src}{f" · {meta['total']:,} ürün" if meta.get('total_shown') else ''}</div>
+<header><div class="eyebrow">{html.escape(meta.get('eyebrow') or 'Şirket Panosu')}</div>
+<h1>{html.escape(meta.get('title') or 'Şirket Panosu')} — {meta['date']}</h1>
+<div class="sub">{html.escape(meta['subline']) if meta.get('subline') else src}{f" · {meta['total']:,} ürün" if meta.get('total_shown') else ''}</div>
 <div class="acc-bar" id="halsa-access" hidden></div></header>
 <div class="acc-msg" id="halsa-access-msg" role="alert" hidden></div>
 <script>{_ACCESS_JS}</script>

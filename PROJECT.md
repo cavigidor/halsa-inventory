@@ -223,3 +223,7 @@ are unchanged. Procedure and acceptance: `docs/halsa_v1_father_report.md`.
 `halsa_b2b.py` is the one B2B calculation (sales column AG = `B2B`; `b2b_kullanici_rapor.xlsx` column B, exact codes)
 used by the separate Klasik variant `classic/klasik_b2b.py` (frozen builder unmodified) and by `father_report --b2b`.
 Offline private reports only; no app route, metric, action or AI input. Details: `docs/b2b_tracking.md`.
+
+## Advanced V1 sources (D-081)
+`services/owner_report.py` (owner / financial offline file: Cari, `importers/detailed_collections.py`, Kredi, Gider/Gelir,
+Bütçe) and `services/general_sources.py` (Hedef, Trodat in the general file). Details: `docs/advanced_v1_sources.md`.

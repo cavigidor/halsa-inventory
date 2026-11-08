@@ -15,9 +15,12 @@ from services import accuracy as ACC, generation as GEN, paths as PATHS
 from services import sales_review as SALES, stock_review as STOCK
 
 
-def generate(data_folder, output, *, today=None, b2b=False, b2b_registration=None, b2b_review_days=365):
+def generate(data_folder, output, *, today=None, b2b=False, b2b_registration=None, b2b_review_days=365,
+             hedef=None, trodat=None, trodat_year=None):
     """b2b=True adds the father's B2B tracking (D-080; services/b2b_review.py). Without it the output is unchanged.
-    b2b_registration: explicit b2b_kullanici_rapor.xlsx path; None = the list is missing (never 'not registered')."""
+    b2b_registration: explicit b2b_kullanici_rapor.xlsx path; None = the list is missing (never 'not registered').
+    hedef / trodat (D-081): explicit shared-audience workbooks for the Hedef / Trodat sections; without them the
+    output is unchanged. Owner / financial sources are never read here (services/owner_report.py)."""
     import dashboard_builder as DB
     today=today or dt.date.today()
     data_folder=str(Path(data_folder).resolve())
@@ -40,6 +43,9 @@ def generate(data_folder, output, *, today=None, b2b=False, b2b_registration=Non
         declarations[key]=GEN._declaration(key,entry)  # existing date/provenance validation, no new inference
 
     PATHS.check({'DATA_FOLDER':data_folder,'DASHBOARD_PATH':str(target)})
+    extra_paths={k:v for k,v in (('hedef',hedef),('trodat',trodat)) if v}
+    for k,v in extra_paths.items():
+        if not Path(v).is_file() or Path(v).suffix.lower()!='.xlsx': raise ValueError(f'{k} dosyası bulunamadı veya .xlsx değil.')
     reg_source=None
     if b2b and b2b_registration is not None:
         if not Path(b2b_registration).is_file() or Path(b2b_registration).suffix.lower()!='.xlsx':
@@ -83,6 +89,23 @@ def generate(data_folder, output, *, today=None, b2b=False, b2b_registration=Non
             'need':'B2B satışı = satış dosyası AG sütunu; kayıt = b2b_kullanici_rapor.xlsx B sütunu. Belirsiz eşleşmeler kayıtlı sayılmaz; kayıt listesi yoksa A/B listeleri üretilmez. "Son zamanlarda" süresi geçicidir.'})
         modules['report_scope']=modules.pop('report_scope')
         meta['intro']+=' B2B Takip bölümü, satış dosyasının AG sütunu ve B2B kayıt listesinin B sütunuyla hazırlanmış ön inceleme arama listeleridir.'
+    extra_counts={}
+    if extra_paths:
+        from services import general_sources as GS
+        before_extra={k:GEN.sha256_file(v) for k,v in extra_paths.items()}
+        scope=modules.pop('report_scope')
+        if hedef:
+            modules['hedef'],extra_counts['hedef']=GS.hedef_section(hedef,DB.load_sales(None,frames['sales']),manifest.core_id)
+        if trodat:
+            modules['trodat'],extra_counts['trodat']=GS.trodat_section(trodat,manifest.core_id,report_year=trodat_year)
+        for row in scope['rows']:
+            if row['section']=='Hedef / Trodat ek analizleri':
+                row['state']='Dahil: '+' ve '.join(x for x in (('Hedef' if hedef else ''),('Trodat' if trodat else '')) if x)
+                row['need']=('Hedef: Risk / Kredi limitleri ve iskonto bu genel rapora alınmaz; eski / eksik alanlar etiketli. '
+                             'Trodat: model düzeyinde, Halsa ürün koduyla eşlenmedi. Seçilmeyen kaynak bölümü yoktur (sıfır değil).')
+        modules['report_scope']=scope
+        if any(GEN.sha256_file(v)!=before_extra[k] for k,v in extra_paths.items()):
+            raise ValueError('Hedef / Trodat dosyası okunurken değişti; rapor yazılmadı.')
     body=DB._html(modules,[],meta,[],ai_panel=False,c360_panel=False,sq_panel=False,opp_panel=False,
                   fair_panel=False,crm_panel=False,own_panel=False,vkm_panel=False,up_panel=False)
     if b2b:
@@ -101,7 +124,8 @@ def generate(data_folder, output, *, today=None, b2b=False, b2b_registration=Non
     finally:
         os.unlink(staged)
     return {'generation':manifest.core_id,'sections':{k:len(m['rows']) for k,m in modules.items()},
-            'sources':{k:s.sha256 for k,s in frozen.items()},'output':str(target),'b2b':b2b_counts}
+            'sources':{k:s.sha256 for k,s in frozen.items()},'output':str(target),'b2b':b2b_counts,
+            **({'extra':extra_counts} if extra_counts else {})}
 
 
 def main():
@@ -111,12 +135,16 @@ def main():
     parser.add_argument('--b2b',action='store_true',help='B2B Takip bölümünü ekle (D-080)')
     parser.add_argument('--b2b-registration',help='b2b_kullanici_rapor.xlsx (B sütunu = kayıtlı müşteri kodu)')
     parser.add_argument('--b2b-review-days',type=int,default=365,help="geçici 'son zamanlarda' süresi (gün)")
+    parser.add_argument('--hedef',help='Hedef çalışma kitabı (genel rapora Hedef / Bölge bölümü; D-081)')
+    parser.add_argument('--trodat',help='Trodat satış raporu (genel rapora model düzeyinde bölüm; D-081)')
+    parser.add_argument('--trodat-year',type=int,help='Trodat rapor yılı (dosya adında yoksa)')
     args=parser.parse_args()
     if (args.b2b_registration or args.b2b_review_days!=365) and not args.b2b: parser.error('--b2b gerekir')
     if args.b2b_review_days<1: parser.error('--b2b-review-days en az 1 olmalı')
     try:
         result=generate(args.data,args.output,b2b=args.b2b,b2b_registration=args.b2b_registration,
-                        b2b_review_days=args.b2b_review_days)
+                        b2b_review_days=args.b2b_review_days,hedef=args.hedef,trodat=args.trodat,
+                        trodat_year=args.trodat_year)
     except (ValueError,OSError,KeyError):
         parser.exit(2,'Rapor oluşturulamadı. Kaynak seçimini/sütunlarını ve yeni çıktı adını kontrol edin; dosyalar değiştirilmedi.\n')
     print('Özel çevrimdışı rapor oluşturuldu. Cari hesap bakiyesi içermez; yalnız yetkili alıcıyla özel paylaşın.')

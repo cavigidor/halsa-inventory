@@ -206,6 +206,10 @@ class ExpenseLine:
     annual_total_matches_months: bool
     source_row: int
     management_category: str = "not_mapped"
+    # D-081: ratios that do not sum to 1 (±RATIO_SUM_TOL). The row's expense totals stay valid; its business-line
+    # allocations are kept as recorded but are not consistent with them and are excluded from line totals.
+    allocation_consistent: bool = True
+    ratio_sum: float | None = None
 
 
 @dataclass(slots=True)
@@ -272,6 +276,7 @@ class GiderGelirSummary(BaseModel):
     excel_errors: dict[str, int] = Field(default_factory=dict)
     ratio_rows_checked: int = 0
     ratio_rows_failed: int = 0
+    allocation_inconsistent_rows: list[int] = Field(default_factory=list)   # Excel rows (D-081), structure only
     ratios_outside_unit_interval: int = 0
     allocation_cells_checked: int = 0
     allocation_cells_not_matching_ratio: int = 0
@@ -478,13 +483,18 @@ def _expenses(records: list[NormalizedRecord], year: int, report: ValidationRepo
 
     expenses, months = [], []
     ratio_bad = blank = outside = alloc_bad = alloc_checked = annual_bad = annual_alloc_bad = 0
+    inconsistent: list[int] = []
     for r in rows:
         v = r.values
         ratios = {ln: v[f"ratio_{ln.value}"] for ln in LINES}
+        ratio_sum = None
         if any(nv.value is None for nv in ratios.values()):
             blank += 1
-        elif not _close(sum(_n(nv) for nv in ratios.values()), 1.0, RATIO_SUM_TOL):
-            ratio_bad += 1
+        else:
+            ratio_sum = sum(_n(nv) for nv in ratios.values())
+            if not _close(ratio_sum, 1.0, RATIO_SUM_TOL):
+                ratio_bad += 1
+                inconsistent.append(r.row)
         if any(nv.value is not None and not 0 <= nv.value <= 1 for nv in ratios.values()):
             outside += 1
         key = record_key("gider_expense", [r.get("cost_center"), r.get("expense_name")])
@@ -505,12 +515,14 @@ def _expenses(records: list[NormalizedRecord], year: int, report: ValidationRepo
         annual_bad += not annual_ok
         hist = {y: v[f"historical_{y}"] for y, _ in _historical_expense_headers(year) if v[f"historical_{y}"].value is not None}
         expenses.append(ExpenseLine(key, r.get("cost_center"), r.get("expense_name"), ratios, v["budget"], hist,
-                                    annual_ok, r.row))
+                                    annual_ok, r.row, allocation_consistent=r.row not in inconsistent,
+                                    ratio_sum=None if ratio_sum is None else round(ratio_sum, 9)))
         for ln in LINES:  # annual line allocation = sum of monthly allocations (workbook formulas)
             if not _close(_n(v[f"annual_{ln.value}"]), sum(_n(v[f"m{m}_{ln.value}"]) for m in range(1, 13))):
                 annual_alloc_bad += 1
     counts.ratio_rows_checked = len(rows)
     counts.ratio_rows_failed = ratio_bad + blank
+    counts.allocation_inconsistent_rows = list(inconsistent)
     counts.ratios_outside_unit_interval = outside
     counts.allocation_cells_checked, counts.allocation_cells_not_matching_ratio = alloc_checked, alloc_bad
     counts.annual_totals_not_matching_months = annual_bad
@@ -522,9 +534,12 @@ def _expenses(records: list[NormalizedRecord], year: int, report: ValidationRepo
         report.add(Severity.ERROR, "allocation_ratio_missing", f"{blank} expense row(s) lack an allocation ratio.",
                    count=blank)
     if ratio_bad:
-        report.add(Severity.ERROR, "allocation_ratio_sum",
-                   f"{ratio_bad} expense row(s) have allocation ratios that do not sum to 1 (±{RATIO_SUM_TOL}).",
-                   count=ratio_bad)
+        # D-081: isolated per row (was fatal for the whole workbook). The rows' expense totals are unaffected; their
+        # business-line allocations are flagged and excluded from line totals, which are then reported as incomplete.
+        report.add(Severity.WARNING, "allocation_ratio_sum",
+                   f"{ratio_bad} expense row(s) have allocation ratios that do not sum to 1 (±{RATIO_SUM_TOL}); Excel "
+                   f"row(s) {', '.join(map(str, inconsistent))}. Their totals are kept; their business-line "
+                   "allocations are excluded from business-line totals.", count=ratio_bad)
     if outside:
         report.add(Severity.WARNING, "allocation_ratio_outside_unit_interval",
                    f"{outside} expense row(s) use a ratio outside 0–1 (a reallocation in the source); kept as recorded.",

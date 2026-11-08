@@ -788,9 +788,10 @@ def test_62_no_refresh_dependency(tmp_path):
         assert banned not in src, banned
 
 
-def test_63_detailed_collections_not_started():
+def test_63_detailed_collections_separate_from_butce():
+    """M6-4 was started in D-081 as its own importer; Bütçe stays independent of it."""
     names = {p.stem for p in (ROOT / "services/importers").glob("*.py")}
-    assert not any(n.startswith(("collection", "tahsilat", "detailed")) for n in names)
+    assert [n for n in names if n.startswith(("collection", "tahsilat", "detailed"))] == ["detailed_collections"]
     src = (ROOT / "services/importers/butce.py").read_text().lower()
     assert "tahsilat" not in src and "collections" not in src.replace("from collections import", "")
 

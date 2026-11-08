@@ -1,5 +1,17 @@
 # STATUS.md — current checkpoint
 
+**2026-11-07 — D-081 Advanced V1: seven additional sources; general + separate owner / financial offline reports; draft PR, NOT merged / deployed / sent.**
+- New collections importer (M6-4); Gider/Gelir ratio rows isolated (59, 82, 165) instead of rejecting the workbook;
+  Bütçe via explicit source selection (no rename); `owner_report.py`; Hedef / Trodat in the general report (opt-in).
+- Real November: owner file 838 Cari accounts · 149 / 316 collections accounts / documents (red 155 rows / 102
+  accounts) · 182 open Kredi installments · Gider/Gelir 10 months, 3 isolated rows · 2,873 Bütçe cells; general file adds
+  Hedef 18,773 and Trodat 40 lines, B2B unchanged. Independent reconciliation 101,668 checks, 0 discrepancies; jsdom
+  50 + 76 checks, 0 JS errors; real browser not performed (none connected). Inputs unchanged.
+- Files: `reports/private/advanced-v1/Halsa_Kasim_2026_Yonetim_Finans.html` `565a8126…`,
+  `Halsa_Kasim_2026_Genel_Gelismis.html` `40dbf854…`. Details and father's questions: `docs/advanced_v1_sources.md`.
+- Tests: `tests/test_advanced_v1_sources.py` 10 (incl. Chromium); updated Gider/Gelir ratio test and the M6-4 guard test.
+  Full suite **2156 passed, 8 skipped, 1 xfailed** (JS + browser required). STOP for PM / owner review.
+
 **2026-11-07 (later) — D-080 review corrections + complete November B2B reports; PR #51 updated, NOT merged / deployed / sent.**
 - ChatGPT review of PR #51 at `f0af472` addressed in `halsa_b2b.py` only: A = definite gaps; new "Doğrulanacak" view for
   ambiguous matches, B2B buyers absent from the list and unclear channel spellings; B and C withheld unless AG verifies;

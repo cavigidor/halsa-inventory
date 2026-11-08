@@ -1566,3 +1566,28 @@ Verified locally on the real exports (details and evidence in `docs/m6_source_in
 - **Real data with the supplied registration file (`dbad60b3…`):** A 4,739 · B 1,142 · C 415 · Doğrulanacak 360;
   independent reconciliation 171,000 checks, 0 discrepancies; original vs variant 7,706 checks, 0 discrepancies
   (`docs/b2b_tracking.md`). Open questions for the father are listed there.
+
+### D-081 · 2026-11-07 · Advanced V1: seven additional sources in a general and a separate owner / financial report
+- **Owner / PM direction:** integrate the November `ERP Exports` sources into Advanced V1 as private offline reports;
+  keep customer balances and owner finances out of the general report; keep Classic and the V1 + B2B reports unchanged;
+  no hosting, CRM or new infrastructure; do not certify overdue amounts before the source meaning is established.
+- **Decision:**
+  - M6-4 started: `services/importers/detailed_collections.py` (framework spec, finance-restricted like D-075). Report date
+    = file-name date = column-J header date, else fail. The red marker is read from the workbook's conditional format
+    (`W < 0`, order date + order term passed) and applied only with an order date; without one the order due date is
+    unknown. J and W are recomputed and deviations reported; rows never merged or repaired. No overdue certification,
+    priority, risk, ranking, action or AI use.
+  - Gider/Gelir: `allocation_ratio_sum` is isolated per row instead of failing the workbook. Row totals stay; the row's
+    business-line allocations are excluded from line totals, which are then unknown in the web view and labelled
+    "EKSİK" (partial) offline — never shown as complete.
+  - Bütçe: no importer change; roles chosen explicitly use the existing `explicit_source_type()` (file name not used;
+    planning year declared). The external link affects only three cached-`#REF!` header cells.
+  - `services/owner_report.py`: the owner / financial file (Cari, collections, Kredi, Gider/Gelir, Bütçe) from explicitly
+    named sources, reusing the existing producers and views. `services/general_sources.py` + `father_report --hedef /
+    --trodat`: Hedef (without Risk / Kredi / discount) and Trodat (model level) in the general file. The general
+    generator never reads an owner / financial source; without the new flags its output is unchanged.
+  - Renderer: optional `eyebrow` / `title` / `subline` meta keys; defaults reproduce the previous header exactly.
+- **Evidence:** `docs/advanced_v1_sources.md` (counts only): 101,668 independent checks, 0 discrepancies.
+- **Unchanged:** metric register and certification, access roles, D-070 / D-071 retirements, Classic, the B2B reports.
+- **Open (father):** the binding overdue rule; collections report filter; Cari / Kredi snapshot dates; Gider/Gelir rows
+  59 / 82 / 165; Bütçe file of record; Hedef ownership and Net Ciro; Trodat units and SKU mapping.

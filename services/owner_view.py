@@ -264,6 +264,10 @@ class GiderGelirView:
     warnings: list[dict]
     accounting_basis: str
     management_mapping: str
+    # D-081: offline owner report only (never in the API projection): per-line sums over the CONSISTENT expense rows
+    # and the rows excluded from them. `lines[*].allocated_expense` is None whenever a row is excluded.
+    allocation_partial: list[dict] = field(default_factory=list)
+    allocation_excluded: list[dict] = field(default_factory=list)
 
 
 def build_gider_gelir_view(res) -> GiderGelirView:
@@ -275,10 +279,12 @@ def build_gider_gelir_view(res) -> GiderGelirView:
         line_rev[(r.native_line.value, r.metric)].append(v)
     exp = defaultdict(list)
     line_exp = defaultdict(list)
+    bad_keys = {e.expense_key for e in res.expenses if not e.allocation_consistent}
+    excluded_alloc = defaultdict(lambda: defaultdict(list))   # expense key -> line -> monthly allocations
     for m in res.expense_months:
-        exp[m.month].append(_num(m.reported_expense))
+        exp[m.month].append(_num(m.reported_expense))     # row totals stay valid for every row
         for ln, nv in m.allocations.items():
-            line_exp[ln.value].append(_num(nv))
+            (excluded_alloc[m.expense_key][ln.value] if m.expense_key in bad_keys else line_exp[ln.value]).append(_num(nv))
     c = res.counts
     shown = sorted(set(c.months_with_revenue) | set(c.months_with_expenses))
     months = [{"month": m, "reported_sales": _sum(rev.get(("reported_sales", m), [])),
@@ -289,7 +295,23 @@ def build_gider_gelir_view(res) -> GiderGelirView:
               "reported_sales": _sum(line_rev.get((ln, "reported_sales"), [])),
               "reported_cost": _sum(line_rev.get((ln, "reported_cost"), [])),
               "reported_gross_profit": _sum(line_rev.get((ln, "reported_gross_profit"), [])),
-              "allocated_expense": _sum(line_exp.get(ln, []))} for ln in LINE_LABELS]
+              "allocated_expense": None if bad_keys else _sum(line_exp.get(ln, []))} for ln in LINE_LABELS]
+    partial = [{"line": ln, "label": LINE_LABELS[ln], "allocated_expense_consistent_rows": _sum(line_exp.get(ln, [])),
+                "complete": not bad_keys} for ln in LINE_LABELS]
+    totals = defaultdict(list)
+    for m in res.expense_months:
+        if m.expense_key in bad_keys:
+            totals[m.expense_key].append(_num(m.reported_expense))
+    excluded = []
+    for e in res.expenses:
+        if e.allocation_consistent:
+            continue
+        rt = _sum(totals.get(e.expense_key, []))
+        al = _sum(v for vs in excluded_alloc[e.expense_key].values() for v in vs)
+        excluded.append({"excel_row": e.source_row, "cost_center": e.cost_center, "expense_name": e.expense_name,
+                         "ratio_sum": e.ratio_sum, "reported_expense_total": rt, "allocations_total": al,
+                         "difference": None if rt is None or al is None else round(al - rt, 2),
+                         **{f"allocated_{ln}": _sum(excluded_alloc[e.expense_key].get(ln, [])) for ln in LINE_LABELS}})
     by_label = {s.line_label: _num(s.value) for s in res.summary_records
                 if s.period_kind.value == "source_reported_budget" and s.year == c.report_year}
     budget = [{"line": lab, "label": disp, "value": by_label.get(lab)} for lab, disp in GG_BUDGET_LINES
@@ -308,6 +330,12 @@ def build_gider_gelir_view(res) -> GiderGelirView:
              "gider satırında 0–1 dışında dağıtım oranı (kaynakta yeniden dağıtım)")):
         if n:
             warnings.append({"code": code, "count": n, "message": f"{n} {msg}."})
+    if bad_keys:
+        rows_txt = ", ".join(str(r) for r in c.allocation_inconsistent_rows)
+        warnings.append({"code": "allocation_ratio_sum", "count": len(bad_keys),
+                         "message": f"{len(bad_keys)} gider satırında iş kolu oranlarının toplamı 1 değil (Excel satırı "
+                                    f"{rows_txt}). Bu satırların aylık gider toplamları korunur; iş kolu dağıtımları "
+                                    "tutarsız olduğu için iş kolu dağıtılmış gider toplamları gösterilmez (eksik)."})
     xs = (c.cross_sheet_checks or {}).get("summary_expense_vs_expense_table", {}).get("failed", 0)
     if xs:
         warnings.append({"code": "summary_expense_pivot_mismatch", "count": xs,
@@ -322,7 +350,8 @@ def build_gider_gelir_view(res) -> GiderGelirView:
                           records={"revenue": c.revenue_records, "expense_rows": c.expense_rows,
                                    "expense_months": c.expense_month_records, "summary": c.summary_records},
                           warnings=warnings, accounting_basis=c.accounting_basis,
-                          management_mapping=c.management_mapping)
+                          management_mapping=c.management_mapping, allocation_partial=partial,
+                          allocation_excluded=excluded)
 
 
 @dataclass
