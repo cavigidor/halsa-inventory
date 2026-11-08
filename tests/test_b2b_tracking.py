@@ -295,17 +295,19 @@ def modern(src, tmp_path_factory):
 
 def test_v1_report_shows_the_same_b2b_classification_as_klasik(classic, modern):
     k, m = _data(classic[1]), _data(modern[1])
-    for v in ("A", "B", "C"):
-        strip = lambda rows: [{x: r[x] for x in r if x != "detail"} for r in rows]
-        assert strip(k["b2b"]["views"][v]["rows"]) == strip(m["b2b"]["views"][v]["rows"]), v
+    strip = lambda rows: [{x: r[x] for x in r if x != "detail"} for r in rows]
+    assert strip(k["b2b"]["rows"]) == strip(m["b2b"]["rows"]) and len(k["b2b"]["rows"]) == 14
+    assert k["b2b"]["izahat"] == m["b2b"]["izahat"] and k["b2b"]["cols"] == m["b2b"]["cols"]
     assert {r["code"]: r["b2b"] for r in k["momentum"]["rows"]} == {r["code"]: r["b2b"] for r in m["momentum"]["rows"]}
     ky = {(r["code"], y["y"]): (y["b2b"], y["b2b_orders"], y["b2b_mixed"])
-          for r in k["b2b"]["views"]["A"]["rows"] + k["b2b"]["views"]["C"]["rows"] for y in r.get("detail", {}).get("years", [])}
+          for r in k["b2b"]["rows"] for y in r.get("detail", {}).get("years", [])}
     my = {(r["code"], r["year"]): (r["b2b_amount"], r["b2b_orders"], r["b2b_mixed"])
           for r in m["purchases_yearly"]["rows"]}
     assert ky and all(my[key] == val for key, val in ky.items())
+    assert not any(r.get("detail") for r in k["b2b"]["rows"] if r["side"] == "kayit")   # no sales → no detail
     assert list(m)[list(m).index("margin") + 1] == "b2b"
     assert classic[0]["b2b"]["view_A"] == modern[0]["b2b"]["view_A"]
+    assert classic[0]["b2b"]["unified"] == modern[0]["b2b"]["unified"]
 
 
 def test_v1_report_without_b2b_is_unchanged_and_keeps_its_safeguards(modern):
@@ -335,37 +337,57 @@ def _open(browser, path):
     return page, errors, requests
 
 
+def _cells(panel, col):
+    heads = [h.get_attribute("data-k") for h in panel.locator("thead th").all()]
+    ix = heads.index(col) + 1
+    return [t.inner_text().strip() for t in panel.locator(f"tbody tr.main td:nth-child({ix})").all()]
+
+
 @pytest.mark.parametrize("which", ["classic", "modern"])
-def test_b2b_takip_views_search_filter_sort_and_detail_in_the_browser(browser, classic, modern, which):
+def test_b2b_takip_single_table_izahat_filter_search_sort_and_detail_in_the_browser(browser, classic, modern, which):
     path = classic[1] if which == "classic" else str(modern[1])
     page, errors, requests = _open(browser, path)
     tabs = [t.get_attribute("data-t") for t in page.locator(".tab").all()]
     assert tabs[tabs.index("margin") + 1] == "b2b"
     page.click('.tab[data-t="b2b"]')
     panel = page.locator("#b2b")
-    assert panel.locator(".b2b-view").count() == 4
-    assert panel.locator("tbody tr.main").count() == 2                          # A: definite gaps only
-    panel.locator(".search").fill("910.00.0010")                               # code search
+    assert panel.locator(".b2b-view").count() == 0                              # no A / B / C / V buttons
+    heads = [h.get_attribute("data-k") for h in panel.locator("thead th").all()]
+    assert heads[-2:] == ["b2b_reg", "izahat"]                                  # İzahat is the rightmost column
+    assert panel.locator("thead th").last.inner_text().upper().startswith("İZAHAT")       # headers are upper-cased by CSS
+    iz = panel.locator("select.b2b-izahat")
+    assert iz.input_value() == "" and iz.locator("option").first.inner_text() == "İzahat: Tümü (14)"
+    assert panel.locator("tbody tr.main").count() == 14                         # default: every row
+    assert page.locator(".tab[data-t='b2b'] .cnt").inner_text() == "14"
+    assert set(_cells(panel, "b2b_reg")) == {"VAR", "Listede yok", "Kontrol"}
+    assert panel.locator("tbody .b2b-flag").count() == 6 and panel.locator("tbody .b2b-amb").count() == 6
+    assert "bulunamadı" not in panel.locator("table").inner_text()
+    assert "YOK" not in _cells(panel, "b2b_reg")                                # no declaration → never YOK
+    panel.locator(".search").fill("910.00.0010")                               # search across all customers
     assert panel.locator("tbody tr.main").count() == 1
+    panel.locator(".search").fill("bayi")                                      # İzahat text is searchable
+    assert panel.locator("tbody tr.main").count() == 1 and "910.00.0007" in panel.inner_text()
     panel.locator(".search").fill("")
-    panel.locator('.b2b-view[data-v="V"]').click()
-    assert panel.locator("tbody tr.main").count() == 6 and "Belirsiz kayıt eşleşmesi" in panel.inner_text()
-    panel.locator(".repsel").select_option("TEMSILCI-B")
-    assert panel.locator("tbody tr.main").count() == 1 and "910.00.0004" in panel.inner_text()
-    panel.locator(".repsel").select_option("")
-    panel.locator('.b2b-view[data-v="B"]').click()
-    assert panel.locator("tbody tr.main").count() == 3 and "Satış verisinde eşleşme yok" in panel.inner_text()
-    panel.locator('.b2b-view[data-v="C"]').click()
-    assert panel.locator("tbody tr.main").count() == 2
+    iz.select_option("listede_yok")
+    assert sorted(_cells(panel, "code")) == ["910.00.0003", "910.00.0010"]
+    iz.select_option("b2b_kayitsiz")                                           # C ∩ Doğrulanacak: one row
+    assert _cells(panel, "code") == ["910.00.0004"] and "eskiden B2B'den alıyordu" in _cells(panel, "izahat")[0]
+    iz.select_option("kayit_satissiz")                                         # registration-only rows stay separate
+    assert sorted(_cells(panel, "code")) == ["12345", "910.00.0099"] and set(_cells(panel, "rep")) == {""}
+    iz.select_option("")
+    panel.locator(".repsel").first.select_option("TEMSILCI-B")
+    assert sorted(_cells(panel, "code")) == ["910.00.0002", "910.00.0004"]
+    panel.locator(".repsel").first.select_option("")
     panel.locator('th[data-k="b2b_total"]').click()
-    assert "910.00.0005" in panel.locator("tbody tr.main").first.inner_text()   # largest B2B total first
+    top = max((r for r in _data(path)["b2b"]["rows"] if r["b2b_total"] is not None), key=lambda r: r["b2b_total"])
+    assert top["code"] in panel.locator("tbody tr.main").first.inner_text()    # largest B2B total first
     if which == "classic":                                                      # detail built on first open
-        assert panel.locator("[data-lazy]").count() == 2
+        assert panel.locator("[data-lazy]").count() == 10                      # customer rows only
         panel.locator("tr.exp").first.click()
         det = panel.locator("tr.det.open")
         assert [h.inner_text().strip().upper() for h in det.locator("table.sub th").all()] == \
             ["YIL", "HARCAMA", "SİPARİŞ", "B2B ALIMI", "SİPARİŞ (B2B)"]
-        assert det.locator(".prods-h").count() == 1 and panel.locator("[data-lazy]").count() == 1
+        assert det.locator(".prods-h").count() == 1 and panel.locator("[data-lazy]").count() == 9
     page.click('.tab[data-t="momentum"]')
     assert page.locator("#momentum .b2b-flag").count() == 2
     if which == "classic":
@@ -393,5 +415,105 @@ def test_missing_registration_banner_in_the_browser(browser, src, tmp_path):
     assert "anlamına gelmez" in page.locator("#b2b .b2b-miss").inner_text()
     page.click('.tab[data-t="momentum"]')
     assert set(t.inner_text() for t in page.locator("#momentum tbody tr.main td:nth-child(3)").all()) == {"—"}
+    assert not errors
+    page.close()
+
+
+# ---------------------------------------------------------------------------------------------
+# 5. one table with İzahat (father's feedback, 2026-11-08) — presentation only, classification unchanged
+# ---------------------------------------------------------------------------------------------
+KONTROL = {"bayi", "b2b_kayitsiz", "bosluk", "kanal", "kayit_bagli"}
+
+
+def _expected_keys(res):
+    keys = set()
+    for k, rows in res["views"].items():
+        for r in rows:
+            reg_side = r["code"] not in res["per"] or (k == "V" and r.get("excel_row"))
+            keys.add(("kayit" if reg_side else "musteri", r["code"]))
+    return keys
+
+
+def test_unified_table_lists_every_classified_row_once_and_every_open_customer(core):
+    rows = HB.unified_rows(core)
+    keys = [(r["side"], r["code"]) for r in rows]
+    assert len(keys) == len(set(keys)) == 14                                    # no customer twice
+    assert _expected_keys(core) <= set(keys)                                    # nothing of A / B / C / V dropped
+    extra = set(keys) - _expected_keys(core)                                    # registered, in no call list
+    assert extra == {("musteri", "910.00.0001"), ("musteri", "090.00.0001")}
+    assert all(core["per"][c]["status"] == "confirmed" and core["per"][c]["recent_b2b"] for _, c in extra)
+    open_customers = {c for c, p in core["per"].items() if not p["closed"]}
+    assert {c for s, c in keys if s == "musteri"} == open_customers               # Tümü = every open customer
+    assert ("musteri", "910.00.0008") not in keys                               # KAPALI rule kept
+    assert ("musteri", "910.00.0006 ") in keys and ("kayit", "910.00.0006") in keys   # never merged across codes
+    r4 = next(r for r in rows if r["code"] == "910.00.0004")
+    assert r4["prev"] == "VC" and r4["izahat_key"] == "b2b_kayitsiz" and "eskiden B2B'den alıyordu" in r4["izahat"]
+    letters = {}
+    for k, vr in core["views"].items():                                         # classification letters preserved
+        for r in vr:
+            reg_side = r["code"] not in core["per"] or (k == "V" and r.get("excel_row"))
+            letters.setdefault(("kayit" if reg_side else "musteri", r["code"]), set()).add(k)
+    assert all(set(r["prev"]) == letters.get((r["side"], r["code"]), set()) for r in rows)
+
+
+def test_unified_amounts_are_the_classification_values_and_b2b_kaydi_is_never_inferred(core):
+    rows = HB.unified_rows(core)
+    for r in rows:
+        p = core["per"].get(r["code"]) if r["side"] == "musteri" else None
+        if p:
+            assert (r["recent"], r["total"], r["last"], r["last_b2b"], r["b2b_total"]) == \
+                (p["recent"], p["total"], p["last"], p["last_b2b"], p["b2b_total"])
+        else:
+            assert r["recent"] is r["total"] is r["b2b_total"] is None and r["rep"] == ""
+        assert r["izahat"] and r["izahat_key"] in HB.IZAHAT
+    st = core["status"]
+    assert {r["code"] for r in rows if r["b2b_reg"] == "VAR"} == \
+        {c for c, s in st.items() if s == "confirmed" and not core["per"][c]["closed"]} | {"12345", "910.00.0099"}
+    assert {r["code"] for r in rows if r["b2b_reg"] == "Kontrol"} == {r["code"] for r in rows if r["izahat_key"] in KONTROL}
+    assert {r["code"] for r in rows if r["b2b_reg"] == "Listede yok"} == {r["code"] for r in core["views"]["A"]}
+    assert "YOK" not in {r["b2b_reg"] for r in rows}                            # no declaration → never YOK
+    assert all("bulunamadı" not in r["izahat"] for r in rows)
+    total = sum(p["b2b_total"] or 0 for p in core["per"].values() if not p["closed"])
+    assert sum(r["b2b_total"] or 0 for r in rows) == total                      # B2B totals unchanged
+
+
+def test_list_complete_declaration_only_turns_unmatched_codes_into_yok(core, src):
+    plain, decl = HB.unified_rows(core), HB.unified_rows(core, registration_complete=True)
+    assert [(r["side"], r["code"]) for r in plain] == [(r["side"], r["code"]) for r in decl]
+    for a, b in zip(plain, decl):
+        if a["izahat_key"] == "listede_yok":
+            assert (a["b2b_reg"], b["b2b_reg"]) == ("Listede yok", "YOK") and b["izahat"].startswith("B2B kaydı yok")
+        else:
+            assert a == b                                                       # Kontrol / VAR rows untouched
+    _, sales, _ = _paths(src)
+    raw = pd.read_excel(sales)
+    base = DB.load_sales(None, raw)
+    missing = HB.analyse(raw, base, DB.cust_attrs(base), HB.read_registration(None), HB.sheet_header(sales))
+    m = HB.module(missing, registration_complete=True)                         # a declaration without a list is void
+    assert {r["b2b_reg"] for r in m["rows"]} == {"—"} and not m["b2b_registration_complete"]
+    assert {r["code"] for r in m["rows"]} == {r["code"] for r in missing["views"]["C"]}
+    assert all(r["izahat_key"] == "liste_kullanilamadi" for r in m["rows"])
+
+
+def test_declaration_needs_the_registration_list(src, tmp_path):
+    stock, sales, _ = _paths(src)
+    with pytest.raises(KB.G.ClassicError):
+        KB.generate_b2b(stock, sales, str(tmp_path / "x.html"), day=DAY, registration_complete=True)
+    from services.father_report import generate
+    with pytest.raises(ValueError):
+        generate(str(tmp_path), tmp_path / "y.html", b2b=True, b2b_list_complete=True)
+    assert not (tmp_path / "x.html").exists() and not (tmp_path / "y.html").exists()
+
+
+def test_declared_preview_shows_yok_in_the_browser(browser, src, tmp_path):
+    stock, sales, reg = _paths(src)
+    res = KB.generate_b2b(stock, sales, str(tmp_path / "d.html"), registration=reg, day=DAY, registration_complete=True)
+    assert res["b2b"]["registration_complete"] and res["b2b"]["unified"]["b2b_kaydi"]["YOK"] == 2
+    page, errors, _ = _open(browser, str(tmp_path / "d.html"))
+    page.click('.tab[data-t="b2b"]')
+    panel = page.locator("#b2b")
+    assert _cells(panel, "b2b_reg").count("YOK") == 2 and "Listede yok" not in _cells(panel, "b2b_reg")
+    assert "beyan edildi" in panel.locator("p.note").inner_text()
+    assert "B2B kaydı yok" in panel.locator("select.b2b-izahat").inner_text()
     assert not errors
     page.close()

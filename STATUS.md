@@ -1,6 +1,14 @@
 # STATUS.md — current checkpoint
 
-**2026-11-07 — D-081 Advanced V1: seven additional sources; general + separate owner / financial offline reports; draft PR, NOT merged / deployed / sent.**
+**2026-11-08 — D-082 B2B Takip as one table with İzahat (father's feedback); draft PR, NOT merged / deployed / sent.**
+- Four A / B / C / Doğrulanacak buttons → one table (Tümü), B2B Kaydı + İzahat last, İzahat filter; classification unchanged.
+  "Listede yok" until the owner declares the list complete (`--b2b-list-complete`); Kontrol never YOK.
+- Reconciliation (private table on the Mac): misses are not formatting (1 space pair); 4,695 of list A have no candidate.
+- Previews `reports/private/b2b-tracking/onizleme-2026-11-08/` (Klasik, Genel, Klasik declared): 7,056 rows; other tabs
+  identical to the delivered `_Tam`; DOM checks pass. Full suite **2163 passed, 8 skipped, 1 xfailed**. STOP for PM review.
+- D-081 (PR #52) and D-080 (PR #51) are **merged** (`81cf126`, `6f560e5`), code only; nothing deployed or sent.
+
+**2026-11-07 — D-081 Advanced V1: seven additional sources; general + separate owner / financial offline reports; PR #52 merged `81cf126` (code only), NOT deployed / sent.**
 - New collections importer (M6-4); Gider/Gelir ratio rows isolated (59, 82, 165) instead of rejecting the workbook;
   Bütçe via explicit source selection (no rename); `owner_report.py`; Hedef / Trodat in the general report (opt-in).
 - Real November: owner file 838 Cari accounts · 149 / 316 collections accounts / documents (red 155 rows / 102
