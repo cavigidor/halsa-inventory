@@ -65,6 +65,67 @@ def _data_blob(html):
     return d if "modules" in d else {"modules": d, **({"stats": d["stats"]} if "stats" in d else {})}
 
 
+# Withheld Cari balances (EXPECTED) must never reach a withheld page. The check looks for the VALUES — as number tokens in
+# any usual rendering and as numbers in the page's DATA — not for raw digit strings, so an identifier such as a random
+# generation id ("…daf2010a4…", main CI 42532320776 attempt 1) or a UUID group ("…-1500-…") is never mistaken for one.
+# Scope: a test helper for THESE synthetic fixtures, not a general leak detector. It matches figures on the whole page,
+# so an unrelated legitimate 2010 or 2011 (e.g. a year) would resemble a rounded balance; the fixture pages contain
+# none. Strict mode (any figure rounding to 1500) is only for pages that show no figures at all (401 / 503 pages).
+WITHHELD = (1500.25, 2010.5)                     # |balance| of 120.01.0001 and 120.01.0002 (kuruş precision)
+_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+                 r"|(?<![0-9A-Za-z])[0-9a-fA-F]{12,}(?![0-9A-Za-z])")
+_TOKEN = re.compile(r"(?<![0-9A-Za-z])[-−]?\d[\d.,]*(?![0-9A-Za-z])")
+
+
+def _token_values(tok):
+    """Every value a number token can mean in Turkish (1.500,25) or English (1,500.25) notation."""
+    t = tok.replace("−", "-").rstrip(".,")
+    out = set()
+    for th, dec in ((".", ","), (",", ".")):
+        body = t.lstrip("-")
+        ip, _, fp = body.partition(dec) if dec in body else (body, "", "")
+        if th in ip and not re.fullmatch(r"\d{1,3}(\%s\d{3})+" % th, ip):
+            continue
+        if th in fp or dec in fp:
+            continue
+        try:
+            v = float(ip.replace(th, "") + ("." + fp if fp else ""))
+        except ValueError:
+            continue
+        out.add((-v if t.startswith("-") else v, bool(fp)))
+    return out
+
+
+def _exposed_cari(html, *, strict_integers=False):
+    """Withheld Cari balances shown on `html`: [] when none. Matches the kuruş values (±0.05: 1500.25, -1.500,25,
+    ₺2.010,50, 2010.5 …), the rounded customer renderings (-1500, -1.500, 2.010, 2011) and, with `strict_integers`
+    (pages that carry no other figures), anything that rounds to 1500. Identifiers are removed first; DATA numbers are checked too."""
+    hits = []
+    text = _ID.sub(" ", html)
+    for tok in _TOKEN.findall(text):
+        for v, has_dec in _token_values(tok):
+            a = abs(v)
+            if has_dec and any(abs(a - w) <= 0.05 for w in WITHHELD):
+                hits.append(tok)
+            elif not has_dec and (a in (2010, 2011) or v == -1500):
+                hits.append(tok)
+            elif strict_integers and round(a) == 1500:                     # no other figures on that page
+                hits.append(tok)
+    m = re.search(r"const DATA=(\{.*?\});\n", html, re.S)
+    if m:
+        def walk(x, path):
+            if isinstance(x, dict):
+                for k, v in x.items():
+                    walk(v, f"{path}.{k}")
+            elif isinstance(x, list):
+                for i, v in enumerate(x):
+                    walk(v, f"{path}[{i}]")
+            elif isinstance(x, (int, float)) and not isinstance(x, bool) and any(abs(abs(x) - w) <= 0.005 for w in WITHHELD):
+                hits.append(f"DATA{path}={x}")
+        walk(json.loads(m.group(1).replace("<\\/", "</")), "")
+    return sorted(set(hits))
+
+
 def _gate(m, today, register=None, definitions=None):
     reg, defs = register or ACC.REGISTER, definitions or ACC.DEFINITIONS
     return ACC.Gate(reg, defs, None, today).bound_to(m.core_snapshot())
@@ -424,14 +485,28 @@ def test_app_serves_one_generation_on_page_and_api_and_withholds_when_stale(srv,
     r2, st2 = _served(s.c)
     assert r2.status_code == 503 and r2.headers["X-Halsa-Dashboard"] == "not_authorized"
     assert {x["key"]: x["state"] for x in st2["metrics"]}[KEY] == "not_verified"
-    assert "1500" not in r2.text and "Bakiye" not in r2.text
+    assert _exposed_cari(r2.text, strict_integers=True) == [] and "Bakiye" not in r2.text
     rep = s.c.post("/api/context/refresh").json()                                  # owner refresh: rebuilt, withheld
     assert rep["ok"], rep
     r3, st3 = _served(s.c)
     assert r3.status_code == 200 and GEN.dashboard_markers(r3.content)[1] == ()
     coll = _data_blob(r3.text)["modules"]["collections"]
     assert coll["rows"] == [] and coll["withheld"]["message"] == ACC.WITHHELD_MESSAGE
-    assert "-1500" not in r3.text and "2010" not in r3.text
+    assert _exposed_cari(r3.text) == []
+    # deterministic regression on this very page: a generation id containing "2010" is not an exposure …
+    fake = ("ba087bfbdf5e40b0daf2010a42096129c964912f088fb61bdf87ae5fa70b740" + "0" * 64)[:len(st3["core_id"])]
+    for g in {st3["core_id"], st3["generation_id"], gen}:
+        assert len(g) == len(fake)
+    unlucky = r3.text
+    for g in {st3["core_id"], st3["generation_id"], gen}:
+        unlucky = unlucky.replace(g, fake)
+    assert "2010" in unlucky and _exposed_cari(unlucky) == []                     # the old substring check failed here
+    # … while a withheld balance placed on the page in any usual rendering is still caught
+    for shown in ("₺-1.500,25", "-1500.25", "-1.500", "₺2.010,50", "2010,5", "2.010", "2011"):
+        leaked = unlucky.replace("</body>", f"<td class=money>{shown}</td></body>", 1)
+        assert _exposed_cari(leaked), shown
+    leaked = unlucky.replace('"withheld":', '"balance": -1500.25, "withheld":', 1)   # inside the dashboard data
+    assert leaked != unlucky and any(h.startswith("DATA") for h in _exposed_cari(leaked))
 
 
 @pytest.mark.production_gate
@@ -506,7 +581,9 @@ def test_permissions_by_role_with_the_verified_cari_list(srv, monkeypatch):
     with TestClient(APP.app, base_url="https://testserver", headers=HDR) as anon:
         r = anon.get("/")
         assert r.status_code == 401 and "Site şifresi" in r.text                 # D-074: no anonymous viewing
-        assert "-1500" not in r.text and "Sentetik Musteri" not in r.text and "stockagent-displayed" not in r.text
+        assert _exposed_cari(r.text, strict_integers=True) == []               # login page: no figures at all
+        assert "Sentetik Musteri" not in r.text and "stockagent-displayed" not in r.text
+        anon_page = r.text
         assert anon.post("/api/uploads").status_code == 401
     with TestClient(APP.app, base_url="https://testserver", headers=HDR) as viewer:
         r = viewer.post("/api/auth/viewer-login", json={"password": VIEW_PASSWORD})
@@ -515,7 +592,8 @@ def test_permissions_by_role_with_the_verified_cari_list(srv, monkeypatch):
         page = viewer.get("/")                                                    # website viewer: the dashboard …
         assert page.status_code == 200 and GEN.dashboard_markers(page.content)[1] == (KEY,)
         assert _data_blob(page.text)["modules"]["collections"]["rows"] == []      # … without Cari records (D-075)
-        assert "-1500" not in page.text and "Sentetik Musteri" not in page.text
+        assert _exposed_cari(page.text) == [] and "Sentetik Musteri" not in page.text   # dashboard: stock / sales
+        viewer_page = page.text                                                         # figures stay legitimate
         assert viewer.get("/api/finance/cari").status_code == 401
         assert viewer.post("/api/uploads").status_code == 403
         assert viewer.post("/api/context/refresh").status_code == 403
@@ -538,3 +616,33 @@ def test_permissions_by_role_with_the_verified_cari_list(srv, monkeypatch):
         own.headers["X-CSRF-Token"] = r.json()["csrf_token"]
         assert own.get("/").status_code == 200
         assert own.post("/api/uploads").status_code == 201
+    # regression on the real anonymous (401) and viewer pages: an unrelated UUID with a "-1500-" group is not a balance
+    # (the old `"-1500" not in` check failed on it), while a Cari balance shown on either page is still caught
+    uuid = "<p>istek 3f2b8c1e-1500-4d2a-9b7c-0a1b2c3d4e5f</p>"
+    for html, strict in ((anon_page, True), (viewer_page, False)):
+        with_uuid = html.replace("</body>", uuid + "</body>", 1)
+        assert with_uuid != html and "-1500" in with_uuid
+        assert _exposed_cari(with_uuid, strict_integers=strict) == []
+        for shown in ("₺-1.500,25", "-1500.25", "-1.500", "₺2.010,50", "2010.5"):
+            leaked = with_uuid.replace("</body>", f"<td class=money>{shown}</td></body>", 1)
+            assert _exposed_cari(leaked, strict_integers=strict), (strict, shown)
+    assert _exposed_cari(anon_page.replace("</body>", "<td>1500</td></body>", 1), strict_integers=True) == ["1500"]
+
+
+def test_withheld_value_check_ignores_identifiers_and_catches_real_values():
+    """Static regression for the false positive of main CI 42532320776 (attempt 1): digit runs inside identifiers are
+    not balances; the balances themselves, in every usual rendering, are."""
+    gen = "ba087bfbdf5e40b0daf2010a42096129c964912f088fb61bdf87ae5fa70b7400"            # 64 hex, as served
+    ids = (f'<meta name="stockagent-generation" content="{gen}"><p>Kuşak: <code>{gen}</code></p>'
+           '<p>batch 123e4567-1500-4abc-8def-2010567890ab · sha 20101500aaaabbbbcccc · id 9f2010c</p>')
+    assert "2010" in ids and "-1500" in ids                                       # the old check failed here
+    assert _exposed_cari(ids) == [] and _exposed_cari(ids, strict_integers=True) == []
+    page = ids + '<script>const DATA={"collections":{"rows":[],"note":"Stok 1500 adet · 1500.0 TL"}};\n</script>'
+    assert _exposed_cari(page) == []                                              # unrelated 1500 figures are fine
+    assert _exposed_cari(page, strict_integers=True) == ["1500", "1500.0"]        # … but not on a page with no figures
+    for shown in ("-1500.25", "₺-1.500,25", "-1,500.25", "1.500,25", "-1500,3", "-1500", "−1.500",
+                  "2010.5", "2.010,50", "₺2,010.50", "2010", "2.010", "2011"):
+        assert _exposed_cari(page + f"<td>{shown}</td>"), shown
+    data = page.replace('"rows":[]', '"rows":[{"code":"120.01.0002","balance":2010.5}]')
+    assert "DATA.collections.rows[0].balance=2010.5" in _exposed_cari(data)
+    assert _exposed_cari(page + "<td>1500</td><td>-700</td><td>2020</td>") == []   # not withheld customer balances
