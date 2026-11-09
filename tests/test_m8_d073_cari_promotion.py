@@ -68,6 +68,9 @@ def _data_blob(html):
 # Withheld Cari balances (EXPECTED) must never reach a withheld page. The check looks for the VALUES — as number tokens in
 # any usual rendering and as numbers in the page's DATA — not for raw digit strings, so an identifier such as a random
 # generation id ("…daf2010a4…", main CI 42532320776 attempt 1) or a UUID group ("…-1500-…") is never mistaken for one.
+# Scope: a test helper for THESE synthetic fixtures, not a general leak detector. It matches figures on the whole page,
+# so an unrelated legitimate 2010 or 2011 (e.g. a year) would resemble a rounded balance; the fixture pages contain
+# none. Strict mode (any figure rounding to 1500) is only for pages that show no figures at all (401 / 503 pages).
 WITHHELD = (1500.25, 2010.5)                     # |balance| of 120.01.0001 and 120.01.0002 (kuruş precision)
 _ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
                  r"|(?<![0-9A-Za-z])[0-9a-fA-F]{12,}(?![0-9A-Za-z])")
@@ -578,7 +581,9 @@ def test_permissions_by_role_with_the_verified_cari_list(srv, monkeypatch):
     with TestClient(APP.app, base_url="https://testserver", headers=HDR) as anon:
         r = anon.get("/")
         assert r.status_code == 401 and "Site şifresi" in r.text                 # D-074: no anonymous viewing
-        assert "-1500" not in r.text and "Sentetik Musteri" not in r.text and "stockagent-displayed" not in r.text
+        assert _exposed_cari(r.text, strict_integers=True) == []               # login page: no figures at all
+        assert "Sentetik Musteri" not in r.text and "stockagent-displayed" not in r.text
+        anon_page = r.text
         assert anon.post("/api/uploads").status_code == 401
     with TestClient(APP.app, base_url="https://testserver", headers=HDR) as viewer:
         r = viewer.post("/api/auth/viewer-login", json={"password": VIEW_PASSWORD})
@@ -587,7 +592,8 @@ def test_permissions_by_role_with_the_verified_cari_list(srv, monkeypatch):
         page = viewer.get("/")                                                    # website viewer: the dashboard …
         assert page.status_code == 200 and GEN.dashboard_markers(page.content)[1] == (KEY,)
         assert _data_blob(page.text)["modules"]["collections"]["rows"] == []      # … without Cari records (D-075)
-        assert "-1500" not in page.text and "Sentetik Musteri" not in page.text
+        assert _exposed_cari(page.text) == [] and "Sentetik Musteri" not in page.text   # dashboard: stock / sales
+        viewer_page = page.text                                                         # figures stay legitimate
         assert viewer.get("/api/finance/cari").status_code == 401
         assert viewer.post("/api/uploads").status_code == 403
         assert viewer.post("/api/context/refresh").status_code == 403
@@ -610,6 +616,17 @@ def test_permissions_by_role_with_the_verified_cari_list(srv, monkeypatch):
         own.headers["X-CSRF-Token"] = r.json()["csrf_token"]
         assert own.get("/").status_code == 200
         assert own.post("/api/uploads").status_code == 201
+    # regression on the real anonymous (401) and viewer pages: an unrelated UUID with a "-1500-" group is not a balance
+    # (the old `"-1500" not in` check failed on it), while a Cari balance shown on either page is still caught
+    uuid = "<p>istek 3f2b8c1e-1500-4d2a-9b7c-0a1b2c3d4e5f</p>"
+    for html, strict in ((anon_page, True), (viewer_page, False)):
+        with_uuid = html.replace("</body>", uuid + "</body>", 1)
+        assert with_uuid != html and "-1500" in with_uuid
+        assert _exposed_cari(with_uuid, strict_integers=strict) == []
+        for shown in ("₺-1.500,25", "-1500.25", "-1.500", "₺2.010,50", "2010.5"):
+            leaked = with_uuid.replace("</body>", f"<td class=money>{shown}</td></body>", 1)
+            assert _exposed_cari(leaked, strict_integers=strict), (strict, shown)
+    assert _exposed_cari(anon_page.replace("</body>", "<td>1500</td></body>", 1), strict_integers=True) == ["1500"]
 
 
 def test_withheld_value_check_ignores_identifiers_and_catches_real_values():
